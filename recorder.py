@@ -13,7 +13,6 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -31,7 +30,7 @@ APP_ID = "winf-hsos.Flex3Light"
 # the same hotkeys, so only one of them may run at a time.
 LECTURE_RECORDER_MUTEX = "Local\\LectureRecorder"
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))   # unpack folder of the packaged app
-FULL = (470, 660)
+FULL = (900, 440)           # fields left, camera preview right, record button and status below
 BAR = (480, 58)
 ASK = (560, 58)
 
@@ -43,6 +42,7 @@ class Api:
         self._core = core
         self._window = None
         self._full_position = None
+        self._full_size = FULL
         self._mode = "full"
 
     def data(self):
@@ -59,6 +59,12 @@ class Api:
 
     def texts(self, module, topic):
         self._core.set_text(module or "", topic or "")
+
+    def save_module(self, entry):
+        return self._core.save_module(entry or {})
+
+    def delete_module(self, eid):
+        self._core.delete_module(eid)
 
     def folder(self, kind):
         current = self._core.archive if kind == "archive_dir" else self._core.raw_dir
@@ -85,10 +91,16 @@ class Api:
         self._core.open_result()
 
     def view(self, mode):
-        """Switch the window between "full" (setup), "bar" (recording) and "ask" (save question)."""
+        """Switch the window between "full" (setup), "bar" (recording) and "ask" (save question).
+
+        Only the bar and the save question stay on top of other windows; the setup window
+        behaves like any other window.
+        """
         w = self._window
+        set_topmost(mode != "full")
         if mode == "full":
-            w.resize(*FULL)
+            capture_exclusion(False)              # the recording is over: screenshots may show it again
+            w.resize(*self._full_size)
             if self._full_position:
                 w.move(*self._full_position)
         else:
@@ -102,6 +114,19 @@ class Api:
                 w.move(max(0, w.x - (size[0] - old[0]) // 2), w.y)
             w.resize(*size)
         self._mode = mode
+
+    def fit(self, delta):
+        """Grow or shrink the setup window by delta CSS pixels, so its content fits exactly.
+
+        The inner height of a frameless window falls short of its outer size by a few
+        pixels that depend on Windows and the display scaling, so the page measures
+        itself and asks for the difference.
+        """
+        if self._mode != "full" or not int(delta):
+            return
+        w = self._window
+        self._full_size = (w.width, min(900, max(300, w.height + int(delta))))
+        w.resize(*self._full_size)
 
     def widen(self, width):
         """Make the bar wide enough for its content (CSS pixels), keeping it centered."""
@@ -119,14 +144,36 @@ class Api:
         self._window.destroy()
 
 
-def exclude_from_capture() -> None:
-    """Hide the window from screen capture (WDA_EXCLUDEFROMCAPTURE); it stays visible on screen."""
-    for _ in range(40):
-        hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
-        if hwnd:
-            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)
-            return
-        time.sleep(0.1)
+def set_topmost(on_top: bool) -> None:
+    """Keep the window above all others, or not.
+
+    Not through pywebview's window.on_top: on Windows it sets the form's TopMost property
+    from the calling thread, and called from the JavaScript bridge that hung the app as
+    soon as a recording started (2026-10-26), so OBS kept recording with nobody to stop it.
+    SetWindowPos is safe from any thread; pywebview moves and resizes the window the same way.
+    """
+    hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
+    if hwnd:
+        HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+        SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x1, 0x2, 0x10
+        ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST if on_top else HWND_NOTOPMOST, 0, 0, 0, 0,
+                                          SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+
+
+def capture_exclusion(exclude: bool) -> None:
+    """Hide the window from screen capture (WDA_EXCLUDEFROMCAPTURE) or show it again.
+
+    Hidden it stays visible on screen but never ends up in a recording; Windows applies
+    this to every capture, screenshots included. So it is only switched on right before
+    a recording starts and off again when the setup window comes back.
+    """
+    if os.environ.get("FLEX3_LIGHT_VISIBLE"):          # tests that take screenshots set this
+        return
+    hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
+    if hwnd:
+        ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11 if exclude else 0)
+        if exclude:
+            time.sleep(0.1)                            # let the compositor apply it before OBS records
 
 
 def single_instance() -> bool:
@@ -169,14 +216,13 @@ def main(test_func=None) -> None:
     api = Api(core)
     window = webview.create_window(TITLE, url=str(HERE / "ui.html"), js_api=api,
                                    width=FULL[0], height=FULL[1], min_size=(300, 50), resizable=False,
-                                   frameless=True, on_top=True, background_color="#f5f7fa", easy_drag=False)
+                                   frameless=True, on_top=False, background_color="#f5f7fa", easy_drag=False)
     api._window = window
     core.on_question = window.restore         # stopped by hotkey while minimized: show the question
+    core.on_capture = capture_exclusion       # hidden from capture only while recording
     # Closed by Windows (Alt+F4, taskbar) during a recording: keep it, like the close button does,
     # instead of leaving OBS recording with nobody to stop it.
     window.events.closing += lambda: core.finish(save=True)
-    if not os.environ.get("FLEX3_LIGHT_VISIBLE"):     # tests that take screenshots set this
-        window.events.shown += lambda: threading.Thread(target=exclude_from_capture, daemon=True).start()
     if test_func:
         webview.start(test_func, window)
     else:

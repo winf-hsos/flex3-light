@@ -61,6 +61,9 @@ class ServerClient:
                 detail = e.reason
             raise ServerError(e.code, detail) from None
 
+    def health(self) -> None:
+        self._call("GET", "/health")
+
     def open_session(self, sid: str) -> str:
         return self._call("PUT", f"/sessions/{sid}")[1]["state"]
 
@@ -78,3 +81,9 @@ class ServerClient:
 
     def delete(self, sid: str) -> None:
         self._call("DELETE", f"/sessions/{sid}")
+
+    def get_profile(self) -> dict:
+        return self._call("GET", "/profile")[1]
+
+    def sync_profile(self, modules: list[dict]) -> dict:
+        return self._call("POST", "/profile/sync", body={"modules": modules})[1]

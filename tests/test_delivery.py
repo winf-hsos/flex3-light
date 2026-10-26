@@ -72,8 +72,8 @@ def wait_for(cond, timeout=120):
 
 
 def begin(d: delivery.Delivery, archive: Path, camera=True):
-    return d.begin("Digitalisierung und Programmierung", "Schleifen", camera, (1920, 1152), True, archive,
-                   {"language": "de", "device_id": "flex3-light-test"})
+    return d.begin({"name": "Digitalisierung und Programmierung", "language": "de"}, "Schleifen", camera,
+                   (1920, 1152), True, archive, {"device_id": "flex3-light-test"})
 
 
 def test_session_is_archived_and_delivered(tmp_path, server, segments):

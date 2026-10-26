@@ -81,18 +81,23 @@ def default_device_id() -> str:
     return "flex3-light-" + slug(os.environ.get("COMPUTERNAME") or socket.gethostname(), 30)
 
 
-def session_metadata(session_id: str, module: str, topic: str, started: dt.datetime, settings: dict) -> dict:
+def session_metadata(session_id: str, module: dict, topic: str, started: dt.datetime, settings: dict,
+                     user: dict) -> dict:
     """session.json after the FLEX3 contract, without the duration (added at the end).
 
-    A laptop has no user register, so the session goes in as unassigned and the server's
-    queue assigns course and series. Consent is set conservatively (recorded, nothing
-    published) and marked as restricted on the device, until Nicolas decides how consent
-    without a register is handled.
+    The module from the lecturer's profile gives course name and language, and, once
+    they are entered there, ILIAS course and Opencast series: then the session arrives
+    assigned, otherwise unassigned for the server's queue. Consent is set conservatively
+    (recorded, nothing published) and marked as restricted on the device, until Nicolas
+    decides how consent without a register is handled.
     """
-    meta = {"session_id": session_id, "status": "unassigned", "course_name": module,
-            "instructor_id": settings.get("instructor_id", ""), "instructor_name": settings.get("instructor_name", ""),
-            "recorded_at": started.isoformat(timespec="seconds"), "room": "",
-            "language": settings.get("language", "de"), "ilias_course_id": "", "opencast_series_id": "",
+    ilias, series = module.get("ilias_course_id", ""), module.get("opencast_series_id", "")
+    assigned = bool(ilias and series and user.get("user_id"))
+    meta = {"session_id": session_id, "status": "assigned" if assigned else "unassigned",
+            "course_name": module["name"], "instructor_id": user.get("user_id", ""),
+            "instructor_name": user.get("user_name", ""), "recorded_at": started.isoformat(timespec="seconds"),
+            "room": "", "language": module.get("language") or settings.get("language", "de"),
+            "ilias_course_id": ilias, "opencast_series_id": series,
             "consent": {"recording": True, "publication": False, "voice_clone": False},
             "consent_source": "restricted_on_device",
             "device_id": settings.get("device_id") or default_device_id(), "software_version": VERSION}
@@ -144,9 +149,12 @@ class Session:
 # ------------------------------------------------------------------ delivery
 
 class Delivery:
-    def __init__(self, root: Path, client: ServerClient | None = None):
+    def __init__(self, root: Path, client: ServerClient | None = None, profile=None):
         self.root = Path(root)
         self.client = client
+        self.profile = profile          # lecturer_profile.Profile, synced by the uploader thread
+        self.reachable: bool | None = None
+        self.last_contact = 0.0
         self.sessions: list[Session] = []
         self.guard = threading.RLock()
         self.wake = threading.Event()
@@ -170,22 +178,23 @@ class Delivery:
 
     # ---------------------------------------------------------- commands from the core
 
-    def begin(self, module: str, topic: str, camera: bool, screen_size, hide_alttab: bool,
-              archive_folder: Path, settings: dict) -> Session:
+    def begin(self, module: dict, topic: str, camera: bool, screen_size, hide_alttab: bool,
+              archive_folder: Path, settings: dict, user: dict | None = None) -> Session:
+        """Open a session for a module from the profile (at least {"name": ...})."""
         started = dt.datetime.now().astimezone()
-        base = f"{started:%Y-%m-%d}_{slug(module)}_{started:%H%M}"
+        base = f"{started:%Y-%m-%d}_{slug(module.get('code') or module['name'])}_{started:%H%M}"
         sid, n = base, 2
         while (self.root / sid).exists():
             sid, n = f"{base}-{n}", n + 1
         folder = self.root / sid
         (folder / "raw").mkdir(parents=True)
-        stem = f"{started:%Y-%m-%d} - {topic or module}"
-        data = {"session_id": sid, "state": "recording", "module": module, "topic": topic,
+        stem = f"{started:%Y-%m-%d} - {topic or module['name']}"
+        data = {"session_id": sid, "state": "recording", "module": module["name"], "topic": topic,
                 "camera": camera, "screen_size": list(screen_size), "hide_alttab": hide_alttab,
                 "deliver": self.client is not None, "alttab": [], "segments": [],
                 "archive": {"folder": str(archive_folder), "stem": stem, "screen": None, "camera": None},
                 "server": {"opened": False, "completed": False}, "error": None,
-                "meta": session_metadata(sid, module, topic, started, settings)}
+                "meta": session_metadata(sid, module, topic, started, settings, user or {})}
         s = Session(folder, data)
         s.save()
         with self.guard:
@@ -358,22 +367,55 @@ class Delivery:
 
     # ---------------------------------------------------------- uploader
 
+    def connection(self) -> str:
+        """"local" without a server, else "online", "offline" or "connecting" before the first contact."""
+        if not self.client:
+            return "local"
+        return {True: "online", False: "offline", None: "connecting"}[self.reachable]
+
+    def _online(self) -> None:
+        self.server_error, self._retry, self.reachable = "", 0, True
+        self.last_contact = time.time()
+
+    def _offline(self, e: Exception) -> None:
+        self._retry += 1
+        self.server_down_until = time.time() + RETRY[min(self._retry, len(RETRY)) - 1]
+        self.server_error, self.reachable = str(e), False
+
     def _upload(self) -> bool:
         if not self.client or time.time() < self.server_down_until:
             return False
+        p = self.profile
+        if p is not None and p.status != "no-profile" and p.due():
+            try:
+                p.sync(self.client)
+                p.status = "online"
+                self._online()
+                return True
+            except ServerError as e:
+                if e.status != 403:
+                    self._offline(e)
+                    return False
+                p.status = "no-profile"            # a device token without a lecturer: no profile on the server
+            except OSError as e:
+                self._offline(e)
+                return False
         for s in self._active():
             if not s.data["deliver"] or s.data["state"] == "done":
                 continue
             try:
                 if self._upload_step(s):
-                    self.server_error = ""
-                    self._retry = 0
+                    self._online()
                     return True
             except (OSError, ServerError) as e:
-                self._retry += 1
-                self.server_down_until = time.time() + RETRY[min(self._retry, len(RETRY)) - 1]
-                self.server_error = str(e)
+                self._offline(e)
                 return False
+        if self.reachable is not True or time.time() - self.last_contact > 60:
+            try:                                   # nothing to send: still keep the status in the window right
+                self.client.health()
+                self._online()
+            except (OSError, ServerError) as e:
+                self._offline(e)
         return False
 
     def _upload_step(self, s: Session) -> bool:

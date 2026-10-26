@@ -24,10 +24,13 @@ import obs_remote as remote
 import obs_scene as scene
 from delivery import Delivery
 from hotkeys import HOTKEY_PAUSE, GlobalKeys
+from lecturer_profile import Profile, seed_entries
+from preview import PreviewServer
 from server_client import ServerClient
 
 APP_DIR = Path(os.environ["APPDATA"]) / "flex3-light"
 SETTINGS_FILE = APP_DIR / "settings.json"
+PROFILE_FILE = APP_DIR / "profile.json"
 DEFAULT_ARCHIVE = Path.home() / "Videos" / "Lectures"
 DEFAULT_RAW = Path.home() / "Videos" / "flex3-light-raw"   # best outside any cloud-synced folder
 
@@ -45,16 +48,6 @@ def semester(d: dt.date) -> str:
     if d.month <= 2:
         return f"{d.year - 1}-{d.year % 100:02d} - WS"
     return f"{d.year} - SS"
-
-
-def module_choices(archive: Path, term: str, module_file: str | None) -> list[str]:
-    """Folders that already exist for the term first, then modules from an optional Markdown list."""
-    existing = sorted(p.name for p in (archive / term).glob("*") if p.is_dir()) if (archive / term).exists() else []
-    names: list[str] = []
-    if module_file and Path(module_file).exists():
-        names = [m.group(1).strip() for m in re.finditer(r"^## (.+)$", Path(module_file).read_text(encoding="utf-8"), re.M)]
-        names = [n for n in names if n != "Wie ein Modul beschrieben wird"]
-    return existing + [n for n in names if n not in existing]
 
 
 def clean_name(text: str) -> str:
@@ -143,11 +136,16 @@ class Core:
         self.stop_pressed = 0.0
         self.asking = False                       # stopped by the user, waiting for "save or discard"
         self.on_question = lambda: None           # set by the UI: bring the window back for the question
+        self.on_capture = lambda exclude: None    # set by the UI: hide its window from capture while recording
         self.message, self.message_kind = "", "info"
         self.obs_state = {"paused": False, "time": "00:00:00"}
         self.screen_size = (scene.FIELD_W, scene.FIELD_H)
+        # The modules live in the lecturer's profile; on the very first start it takes over what exists.
+        self.profile = Profile(PROFILE_FILE)
+        if self.profile.is_new:
+            self.profile.seed(seed_entries(self.archive, self.term, self.settings.get("module_file")))
         # Picks up what an earlier run left unfinished, even before OBS is ready.
-        self.delivery = Delivery(self.raw_dir, server_client(self.settings)).start()
+        self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile).start()
 
         remote.start(profile=scene.NAME, collection=scene.NAME)
         self.o = remote.Obs().__enter__()
@@ -165,6 +163,9 @@ class Core:
                 (n for n in names if guess[kind](n)), names[0] if names else "")
         self.apply_devices()
 
+        # Camera preview for the window; it rests while recording or without a camera.
+        self.preview = PreviewServer(scene.CAMERA, lambda: self.session is None
+                                     and self.choice.get("camera") != scene.NO_CAMERA)
         self.keys = GlobalKeys(self.events)
         self.keys.start()
         self.meter = LevelMeter()
@@ -175,7 +176,8 @@ class Core:
 
     def data(self) -> dict:
         return {"term": self.term,
-                "modules": module_choices(self.archive, self.term, self.settings.get("module_file")),
+                "modules": [m["name"] for m in self.profile.modules()],
+                "profile": self.profile.modules(), "user": self.profile.user(), "preview_url": self.preview.url,
                 "module": self.module,
                 "devices": {k: [n for n, _ in v] for k, v in self.devices.items()},
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
@@ -223,6 +225,28 @@ class Core:
             self.apply_devices()
         self.save()
 
+    def save_module(self, entry: dict) -> str:
+        """Add or change a module in the profile; returns an error message for the UI or ''."""
+        name = clean_name(entry.get("name", ""))
+        if not name:
+            return "Ein Modul braucht einen Namen."
+        other = self.profile.find(name)
+        if other and other["id"] != entry.get("id"):
+            return "Ein Modul mit diesem Namen gibt es schon."
+        fields = {k: entry.get(k, "") for k in ("code", "language", "ilias_course_id", "opencast_series_id")}
+        fields["code"] = re.sub(r"[^a-z0-9-]+", "-", fields["code"].lower()).strip("-")[:40]
+        fields["language"] = fields["language"] if re.fullmatch(r"[a-z]{2}", fields["language"] or "") else "de"
+        if entry.get("id"):
+            self.profile.update(entry["id"], name=name, **fields)
+        else:
+            self.profile.add(name, **fields)
+        self.delivery.wake.set()                  # send it at once if the server is there
+        return ""
+
+    def delete_module(self, eid: str) -> None:
+        self.profile.delete(eid)
+        self.delivery.wake.set()
+
     def save(self) -> None:
         self.settings.update({"module": self.module, **self.choice, "archive_dir": str(self.archive),
                               "raw_dir": str(self.raw_dir), **self.options})
@@ -240,15 +264,20 @@ class Core:
         if not module:
             return "Bitte zuerst ein Modul wählen."
         self.save()
-        s = self.delivery.begin(module, clean_name(self.topic), self.choice.get("camera") != scene.NO_CAMERA,
+        entry = self.profile.find(module) or self.profile.add(module)    # a module typed in joins the profile
+        self.delivery.wake.set()
+        s = self.delivery.begin(entry, clean_name(self.topic), self.choice.get("camera") != scene.NO_CAMERA,
                                 self.screen_size, self.options["hide_alttab"],
-                                self.archive / semester(dt.date.today()) / module, self.settings)
+                                self.archive / semester(dt.date.today()) / entry["name"], self.settings,
+                                self.profile.user())
+        self.on_capture(True)                     # before the first frame, also when started by hotkey
         try:
             with self.lock:
                 # Every session gets its own raw folder, so its one-minute segments are easy to tell apart.
                 self.o.request("SetRecordDirectory", {"recordDirectory": s.raw_dir.as_posix()})
                 self.o.request("StartRecord")
         except Exception:
+            self.on_capture(False)
             self.delivery.forget(s)
             raise
         self.session = s
@@ -345,7 +374,10 @@ class Core:
         return {"recording": self.session is not None, "asking": self.asking, "paused": self.obs_state["paused"],
                 "time": self.obs_state["time"], "level": round(db, 1), "splitting": splitting,
                 "progress": round(progress, 3), "message": message, "message_kind": kind,
-                "has_result": bool(info and info["screen"]), "hotkey_errors": list(self.keys.failed)}
+                "has_result": bool(info and info["screen"]), "hotkey_errors": list(self.keys.failed),
+                "connection": self.delivery.connection(), "profile_status": self.profile.status,
+                "profile_pending": self.profile.dirty() and self.delivery.connection() != "local",
+                "profile_stamp": f"{self.profile.data['revision']}-{self.profile.data['synced_at']}"}
 
     def _loop(self) -> None:
         while True:

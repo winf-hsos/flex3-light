@@ -28,7 +28,7 @@
     border-bottom: 1px solid var(--line); }
   .header .dot { width: 22px; height: 22px; border-radius: 7px; background: var(--blue); position: relative; }
   .header .dot::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: #fff; }
-  .header .title { font-weight: 600; font-size: 15px; flex: 1; letter-spacing: .1px; }
+  .header .title { font-weight: 600; font-size: 15px; flex: 1; letter-spacing: .1px; white-space: nowrap; }
   .header .title b { color: var(--blue); font-weight: 700; }
   .pill { font-size: 11.5px; font-weight: 600; color: var(--blue-dark); background: var(--blue-soft); padding: 3px 10px; border-radius: 999px; }
   .win-btn { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--muted); }
@@ -53,8 +53,10 @@
   .device .field { flex: 1; min-width: 0; }
   .level { height: 6px; border-radius: 3px; background: #e6ebf0; overflow: hidden; }
   .level div { height: 100%; width: 0; background: var(--green); border-radius: 3px; transition: width .08s linear; }
-  .options { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 12.5px; }
-  .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .toggle { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .toggle b { display: block; font-weight: 600; font-size: 13px; color: var(--text); }
+  .toggle small { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+  .toggle .knob { flex: none; }
   .toggle input { position: absolute; opacity: 0; pointer-events: none; }
   .toggle .knob { width: 30px; height: 18px; border-radius: 9px; background: #cfd7e0; position: relative; transition: .15s; }
   .toggle .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
@@ -71,7 +73,7 @@
   .hint { min-height: 16px; font-size: 12px; color: var(--muted); }
   .hint.error { color: #c62828; } .hint.ok { color: #1e7e34; }
 
-  .result { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; display: none; gap: 9px;
+  .result { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; display: none; gap: 6px;
     box-shadow: var(--shadow); }
   .result.show { display: grid; }
   .bar-track { height: 5px; border-radius: 3px; background: #e6ebf0; overflow: hidden; }
@@ -81,15 +83,76 @@
   .btn svg { color: var(--blue); }
   .btn:hover { border-color: var(--blue); background: var(--blue-soft); }
 
-  details { color: var(--muted); font-size: 12px; }
-  summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; width: max-content; }
-  summary:hover { color: var(--text); }
-  summary::-webkit-details-marker { display: none; }
-  .folders { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 8px; align-items: center; margin-top: 8px;
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; }
-  .folders .path { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  /* fields left, camera right at the same height, then record button and status in one row */
+  .main { grid-template-columns: 360px 1fr; column-gap: 20px; row-gap: 16px; align-items: stretch; }
+  .fields { display: grid; gap: 9px; align-content: start; min-width: 0; }
+  .field.mic { position: relative; padding-bottom: 10px; }
+  .meter { position: absolute; left: 11px; right: 11px; bottom: 5px; height: 3px; border-radius: 2px; background: #e6ebf0; overflow: hidden; }
+  .meter div { height: 100%; width: 0; background: var(--green); transition: width .08s linear; }
+  .preview { position: relative; border-radius: 14px; overflow: hidden; background: #e9eef3; min-height: 0;
+    border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .preview img:not([src]) { display: none; }
+  .preview-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px;
+    padding: 24px; text-align: center; color: var(--muted); font-size: 12.5px; }
+  .preview-empty svg { width: 30px; height: 30px; color: var(--faint); }
+  .preview-chip { position: absolute; left: 10px; bottom: 10px; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 20px);
+    padding: 4px 10px; border-radius: 999px; background: rgba(16, 24, 32, .55); color: #fff; font-size: 11.5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; backdrop-filter: blur(4px); }
+  .preview-chip:empty, .preview:not(.live) .preview-chip { display: none; }
+  .preview-chip .live-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #4cd964; }
+  .main .record { margin-top: 0; }
+  .status { display: grid; align-content: center; min-width: 0; }
+  .status .hint:empty::before { content: "Strg+Alt+R zweimal beendet die Aufnahme · Strg+Alt+P pausiert"; color: var(--faint); }
+  body.has-result .status .hint { display: none; }
+  .result-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .result-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+  .result-row .btn { flex: none; }
+
+  /* settings */
+  .settings { display: none; }
+  body.configuring .settings { display: grid; } body.configuring .main { display: none; }
+  .manage, .settings { width: 100%; max-width: 620px; margin: 0 auto; }
+  .section { display: grid; gap: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; box-shadow: var(--shadow); }
+  .section-title { font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); }
+  .folders { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 12px; align-items: center; font-size: 12.5px; }
+  .folders .path { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.configuring #settingsButton { background: var(--blue-soft); color: var(--blue-dark); }
   .folders button { color: var(--blue); font-size: 12px; font-weight: 600; }
   .folders button:hover { color: var(--blue-dark); text-decoration: underline; }
+
+  /* connection to the server */
+  .conn { display: none; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); }
+  .conn.show { display: flex; }
+  .conn::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .conn.online::before { background: var(--green); }
+  .conn.offline::before { background: var(--yellow); }
+
+  /* module management */
+  .row-label { display: flex !important; justify-content: space-between; align-items: baseline; }
+  .link { color: var(--blue); font-size: 11.5px; font-weight: 600; }
+  .link:hover { color: var(--blue-dark); text-decoration: underline; }
+  .manage { display: none; }
+  body.managing .manage { display: grid; } body.managing .main { display: none; }
+  .manage-head { display: flex; justify-content: space-between; align-items: center; }
+  .manage-title { font-weight: 600; font-size: 14px; }
+  .manage-head .link { font-size: 13px; }
+  .mod-list { display: grid; gap: 6px; max-height: 236px; overflow-y: auto; padding: 1px; }
+  .mod-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; box-shadow: var(--shadow); }
+  .mod-row:hover { border-color: var(--blue); }
+  .mod-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mod-row .meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .mod-row .tag { font-size: 10.5px; font-weight: 600; color: var(--blue-dark); background: var(--blue-soft);
+    padding: 1px 6px; border-radius: 5px; }
+  .mod-empty { color: var(--muted); font-size: 12.5px; padding: 6px 2px; }
+  .btn.add { justify-self: start; }
+  .editor { display: none; gap: 9px; }
+  body.editing .editor { display: grid; } body.editing .mod-list, body.editing .btn.add { display: none; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .editor-buttons { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+  .editor-buttons .spacer { flex: 1; }
 
   /* slim bar while recording */
   .bar { display: none; height: 100vh; align-items: center; gap: 12px; padding: 0 10px 0 14px; background: var(--card);
@@ -133,41 +196,79 @@
   <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 6h5l2 2h9v10H4z"/></symbol>
-  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M18.76 10.19 L21.48 10.50 L21.48 13.50 L18.76 13.81 L18.06 15.50 L19.77 17.64 L17.64 19.77 L15.50 18.06 L13.81 18.76 L13.50 21.48 L10.50 21.48 L10.19 18.76 L8.50 18.06 L6.36 19.77 L4.23 17.64 L5.94 15.50 L5.24 13.81 L2.52 13.50 L2.52 10.50 L5.24 10.19 L5.94 8.50 L4.23 6.36 L6.36 4.23 L8.50 5.94 L10.19 5.24 L10.50 2.52 L13.50 2.52 L13.81 5.24 L15.50 5.94 L17.64 4.23 L19.77 6.36 L18.06 8.50Z"/><circle cx="12" cy="12" r="3"/></symbol>
 </svg>
 
 <div class="setup">
   <div class="header pywebview-drag-region">
     <span class="dot pywebview-drag-region"></span><span class="title pywebview-drag-region"><b class="pywebview-drag-region">FLEX3</b> Light</span>
+    <span class="conn" id="conn"></span>
     <span class="pill" id="term">…</span>
+    <button class="win-btn" id="settingsButton" title="Einstellungen" onclick="openSettings()"><svg class="i"><use href="#i-gear"/></svg></button>
     <button class="win-btn" title="Minimieren" onclick="api().minimize()"><svg class="i"><use href="#i-minimize"/></svg></button>
     <button class="win-btn close" title="Schließen" onclick="closeWindow()"><svg class="i"><use href="#i-close"/></svg></button>
   </div>
-  <div class="content">
-    <div class="field"><label>Modul</label><input id="module" list="modules" placeholder="Modul wählen oder eintippen" onchange="sendTexts()"><datalist id="modules"></datalist></div>
-    <div class="field"><label>Thema der Sitzung, optional</label><input id="topic" placeholder="geht in den Dateinamen" onchange="sendTexts()"></div>
-    <div class="device"><svg class="i"><use href="#i-screen"/></svg><div class="field"><label>Bildschirm</label><select id="screen" onchange="selectDevice(this)"></select></div></div>
-    <div class="device"><svg class="i"><use href="#i-camera"/></svg><div class="field"><label>Kamera</label><select id="camera" onchange="selectDevice(this)"></select></div></div>
-    <div class="device"><svg class="i"><use href="#i-mic"/></svg><div class="field"><label>Mikrofon</label><select id="microphone" onchange="selectDevice(this)"></select></div></div>
-    <div class="level" title="Mikrofonpegel"><div id="level1"></div></div>
-    <div class="options">
-      <label class="toggle"><input type="checkbox" id="hide_taskbar" onchange="setOption(this)"><span class="knob"></span>Taskleiste nicht aufnehmen</label>
-      <label class="toggle"><input type="checkbox" id="hide_alttab" onchange="setOption(this)"><span class="knob"></span>Alt+Tab ausblenden</label>
+  <div class="content main">
+    <div class="fields">
+      <div class="field"><label class="row-label">Modul<button class="link" onclick="openModules()">Module verwalten</button></label><input id="module" list="modules" placeholder="Modul wählen oder eintippen" onchange="sendTexts()"><datalist id="modules"></datalist></div>
+      <div class="field"><label>Thema der Sitzung, optional</label><input id="topic" placeholder="geht in den Dateinamen" onchange="sendTexts()"></div>
+      <div class="device"><svg class="i"><use href="#i-screen"/></svg><div class="field"><label>Bildschirm</label><select id="screen" onchange="selectDevice(this)"></select></div></div>
+      <div class="device"><svg class="i"><use href="#i-camera"/></svg><div class="field"><label>Kamera</label><select id="camera" onchange="selectDevice(this)"></select></div></div>
+      <div class="device"><svg class="i"><use href="#i-mic"/></svg><div class="field mic"><label>Mikrofon</label><select id="microphone" onchange="selectDevice(this)"></select><div class="meter" title="Mikrofonpegel"><div id="level1"></div></div></div></div>
+    </div>
+    <div class="preview" id="preview">
+      <div class="preview-empty"><svg class="i"><use href="#i-camera"/></svg><span id="previewEmpty"></span></div>
+      <img id="previewImage" alt="">
+      <div class="preview-chip"><span class="live-dot"></span><span id="previewCaption"></span></div>
     </div>
     <button class="record" onclick="startRecording()"><span class="circle"></span>Aufnahme starten<span class="key">Strg+Alt+R</span></button>
-    <div class="hint" id="hint"></div>
-    <div class="result" id="result">
-      <div class="bar-track"><div id="progress"></div></div>
-      <div id="resultText"></div>
-      <div><button class="btn" id="openButton" onclick="api().open_result()"><svg class="i"><use href="#i-folder"/></svg>Im Ordner öffnen</button></div>
+    <div class="status">
+      <div class="hint" id="hint"></div>
+      <div class="result" id="result">
+        <div class="bar-track"><div id="progress"></div></div>
+        <div class="result-row"><span id="resultText"></span><button class="btn" id="openButton" onclick="api().open_result()"><svg class="i"><use href="#i-folder"/></svg>Im Ordner öffnen</button></div>
+      </div>
     </div>
-    <details>
-      <summary><svg class="i"><use href="#i-gear"/></svg>Ordner</summary>
+  </div>
+
+  <div class="content settings">
+    <div class="manage-head"><span class="manage-title">Einstellungen</span><button class="link" onclick="closeSettings()">Fertig</button></div>
+    <div class="section">
+      <div class="section-title">Aufnahme</div>
+      <label class="toggle"><input type="checkbox" id="hide_taskbar" onchange="setOption(this)"><span class="knob"></span><span><b>Taskleiste nicht aufnehmen</b><small>Der Bildschirm wird ohne die Windows-Taskleiste aufgezeichnet.</small></span></label>
+      <label class="toggle"><input type="checkbox" id="hide_alttab" onchange="setOption(this)"><span class="knob"></span><span><b>Alt+Tab ausblenden</b><small>Beim Wechseln der Fenster bleibt das Bild der Aufnahme kurz stehen.</small></span></label>
+    </div>
+    <div class="section">
+      <div class="section-title">Ordner</div>
       <div class="folders">
         <span>Ablage</span><span class="path" id="archive_dir"></span><button onclick="pickFolder('archive_dir')">Ändern</button>
         <span>Rohaufnahme</span><span class="path" id="raw_dir"></span><button onclick="pickFolder('raw_dir')">Ändern</button>
       </div>
-    </details>
+    </div>
+  </div>
+
+  <div class="content manage">
+    <div class="manage-head"><span class="manage-title" id="manageTitle">Module</span><button class="link" onclick="closeModules()">Fertig</button></div>
+    <div class="mod-list" id="modList"></div>
+    <button class="btn add" id="addButton" onclick="editModule(null)">+ Modul hinzufügen</button>
+    <div class="editor" id="editor">
+      <div class="field"><label>Name, zugleich Ordner in der Ablage</label><input id="m_name"></div>
+      <div class="pair">
+        <div class="field"><label>Kürzel</label><input id="m_code" placeholder="z. B. dup"></div>
+        <div class="field"><label>Sprache</label><select id="m_language"><option value="de">Deutsch</option><option value="en">Englisch</option></select></div>
+      </div>
+      <div class="pair">
+        <div class="field"><label>ILIAS-Kurs, optional</label><input id="m_ilias" placeholder="Kurs-ID"></div>
+        <div class="field"><label>Opencast-Serie, optional</label><input id="m_series" placeholder="Serien-ID"></div>
+      </div>
+      <div class="editor-buttons">
+        <button class="pill-btn save" onclick="saveModule()">Speichern</button>
+        <button class="pill-btn" onclick="renderModules()">Abbrechen</button>
+        <span class="spacer"></span>
+        <button class="pill-btn discard" id="deleteModuleButton" onclick="deleteModule()">Löschen</button>
+      </div>
+    </div>
+    <div class="hint" id="manageHint"></div>
   </div>
 </div>
 
@@ -189,6 +290,13 @@
   const api = () => window.pywebview.api;
   const $ = id => document.getElementById(id);
   let view = "full", pauseIcon = "pause", confirmUntil = 0;
+  let profile = [], editingId = null, profileStamp = "", deleteUntil = 0;
+  const LANGUAGES = {de: "DE", en: "EN"};
+  const CONNECTION = {
+    local: ["", "Kein Server eingerichtet: alles bleibt auf diesem Rechner"],
+    connecting: ["Verbinde …", "Der Server wird gesucht"],
+    online: ["Online", "Mit dem Server verbunden"],
+    offline: ["Offline", "Server nicht erreichbar: Aufnahmen und Änderungen an den Modulen werden übertragen, sobald er wieder da ist"]};
 
   function label(kind, name, index) {
     if (kind !== "screen") return name;
@@ -201,17 +309,113 @@
     names.forEach((n, i) => { const o = document.createElement("option"); o.textContent = label(kind, n, i); o.value = n; s.appendChild(o); });
     s.value = chosen;
   }
+  function fillModules(d) {
+    profile = d.profile;
+    const list = $("modules"); list.innerHTML = "";
+    for (const m of d.modules) { const o = document.createElement("option"); o.value = m; list.appendChild(o); }
+    if (document.body.classList.contains("managing") && !document.body.classList.contains("editing")) renderModules();
+  }
   async function load() {
     const d = await api().data();
     $("term").textContent = d.term.replace(" - ", " · ");
-    const list = $("modules"); list.innerHTML = "";
-    for (const m of d.modules) { const o = document.createElement("option"); o.value = m; list.appendChild(o); }
+    fillModules(d);
     $("module").value = d.module;
     for (const kind of ["screen", "camera", "microphone"]) fillSelect(kind, d.devices[kind], d.choice[kind]);
     for (const k in d.options) $(k).checked = d.options[k];
-    $("archive_dir").textContent = d.archive_dir;
-    $("raw_dir").textContent = d.raw_dir;
+    for (const k of ["archive_dir", "raw_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
+    previewUrl = d.preview_url || "";
+    updatePreview();
   }
+  // ---- module management: the lecturer's profile, kept locally and synced with the server
+  function openModules() { document.body.classList.remove("configuring"); document.body.classList.add("managing"); renderModules(); }
+  // The window takes the height of the setup view; the settings and the module list use
+  // that height too, so switching between them does not make the window jump.
+  let mainHeight = 0;
+  function fitWindow() {
+    if (view !== "full") return;
+    const cls = document.body.classList, h = document.querySelector(".setup").scrollHeight;
+    if (!cls.contains("managing") && !cls.contains("configuring")) mainHeight = h;
+    const delta = Math.max(h, mainHeight) - window.innerHeight;
+    if (Math.abs(delta) > 2) api().fit(delta);
+  }
+  function openSettings() { document.body.classList.remove("managing", "editing"); document.body.classList.toggle("configuring"); }
+  function closeSettings() { document.body.classList.remove("configuring"); }
+
+  // ---- camera preview: an MJPEG stream from the app (preview.py), pictures taken from OBS,
+  // which holds the webcam. The stream only runs while the setup view shows it.
+  let previewUrl = "";
+  function updatePreview() {
+    const cls = document.body.classList, camera = $("camera").value, img = $("previewImage");
+    const show = !!previewUrl && !!camera && camera !== "keine" && view === "full"
+      && !cls.contains("managing") && !cls.contains("configuring") && !cls.contains("recording");
+    if (show && !img.getAttribute("src")) img.src = previewUrl;
+    if (!show && img.getAttribute("src")) img.removeAttribute("src");
+    $("preview").classList.toggle("live", show);
+    $("previewEmpty").textContent = camera === "keine" ? "Keine Kamera gewählt: Es wird nur der Bildschirm aufgenommen."
+      : "Die Kamera startet …";
+    $("previewCaption").textContent = show ? camera : "";
+  }
+  window.addEventListener("DOMContentLoaded", () => {
+    $("previewImage").onerror = () => { $("previewImage").removeAttribute("src"); setTimeout(updatePreview, 1000); };
+  });
+  function closeModules() { document.body.classList.remove("managing", "editing"); load(); }
+  function renderModules() {
+    document.body.classList.remove("editing");
+    $("manageTitle").textContent = "Module";
+    $("manageHint").textContent = "";
+    const list = $("modList"); list.innerHTML = "";
+    if (!profile.length) list.innerHTML = '<div class="mod-empty">Noch keine Module. Ein Modul, das du beim Aufnehmen eintippst, kommt auch hierher.</div>';
+    for (const m of profile) {
+      const b = document.createElement("button");
+      b.className = "mod-row";
+      b.onclick = () => editModule(m.id);
+      const name = document.createElement("span"); name.className = "name"; name.textContent = m.name;
+      const meta = document.createElement("span"); meta.className = "meta";
+      meta.textContent = [m.code, m.ilias_course_id && m.opencast_series_id ? "ILIAS" : ""].filter(Boolean).join(" · ");
+      const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = LANGUAGES[m.language] || m.language;
+      b.append(name, meta, tag);
+      list.appendChild(b);
+    }
+  }
+  function editModule(id) {
+    const m = profile.find(x => x.id === id) || {name: "", code: "", language: "de", ilias_course_id: "", opencast_series_id: ""};
+    editingId = id;
+    $("manageTitle").textContent = id ? "Modul bearbeiten" : "Neues Modul";
+    $("m_name").value = m.name; $("m_code").value = m.code; $("m_language").value = m.language;
+    $("m_ilias").value = m.ilias_course_id; $("m_series").value = m.opencast_series_id;
+    $("deleteModuleButton").style.display = id ? "" : "none";
+    $("manageHint").textContent = ""; $("manageHint").className = "hint";
+    document.body.classList.add("editing");
+    $("m_name").focus();
+  }
+  async function saveModule() {
+    const error = await api().save_module({id: editingId, name: $("m_name").value, code: $("m_code").value,
+      language: $("m_language").value, ilias_course_id: $("m_ilias").value, opencast_series_id: $("m_series").value});
+    if (error) { $("manageHint").textContent = error; $("manageHint").className = "hint error"; return; }
+    fillModules(await api().data());
+    renderModules();
+  }
+  async function deleteModule() {
+    const b = $("deleteModuleButton");
+    if (Date.now() >= deleteUntil) {                       // a second click within 3 s deletes
+      deleteUntil = Date.now() + 3000;
+      b.classList.add("confirm"); b.textContent = "Wirklich löschen?";
+      setTimeout(() => { b.classList.remove("confirm"); b.textContent = "Löschen"; }, 3100);
+      return;
+    }
+    deleteUntil = 0;
+    await api().delete_module(editingId);
+    fillModules(await api().data());
+    renderModules();
+  }
+  function showConnection(st) {
+    const c = $("conn"), [text, title] = CONNECTION[st.connection] || ["", ""];
+    c.className = "conn " + st.connection + (text ? " show" : "");
+    c.textContent = text;
+    c.title = title + (st.profile_pending && st.connection === "offline" ? ". Geänderte Module warten auf die Übertragung." : "")
+      + (st.profile_status === "no-profile" ? ". Dieser Zugang hat am Server kein Profil, die Module bleiben lokal." : "");
+  }
+
   const selectDevice = el => api().select(el.id, el.value);
   const setOption = el => api().option(el.id, el.checked);
   const sendTexts = () => api().texts($("module").value, $("topic").value);
@@ -250,6 +454,12 @@
       if (wanted !== view) { view = wanted; await api().view(wanted); requestAnimationFrame(fitBar); }
       document.body.classList.toggle("recording", st.recording);
       document.body.classList.toggle("asking", st.recording && st.asking);
+      showConnection(st);
+      if (st.profile_stamp !== profileStamp) {              // changed here or on another device
+        const first = !profileStamp;
+        profileStamp = st.profile_stamp;
+        if (!first && !st.recording) fillModules(await api().data());
+      }
       document.body.classList.toggle("paused", st.recording && st.paused && !st.asking);
       $("clock").textContent = st.paused ? "PAUSE " + st.time : st.time;
       $("askClock").textContent = st.time;
@@ -260,16 +470,21 @@
         $("pauseButton").title = st.paused ? "Weiter (Strg+Alt+P)" : "Pause (Strg+Alt+P)";
       }
       for (const id of ["level1", "level2"]) { const l = $(id); l.style.width = levelWidth(st.level) + "%"; l.style.background = levelColor(st.level); }
-      $("result").classList.toggle("show", !st.recording && (st.splitting || st.has_result));
+      const showResult = !st.recording && (st.splitting || st.has_result);
+      $("result").classList.toggle("show", showResult);
+      document.body.classList.toggle("has-result", showResult);
       $("progress").style.width = (st.splitting ? st.progress * 100 : 100) + "%";
       $("resultText").textContent = st.splitting ? "Wird abgelegt … " + Math.round(st.progress * 100) + " %" : st.message;
+      $("resultText").title = $("resultText").textContent;
+      updatePreview();
+      fitWindow();
       $("openButton").style.display = (!st.splitting && st.has_result) ? "" : "none";
       if (!st.splitting && !st.has_result) showHint(st.message, st.message_kind);
       else showHint(st.hotkey_errors.length ? "Tasten belegt: " + st.hotkey_errors.join(", ") : "", "error");
     } catch (e) { }
     setTimeout(tick, 250);
   }
-  window.addEventListener("pywebviewready", () => { load(); tick(); });
+  window.addEventListener("pywebviewready", async () => { await load(); tick(); });
 </script>
 </body>
 </html>
