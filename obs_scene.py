@@ -13,6 +13,7 @@ from pathlib import Path
 
 import hardware
 import obs_remote as remote
+from delivery import SEGMENT_MINUTES
 
 # OBS profile, scene collection and scene. The lecture recorder uses "Lecture". Letters and digits
 # only, because the profile folder that recordEncoder.json goes into is named after it.
@@ -31,6 +32,10 @@ def output_settings(raw_dir: Path) -> list[tuple[str, str, str]]:
         ("AdvOut", "RecEncoder", hardware.obs_encoder()[0]),
         ("AdvOut", "RecTracks", "1"),
         ("AdvOut", "Track1Bitrate", "160"),
+        # a new file every minute, so delivery.py can process and send the recording while it runs
+        ("AdvOut", "RecSplitFile", "true"),
+        ("AdvOut", "RecSplitFileType", "Time"),
+        ("AdvOut", "RecSplitFileTime", str(SEGMENT_MINUTES)),
         ("AdvOut", "RecRescale", "false"),
         ("Output", "FilenameFormatting", "%CCYY-%MM-%DD %hh-%mm-%ss"),
     ]

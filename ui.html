@@ -262,7 +262,7 @@
       for (const id of ["level1", "level2"]) { const l = $(id); l.style.width = levelWidth(st.level) + "%"; l.style.background = levelColor(st.level); }
       $("result").classList.toggle("show", !st.recording && (st.splitting || st.has_result));
       $("progress").style.width = (st.splitting ? st.progress * 100 : 100) + "%";
-      $("resultText").textContent = st.splitting ? "Wird geteilt und abgelegt … " + Math.round(st.progress * 100) + " %" : st.message;
+      $("resultText").textContent = st.splitting ? "Wird abgelegt … " + Math.round(st.progress * 100) + " %" : st.message;
       $("openButton").style.display = (!st.splitting && st.has_result) ? "" : "none";
       if (!st.splitting && !st.has_result) showHint(st.message, st.message_kind);
       else showHint(st.hotkey_errors.length ? "Tasten belegt: " + st.hotkey_errors.join(", ") : "", "error");

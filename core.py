@@ -1,13 +1,13 @@
 """Core of FLEX3 Light, without user interface.
 
-Holds the OBS connection, device selection, settings, global hotkeys, Alt+Tab
-detection and the split after stopping. The UI (recorder.py) polls status()
-and calls the commands; OBS requests go through a lock because UI, hotkeys
-and the status loop run in different threads.
+Holds the OBS connection, device selection, settings, global hotkeys and Alt+Tab
+detection, and hands every recording to delivery.py, which processes and delivers
+it piece by piece while it runs. The UI (recorder.py) polls status() and calls the
+commands; OBS requests go through a lock because UI, hotkeys and the status loop
+run in different threads.
 """
 from __future__ import annotations
 
-import ctypes
 import datetime as dt
 import json
 import math
@@ -22,16 +22,14 @@ from pathlib import Path
 import monitors                  # sets DPI awareness on import: physical pixels
 import obs_remote as remote
 import obs_scene as scene
-import split
+from delivery import Delivery
 from hotkeys import HOTKEY_PAUSE, GlobalKeys
+from server_client import ServerClient
 
 APP_DIR = Path(os.environ["APPDATA"]) / "flex3-light"
 SETTINGS_FILE = APP_DIR / "settings.json"
 DEFAULT_ARCHIVE = Path.home() / "Videos" / "Lectures"
 DEFAULT_RAW = Path.home() / "Videos" / "flex3-light-raw"   # best outside any cloud-synced folder
-
-# File names go into a German archive, so the suffixes stay German.
-SCREEN_SUFFIX, CAMERA_SUFFIX = "Bildschirm", "Kamera"
 
 # The recorded picture lags the time OBS reports by about 0.55 s (encoding and muxing),
 # measured on 2026-10-09: switcher visible 3.73 to 4.83 s, computed 3.02 to 4.61 s.
@@ -63,25 +61,11 @@ def clean_name(text: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "", text).strip().rstrip(".")
 
 
-def free_path(path: Path) -> Path:
-    n, p = 2, path
-    while p.exists():
-        p = path.with_name(f"{path.stem} ({n}){path.suffix}")
-        n += 1
-    return p
-
-
-def recycle(path: Path) -> None:
-    """Move a file to the recycle bin (falls back to deleting it if Windows refuses)."""
-    class SHFILEOPSTRUCTW(ctypes.Structure):
-        _fields_ = [("hwnd", ctypes.c_void_p), ("wFunc", ctypes.c_uint), ("pFrom", ctypes.c_wchar_p),
-                    ("pTo", ctypes.c_wchar_p), ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", ctypes.c_int),
-                    ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", ctypes.c_wchar_p)]
-    FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
-    op = SHFILEOPSTRUCTW(wFunc=FO_DELETE, pFrom=str(path) + "\0",
-                         fFlags=FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI)
-    if ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) != 0 and path.exists():
-        path.unlink()
+def server_client(settings: dict) -> ServerClient | None:
+    """The FLEX3 Light server from the settings, or None: then recordings are only archived locally."""
+    if settings.get("server_url") and settings.get("server_token"):
+        return ServerClient(settings["server_url"], settings["server_token"], settings.get("upload_kbit"))
+    return None
 
 
 def load_settings() -> dict:
@@ -153,18 +137,17 @@ class Core:
         self.topic = ""
         self.options = {"hide_taskbar": self.settings.get("hide_taskbar", True),
                         "hide_alttab": self.settings.get("hide_alttab", True)}
-        self.session: dict | None = None
+        self.session = None                       # delivery.Session while recording
         self.offset: float | None = None          # wall clock minus recording time
         self.alttab_start: float | None = None
         self.stop_pressed = 0.0
         self.asking = False                       # stopped by the user, waiting for "save or discard"
         self.on_question = lambda: None           # set by the UI: bring the window back for the question
-        self.splitting = False
-        self.progress = 0.0
         self.message, self.message_kind = "", "info"
-        self.last_file: Path | None = None
         self.obs_state = {"paused": False, "time": "00:00:00"}
         self.screen_size = (scene.FIELD_W, scene.FIELD_H)
+        # Picks up what an earlier run left unfinished, even before OBS is ready.
+        self.delivery = Delivery(self.raw_dir, server_client(self.settings)).start()
 
         remote.start(profile=scene.NAME, collection=scene.NAME)
         self.o = remote.Obs().__enter__()
@@ -229,12 +212,12 @@ class Core:
             self.save()
 
     def set_folder(self, kind: str, path: str) -> None:
-        if self.session is not None or self.splitting or not path:
+        if self.session is not None or self.delivery.busy() or not path:
             return
         if kind == "archive_dir":
             self.archive = Path(path)
         elif kind == "raw_dir":
-            self.raw_dir = Path(path)
+            self.raw_dir = self.delivery.root = Path(path)
             with self.lock:
                 scene.ensure_profile_and_scene(self.o, self.raw_dir)
             self.apply_devices()
@@ -251,19 +234,26 @@ class Core:
         """Start recording; returns an error message for the UI or ''."""
         if self.session is not None:
             return ""
-        if self.splitting:
-            return "Die letzte Aufnahme wird noch geteilt."
+        if self.delivery.busy():
+            return "Die letzte Aufnahme wird noch abgelegt."
         module = clean_name(self.module)
         if not module:
             return "Bitte zuerst ein Modul wählen."
         self.save()
-        with self.lock:
-            self.o.request("StartRecord")
-        self.session = {"module": module, "topic": clean_name(self.topic), "date": dt.date.today(),
-                        "camera": self.choice.get("camera") != scene.NO_CAMERA, "alttab": [],
-                        "screen_size": self.screen_size}
+        s = self.delivery.begin(module, clean_name(self.topic), self.choice.get("camera") != scene.NO_CAMERA,
+                                self.screen_size, self.options["hide_alttab"],
+                                self.archive / semester(dt.date.today()) / module, self.settings)
+        try:
+            with self.lock:
+                # Every session gets its own raw folder, so its one-minute segments are easy to tell apart.
+                self.o.request("SetRecordDirectory", {"recordDirectory": s.raw_dir.as_posix()})
+                self.o.request("StartRecord")
+        except Exception:
+            self.delivery.forget(s)
+            raise
+        self.session = s
         self.offset, self.alttab_start = None, None
-        self.message, self.last_file = "", None
+        self.message = ""
         return ""
 
     def pause(self) -> None:
@@ -297,61 +287,65 @@ class Core:
         self.asking = False
 
     def finish(self, save: bool) -> None:
-        """End the recording: split and file it, or move the raw file to the recycle bin."""
+        """End the recording: archive and deliver it, or move it to the recycle bin (and off the server)."""
         if self.session is None:
             return
         with self.lock:
-            raw = Path(self.o.request("StopRecord")["outputPath"])
+            self.o.request("StopRecord")
+            # OBS refuses a new record directory until the output has really stopped.
+            deadline = time.time() + 10
+            while self.o.request("GetRecordStatus")["outputActive"] and time.time() < deadline:
+                time.sleep(0.1)
+            self.o.request("SetRecordDirectory", {"recordDirectory": self.raw_dir.as_posix()}, check=False)
         s, self.session, self.asking = self.session, None, False
-        if not save:
-            threading.Thread(target=self._discard, args=(raw,), daemon=False).start()
-            return
-        folder = self.archive / semester(s["date"]) / s["module"]
-        stem = f"{s['date']:%Y-%m-%d} - {s['topic'] or s['module']}"
-        screen_out = free_path(folder / f"{stem} - {SCREEN_SUFFIX}.mp4")
-        camera_out = free_path(folder / f"{stem} - {CAMERA_SUFFIX}.mp4") if s["camera"] else None
-        spans = s["alttab"] if self.options["hide_alttab"] else []
-        self.splitting, self.progress = True, 0.0
-        threading.Thread(target=self._split, args=(raw, screen_out, camera_out, spans, s["screen_size"]),
-                         daemon=False).start()
+        self.delivery.stop(s, save)
+        self.message = ""
 
-    def _split(self, raw: Path, screen_out: Path, camera_out: Path | None, spans: list, size) -> None:
-        try:
-            time.sleep(1.5)   # let OBS close the file
-            split.split_recording(raw, screen_out, camera_out, lambda x: setattr(self, "progress", x),
-                                  freeze=spans, screen_size=size)
-            raw.unlink()
-            self.last_file = screen_out
-            extra = f" · {len(spans)} Fensterwechsel ausgeblendet" if spans else ""
-            self.message, self.message_kind = f"Abgelegt in {screen_out.parent.name}{extra}", "ok"
-        except Exception as e:
-            self.last_file = raw
-            self.message, self.message_kind = f"Teilen fehlgeschlagen, die Rohaufnahme bleibt erhalten: {e}", "error"
-        finally:
-            self.splitting = False
-
-    def _discard(self, raw: Path) -> None:
-        time.sleep(1.5)   # let OBS close the file
-        try:
-            recycle(raw)
-            self.message, self.message_kind = "Aufnahme verworfen, die Rohdatei liegt im Papierkorb", "info"
-        except Exception as e:
-            self.message, self.message_kind = f"Verwerfen fehlgeschlagen, die Rohdatei liegt noch in {raw.parent}: {e}", "error"
+    def _result(self) -> Path | None:
+        s = self.delivery.latest()
+        screen = s and s is not self.session and s.data["archive"]["screen"]
+        return Path(screen) if screen else None
 
     def open_result(self) -> None:
-        if self.last_file and self.last_file.exists():
-            subprocess.Popen(["explorer", "/select,", str(self.last_file)])
-        elif self.last_file:
-            os.startfile(self.last_file.parent)
+        f = self._result()
+        if f and f.exists():
+            subprocess.Popen(["explorer", "/select,", str(f)])
+        elif f:
+            os.startfile(f.parent)
 
     # ---------------------------------------------------------- status loop
 
+    @staticmethod
+    def _delivery_message(info: dict) -> tuple[str, str]:
+        if info["error"]:
+            return f"Ablegen fehlgeschlagen, die Rohaufnahme bleibt erhalten: {info['error']}", "error"
+        if not info["screen"]:
+            return ("Aufnahme verworfen, die Rohdateien liegen im Papierkorb", "info") \
+                if info["state"] in ("discarded", "done") else ("", "info")
+        text = f"Abgelegt in {info['module']}"
+        if info["alttab"]:
+            text += f" · {info['alttab']} Fensterwechsel ausgeblendet"
+        if not info["deliver"]:
+            return text, "ok"
+        if info["completed"]:
+            return text + " · an den Server übertragen", "ok"
+        if info["server_error"]:
+            return text + " · Server nicht erreichbar, die Übertragung folgt", "info"
+        return text + f" · Übertragung {info['uploaded']} von {info['parts']} Teilen", "info"
+
     def status(self) -> dict:
         db = self.meter.db if time.time() - self.meter.at < 1 else -90.0
+        s = self.delivery.latest()
+        info = self.delivery.summary(s) if s is not None and s is not self.session else None
+        splitting = bool(info and info["state"] == "stopped" and not info["error"])
+        progress = info["processed"] / info["segments"] if splitting and info["segments"] else 0.0
+        message, kind = self.message, self.message_kind
+        if info and not message:
+            message, kind = self._delivery_message(info)
         return {"recording": self.session is not None, "asking": self.asking, "paused": self.obs_state["paused"],
-                "time": self.obs_state["time"], "level": round(db, 1), "splitting": self.splitting,
-                "progress": round(self.progress, 3), "message": self.message, "message_kind": self.message_kind,
-                "has_result": bool(self.last_file), "hotkey_errors": list(self.keys.failed)}
+                "time": self.obs_state["time"], "level": round(db, 1), "splitting": splitting,
+                "progress": round(progress, 3), "message": message, "message_kind": kind,
+                "has_result": bool(info and info["screen"]), "hotkey_errors": list(self.keys.failed)}
 
     def _loop(self) -> None:
         while True:
@@ -391,9 +385,11 @@ class Core:
             edge, wall = value
             if edge == "down":
                 self.alttab_start = wall - self.offset
+                self.session.alttab_open = True        # no segment is cut until the span is known
             elif self.alttab_start is not None:
                 # shift by the video delay, plus margin for the switcher fading in and out
                 a = self.alttab_start + VIDEO_DELAY - 0.25
                 b = wall - self.offset + VIDEO_DELAY + 0.5
-                self.session["alttab"].append((max(0.0, a), b))
+                self.session.add_span(max(0.0, a), b)
                 self.alttab_start = None
+                self.session.alttab_open = False

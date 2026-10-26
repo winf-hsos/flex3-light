@@ -1,0 +1,422 @@
+"""Recording sessions that are processed and delivered piece by piece while the lecture runs.
+
+OBS writes a new file every minute into the session's own raw folder. Two background
+threads take it from there:
+
+    processor   splits every finished segment into screen, camera and program mix
+                (split.py, at low priority while recording), and after the stop joins
+                the parts into the local archive
+    uploader    sends every processed part to the FLEX3 Light server (server/), and
+                after the archive is written completes the session there
+
+Each session lives in a folder below the raw folder with a manifest.json, so work
+that a closed window or a crash interrupted continues at the next start. Nothing is
+deleted before it is safe: raw segments only after the archive is written and
+checked, parts only after the server has confirmed the complete session.
+"""
+from __future__ import annotations
+
+import ctypes
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import shutil
+import socket
+import threading
+import time
+from pathlib import Path
+
+import split
+from server_client import ServerClient, ServerError
+
+VERSION = "0.1.0"
+SEGMENT_MINUTES = 1         # OBS splits the recording this often
+SETTLE = 3.0                # a finished segment must be untouched this long before it is read
+RETRY = (5, 15, 30, 60)     # seconds between attempts while the server is unreachable
+# File names go into a German archive, so the suffixes stay German.
+SCREEN_SUFFIX, CAMERA_SUFFIX = "Bildschirm", "Kamera"
+
+
+# ------------------------------------------------------------------ helpers
+
+def free_path(path: Path) -> Path:
+    n, p = 2, path
+    while p.exists():
+        p = path.with_name(f"{path.stem} ({n}){path.suffix}")
+        n += 1
+    return p
+
+
+def recycle(path: Path) -> None:
+    """Move a file to the recycle bin (falls back to deleting it if Windows refuses)."""
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [("hwnd", ctypes.c_void_p), ("wFunc", ctypes.c_uint), ("pFrom", ctypes.c_wchar_p),
+                    ("pTo", ctypes.c_wchar_p), ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", ctypes.c_int),
+                    ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", ctypes.c_wchar_p)]
+    FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
+    op = SHFILEOPSTRUCTW(wFunc=FO_DELETE, pFrom=str(path) + "\0",
+                         fFlags=FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI)
+    if ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) != 0 and path.exists():
+        path.unlink()
+
+
+def slug(text: str, limit: int = 40) -> str:
+    t = text.lower()
+    for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        t = t.replace(a, b)
+    return re.sub(r"[^a-z0-9]+", "-", t).strip("-")[:limit].strip("-") or "session"
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def default_device_id() -> str:
+    return "flex3-light-" + slug(os.environ.get("COMPUTERNAME") or socket.gethostname(), 30)
+
+
+def session_metadata(session_id: str, module: str, topic: str, started: dt.datetime, settings: dict) -> dict:
+    """session.json after the FLEX3 contract, without the duration (added at the end).
+
+    A laptop has no user register, so the session goes in as unassigned and the server's
+    queue assigns course and series. Consent is set conservatively (recorded, nothing
+    published) and marked as restricted on the device, until Nicolas decides how consent
+    without a register is handled.
+    """
+    meta = {"session_id": session_id, "status": "unassigned", "course_name": module,
+            "instructor_id": settings.get("instructor_id", ""), "instructor_name": settings.get("instructor_name", ""),
+            "recorded_at": started.isoformat(timespec="seconds"), "room": "",
+            "language": settings.get("language", "de"), "ilias_course_id": "", "opencast_series_id": "",
+            "consent": {"recording": True, "publication": False, "voice_clone": False},
+            "consent_source": "restricted_on_device",
+            "device_id": settings.get("device_id") or default_device_id(), "software_version": VERSION}
+    if topic:
+        meta["topic"] = topic             # not in the contract; unknown fields are ignored
+    return meta
+
+
+# ------------------------------------------------------------------ session
+
+class Session:
+    """One recording: a folder with raw/ (written by OBS), parts/ and manifest.json."""
+
+    def __init__(self, folder: Path, data: dict):
+        self.folder, self.data = folder, data
+        self.lock = threading.RLock()
+        self.alttab_open = False          # Alt+Tab held right now: wait before cutting a segment
+
+    @property
+    def id(self) -> str:
+        return self.data["session_id"]
+
+    @property
+    def raw_dir(self) -> Path:
+        return self.folder / "raw"
+
+    @property
+    def parts_dir(self) -> Path:
+        return self.folder / "parts"
+
+    def part(self, index: int, track: str) -> Path:
+        return self.parts_dir / f"{index:04d}-{track}.mp4"
+
+    def tracks(self) -> list[str]:
+        return ["screen"] + (["camera"] if self.data["camera"] else []) + (["mix"] if self.data["deliver"] else [])
+
+    def save(self) -> None:
+        with self.lock:
+            tmp = self.folder / "manifest.json.tmp"
+            tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(tmp, self.folder / "manifest.json")
+
+    def add_span(self, a: float, b: float) -> None:
+        with self.lock:
+            self.data["alttab"].append([a, b])
+            self.save()
+
+
+# ------------------------------------------------------------------ delivery
+
+class Delivery:
+    def __init__(self, root: Path, client: ServerClient | None = None):
+        self.root = Path(root)
+        self.client = client
+        self.sessions: list[Session] = []
+        self.guard = threading.RLock()
+        self.wake = threading.Event()
+        self.server_down_until = 0.0
+        self.server_error = ""
+        self._retry = 0
+        self.last_exception = ""
+
+    def start(self) -> "Delivery":
+        """Pick up unfinished sessions from earlier runs and start both threads."""
+        for manifest in sorted(self.root.glob("*/manifest.json")):
+            s = Session(manifest.parent, json.loads(manifest.read_text(encoding="utf-8")))
+            if s.data["state"] == "recording":       # the app ended during a recording: keep it
+                s.data["state"] = "stopped"
+            s.data["error"] = None                   # try again what failed last time
+            s.save()
+            self.sessions.append(s)
+        threading.Thread(target=self._loop, args=(self._process,), daemon=True).start()
+        threading.Thread(target=self._loop, args=(self._upload,), daemon=True).start()
+        return self
+
+    # ---------------------------------------------------------- commands from the core
+
+    def begin(self, module: str, topic: str, camera: bool, screen_size, hide_alttab: bool,
+              archive_folder: Path, settings: dict) -> Session:
+        started = dt.datetime.now().astimezone()
+        base = f"{started:%Y-%m-%d}_{slug(module)}_{started:%H%M}"
+        sid, n = base, 2
+        while (self.root / sid).exists():
+            sid, n = f"{base}-{n}", n + 1
+        folder = self.root / sid
+        (folder / "raw").mkdir(parents=True)
+        stem = f"{started:%Y-%m-%d} - {topic or module}"
+        data = {"session_id": sid, "state": "recording", "module": module, "topic": topic,
+                "camera": camera, "screen_size": list(screen_size), "hide_alttab": hide_alttab,
+                "deliver": self.client is not None, "alttab": [], "segments": [],
+                "archive": {"folder": str(archive_folder), "stem": stem, "screen": None, "camera": None},
+                "server": {"opened": False, "completed": False}, "error": None,
+                "meta": session_metadata(sid, module, topic, started, settings)}
+        s = Session(folder, data)
+        s.save()
+        with self.guard:
+            self.sessions.append(s)
+        return s
+
+    def stop(self, s: Session, save: bool) -> None:
+        with s.lock:
+            s.data["state"] = "stopped" if save else "discarded"
+            s.alttab_open = False
+            s.save()
+        self.wake.set()
+
+    def forget(self, s: Session) -> None:
+        """Remove a session that never started recording."""
+        with self.guard:
+            self.sessions.remove(s)
+        shutil.rmtree(s.folder, ignore_errors=True)
+
+    def latest(self) -> Session | None:
+        with self.guard:
+            return self.sessions[-1] if self.sessions else None
+
+    def busy(self) -> bool:
+        """True while a stopped session is still being processed into the archive."""
+        with self.guard:
+            return any(s.data["state"] == "stopped" and not s.data["error"] for s in self.sessions)
+
+    def summary(self, s: Session) -> dict:
+        with s.lock:
+            segs = s.data["segments"]
+            tracks = s.tracks()
+            total = len(segs) * len(tracks)
+            uploaded = sum(len(x.get("uploaded", [])) for x in segs)
+            return {"state": s.data["state"], "segments": len(segs), "processed": sum(x["processed"] for x in segs),
+                    "deliver": s.data["deliver"], "uploaded": uploaded, "parts": total,
+                    "completed": s.data["server"]["completed"], "error": s.data["error"],
+                    "server_error": self.server_error if s.data["deliver"] else "",
+                    "screen": s.data["archive"]["screen"], "module": s.data["module"],
+                    "alttab": len(s.data["alttab"]) if s.data["hide_alttab"] else 0}
+
+    # ---------------------------------------------------------- threads
+
+    def _loop(self, step) -> None:
+        while True:
+            try:
+                worked = step()
+            except Exception as e:            # keep the thread alive; kept for debugging
+                self.last_exception = repr(e)
+                worked = False
+            if not worked:
+                self.wake.wait(2)
+                self.wake.clear()
+
+    def _active(self) -> list[Session]:
+        with self.guard:
+            return list(self.sessions)
+
+    def _finish(self, s: Session) -> None:
+        with self.guard:
+            if s in self.sessions and s is not self.sessions[-1]:
+                self.sessions.remove(s)
+        with s.lock:
+            s.data["state"] = "done"
+            s.save()
+        shutil.rmtree(s.parts_dir, ignore_errors=True)
+        shutil.rmtree(s.raw_dir, ignore_errors=True)
+        (s.folder / "manifest.json").unlink(missing_ok=True)
+        try:
+            s.folder.rmdir()
+        except OSError:
+            pass
+
+    # ---------------------------------------------------------- processor
+
+    def _process(self) -> bool:
+        for s in self._active():
+            state = s.data["state"]
+            if s.data["error"] or state in ("archived", "done"):
+                continue
+            if state == "discarded":
+                files = list(s.raw_dir.glob("*.mkv"))
+                if not files and not s.parts_dir.exists():
+                    continue                  # cleaned up, the uploader still deletes it on the server
+                time.sleep(1.5)               # let OBS close the last file
+                for f in files:
+                    recycle(f)
+                shutil.rmtree(s.parts_dir, ignore_errors=True)
+                if not s.data["server"]["opened"]:
+                    self._finish(s)
+                return True
+            try:
+                if self._next_segment(s):
+                    return True
+                if state == "stopped" and self._archive(s):
+                    return True
+            except Exception as e:
+                with s.lock:
+                    s.data["error"] = str(e)
+                    s.save()
+        return False
+
+    def _next_segment(self, s: Session) -> bool:
+        """Register and process the next finished segment; False if there is none yet."""
+        with s.lock:
+            segs = s.data["segments"]
+            pending = next((i for i, x in enumerate(segs) if not x["processed"]), None)
+        if pending is None:
+            files = sorted(s.raw_dir.glob("*.mkv"))
+            known = {x["raw"] for x in segs}
+            new = [f for f in files if f.name not in known]
+            if not new:
+                return False
+            f = new[0]
+            last = f == files[-1]
+            if (last and s.data["state"] == "recording") or time.time() - f.stat().st_mtime < SETTLE:
+                return False                       # OBS is still writing it
+            if s.alttab_open:
+                return False                       # its Alt+Tab span is not known yet
+            start = sum(x["duration"] for x in segs)
+            with s.lock:
+                segs.append({"raw": f.name, "start": start, "duration": split.duration(f), "processed": False,
+                             "sha256": {}, "uploaded": []})
+                s.save()
+            pending = len(segs) - 1
+        seg = segs[pending]
+        a0, d = seg["start"], seg["duration"]
+        spans = [(max(0.0, a - a0), min(d, b - a0)) for a, b in s.data["alttab"] if b > a0 and a < a0 + d] \
+            if s.data["hide_alttab"] else []
+        tracks = s.tracks()
+        s.parts_dir.mkdir(exist_ok=True)
+        split.split_recording(s.raw_dir / seg["raw"], s.part(pending, "screen"),
+                              s.part(pending, "camera") if "camera" in tracks else None,
+                              freeze=spans, screen_size=tuple(s.data["screen_size"]),
+                              mix_out=s.part(pending, "mix") if "mix" in tracks else None,
+                              low_priority=s.data["state"] == "recording")
+        with s.lock:
+            seg["sha256"] = {t: sha256(s.part(pending, t)) for t in tracks}
+            seg["processed"] = True
+            s.save()
+        self.wake.set()                            # the uploader has something new
+        return True
+
+    def _archive(self, s: Session) -> bool:
+        """After the stop: join the parts into the local archive, then drop the raw segments."""
+        segs = s.data["segments"]
+        if any(not x["processed"] for x in segs):
+            return False
+        if {f.name for f in s.raw_dir.glob("*.mkv")} - {x["raw"] for x in segs}:
+            return False                           # the last segment is still settling
+        if not segs:
+            raise RuntimeError("OBS hat keine Datei geschrieben")
+        a = s.data["archive"]
+        folder = Path(a["folder"])
+        screen = free_path(folder / f"{a['stem']} - {SCREEN_SUFFIX}.mp4")
+        split.join([s.part(i, "screen") for i in range(len(segs))], screen)
+        camera = None
+        if s.data["camera"]:
+            camera = free_path(folder / f"{a['stem']} - {CAMERA_SUFFIX}.mp4")
+            split.join([s.part(i, "camera") for i in range(len(segs))], camera)
+        with s.lock:
+            a["screen"], a["camera"] = str(screen), str(camera) if camera else None
+            s.data["state"] = "archived"
+            s.save()
+        shutil.rmtree(s.raw_dir, ignore_errors=True)
+        if not s.data["deliver"]:
+            self._finish(s)
+        self.wake.set()
+        return True
+
+    # ---------------------------------------------------------- uploader
+
+    def _upload(self) -> bool:
+        if not self.client or time.time() < self.server_down_until:
+            return False
+        for s in self._active():
+            if not s.data["deliver"] or s.data["state"] == "done":
+                continue
+            try:
+                if self._upload_step(s):
+                    self.server_error = ""
+                    self._retry = 0
+                    return True
+            except (OSError, ServerError) as e:
+                self._retry += 1
+                self.server_down_until = time.time() + RETRY[min(self._retry, len(RETRY)) - 1]
+                self.server_error = str(e)
+                return False
+        return False
+
+    def _upload_step(self, s: Session) -> bool:
+        sv = s.data["server"]
+        if s.data["state"] == "discarded":
+            if sv["opened"]:
+                self.client.delete(s.id)
+            self._finish(s)
+            return True
+        if not sv["opened"]:
+            self.client.open_session(s.id)
+            with s.lock:
+                sv["opened"] = True
+                s.save()
+            return True
+        for i, seg in enumerate(s.data["segments"]):
+            if not seg["processed"]:
+                break
+            for track, digest in seg["sha256"].items():
+                if track not in seg["uploaded"]:
+                    self.client.put_part(s.id, track, i, s.part(i, track), digest)
+                    with s.lock:
+                        seg["uploaded"].append(track)
+                        s.save()
+                    return True
+        if s.data["state"] != "archived" or sv["completed"]:
+            return False
+        segs = s.data["segments"]
+        if any(set(x["sha256"]) - set(x["uploaded"]) for x in segs):
+            return False
+        n = len(segs)
+        meta = {**s.data["meta"], "duration_sec": round(sum(x["duration"] for x in segs))}
+        state = self.client.complete(s.id, meta, {t: n for t in s.tracks()})
+        while state == "assembling":
+            time.sleep(2)
+            st = self.client.status(s.id)
+            state = st["state"]
+            if st.get("error"):
+                raise ServerError(500, st["error"])
+        if state != "complete":
+            raise ServerError(500, f"unexpected state {state}")
+        with s.lock:
+            sv["completed"] = True
+            s.save()
+        self._finish(s)
+        return True

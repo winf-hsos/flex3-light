@@ -34,7 +34,7 @@ def nvenc() -> bool:
     if os.environ.get("FLEX3_LIGHT_ENCODER", "").lower() == "x264":
         return False
     r = subprocess.run([ffmpeg(), "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=640x360:d=0.2",
-                        "-c:v", "h264_nvenc", "-f", "null", "-"], capture_output=True, creationflags=NO_WINDOW)
+                        "-c:v", "h264_nvenc", "-f", "null", "-"], stdin=subprocess.DEVNULL, capture_output=True, creationflags=NO_WINDOW)
     return r.returncode == 0
 
 
