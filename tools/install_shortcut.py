@@ -29,7 +29,7 @@ if __name__ == "__main__":
     sl.SetArguments(f'"{ROOT / "recorder.py"}"')
     sl.SetWorkingDirectory(str(ROOT))
     sl.SetIconLocation(str(ROOT / "assets" / "icon.ico"), 0)
-    sl.SetDescription("Record lectures with OBS")
+    sl.SetDescription("Record and stream lectures with OBS")
     store = sl.QueryInterface(propsys.IID_IPropertyStore)
     store.SetValue(pscon.PKEY_AppUserModel_ID, propsys.PROPVARIANTType(APP_ID))
     store.Commit()

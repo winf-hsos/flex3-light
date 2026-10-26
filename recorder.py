@@ -1,4 +1,4 @@
-"""Lecture recorder: a small window on top of OBS, HTML user interface via pywebview (Edge WebView2).
+"""FLEX3 Light: a small window on top of OBS, HTML user interface via pywebview (Edge WebView2).
 
 Before recording: module, topic, screen, camera, microphone, options, folders.
 While recording the window shrinks to a slim bar with time, level, pause and
@@ -25,8 +25,11 @@ webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
 
 from core import Core
 
-TITLE = "Vorlesung aufnehmen"
-APP_ID = "winf-hsos.LectureRecorder"
+TITLE = "FLEX3 Light"
+APP_ID = "winf-hsos.Flex3Light"
+# The lecture recorder this app was forked from. Both drive the same OBS and register
+# the same hotkeys, so only one of them may run at a time.
+LECTURE_RECORDER_MUTEX = "Local\\LectureRecorder"
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))   # unpack folder of the packaged app
 FULL = (470, 640)
 BAR = (480, 58)
@@ -130,7 +133,7 @@ def single_instance() -> bool:
     """Only one window: two instances fight over hotkeys and the recording. A second
     start brings the existing window to the front and exits."""
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)   # windll's GetLastError can be overwritten
-    single_instance.mutex = kernel32.CreateMutexW(None, False, "Local\\LectureRecorder")
+    single_instance.mutex = kernel32.CreateMutexW(None, False, "Local\\Flex3Light")
     if ctypes.get_last_error() != 183:                  # ERROR_ALREADY_EXISTS
         return True
     hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
@@ -140,8 +143,20 @@ def single_instance() -> bool:
     return False
 
 
+def lecture_recorder_running() -> bool:
+    """True while the lecture recorder runs; it holds its single-instance mutex."""
+    handle = ctypes.windll.kernel32.OpenMutexW(0x00100000, False, LECTURE_RECORDER_MUTEX)   # SYNCHRONIZE
+    if handle:
+        ctypes.windll.kernel32.CloseHandle(handle)
+    return bool(handle)
+
+
 def main(test_func=None) -> None:
     if not single_instance():
+        return
+    if lecture_recorder_running():
+        ctypes.windll.user32.MessageBoxW(None, "Der Lecture Recorder läuft gerade. Beide Programme steuern "
+                                         "dasselbe OBS, bitte ihn zuerst schließen.", TITLE, 0x30)
         return
     # Own taskbar identity, so a pinned Start menu entry with the same ID and the
     # running window share one taskbar button.
@@ -160,7 +175,7 @@ def main(test_func=None) -> None:
     # Closed by Windows (Alt+F4, taskbar) during a recording: keep it, like the close button does,
     # instead of leaving OBS recording with nobody to stop it.
     window.events.closing += lambda: core.finish(save=True)
-    if not os.environ.get("LECTURE_RECORDER_VISIBLE"):     # tests that take screenshots set this
+    if not os.environ.get("FLEX3_LIGHT_VISIBLE"):     # tests that take screenshots set this
         window.events.shown += lambda: threading.Thread(target=exclude_from_capture, daemon=True).start()
     if test_func:
         webview.start(test_func, window)

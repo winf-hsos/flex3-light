@@ -1,4 +1,4 @@
-"""Core of the lecture recorder, without user interface.
+"""Core of FLEX3 Light, without user interface.
 
 Holds the OBS connection, device selection, settings, global hotkeys, Alt+Tab
 detection and the split after stopping. The UI (recorder.py) polls status()
@@ -25,10 +25,10 @@ import obs_scene as scene
 import split
 from hotkeys import HOTKEY_PAUSE, GlobalKeys
 
-APP_DIR = Path(os.environ["APPDATA"]) / "lecture-recorder"
+APP_DIR = Path(os.environ["APPDATA"]) / "flex3-light"
 SETTINGS_FILE = APP_DIR / "settings.json"
 DEFAULT_ARCHIVE = Path.home() / "Videos" / "Lectures"
-DEFAULT_RAW = Path.home() / "Videos" / "lecture-recorder-raw"   # best outside any cloud-synced folder
+DEFAULT_RAW = Path.home() / "Videos" / "flex3-light-raw"   # best outside any cloud-synced folder
 
 # File names go into a German archive, so the suffixes stay German.
 SCREEN_SUFFIX, CAMERA_SUFFIX = "Bildschirm", "Kamera"
@@ -92,19 +92,16 @@ def load_settings() -> dict:
 
 
 def _migrate_old_settings() -> dict:
-    """One-off: take over the settings of the first (German-named) version."""
-    old = Path(os.environ["APPDATA"]) / "vorlesung-aufnahme" / "einstellungen.json"
+    """One-off: take over the settings of the lecture recorder this app was forked from.
+
+    The raw folder is not taken over, so the two apps never write into the same one.
+    """
+    old = Path(os.environ["APPDATA"]) / "lecture-recorder" / "settings.json"
     try:
-        o = json.loads(old.read_text(encoding="utf-8"))
+        s = json.loads(old.read_text(encoding="utf-8"))
     except Exception:
         return {}
-    keys = {"modul": "module", "bildschirm": "screen", "kamera": "camera", "mikrofon": "microphone",
-            "ablage": "archive_dir", "eingang": "raw_dir", "ohne_taskleiste": "hide_taskbar",
-            "alttab_ausblenden": "hide_alttab"}
-    s = {new: o[old_key] for old_key, new in keys.items() if old_key in o}
-    md = Path.home() / "OneDrive - HSOS" / "01 - Hochschule" / "_Wissensbasis" / "module.md"
-    if md.exists():
-        s["module_file"] = str(md)
+    s.pop("raw_dir", None)
     save_settings(s)
     return s
 

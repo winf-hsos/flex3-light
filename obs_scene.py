@@ -1,4 +1,4 @@
-"""OBS profile, scene and devices for lecture recordings.
+"""OBS profile, scene and devices for FLEX3 Light.
 
 Wide canvas of 3840x1200: the screen on the left, the webcam on the right,
 each fitted into a 1920x1200 field. split.py later cuts the recording into
@@ -14,7 +14,9 @@ from pathlib import Path
 import hardware
 import obs_remote as remote
 
-NAME = "Lecture"                    # OBS profile, scene collection and scene
+# OBS profile, scene collection and scene. The lecture recorder uses "Lecture". Letters and digits
+# only, because the profile folder that recordEncoder.json goes into is named after it.
+NAME = "FLEX3Light"
 SCREEN, CAMERA, MICROPHONE = "Screen", "Camera", "Microphone"
 FIELD_W, FIELD_H = 1920, 1200
 NO_CAMERA = "keine"                 # shown in the (German) user interface

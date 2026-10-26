@@ -1,4 +1,4 @@
-"""Set up the OBS profile and scene for lecture recordings and list the devices.
+"""Set up the OBS profile and scene of FLEX3 Light and list the devices.
 
     python tools/setup_obs.py
 

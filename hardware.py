@@ -2,7 +2,7 @@
 
 With an NVIDIA GPU both OBS and the split use NVENC. Without one they fall back
 to x264 on the CPU, which works everywhere but costs noticeably more CPU time.
-Set LECTURE_RECORDER_ENCODER=x264 to force the fallback (for testing).
+Set FLEX3_LIGHT_ENCODER=x264 to force the fallback (for testing).
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def ffmpeg() -> str:
 @functools.cache
 def nvenc() -> bool:
     """True if a short NVENC test encode succeeds."""
-    if os.environ.get("LECTURE_RECORDER_ENCODER", "").lower() == "x264":
+    if os.environ.get("FLEX3_LIGHT_ENCODER", "").lower() == "x264":
         return False
     r = subprocess.run([ffmpeg(), "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=640x360:d=0.2",
                         "-c:v", "h264_nvenc", "-f", "null", "-"], capture_output=True, creationflags=NO_WINDOW)
