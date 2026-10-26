@@ -26,6 +26,7 @@ While recording, the window shrinks to a slim bar that turns yellow when paused 
 - **A calm main window.** The setup window behaves like any other window; only the slim bar while recording and the save question stay on top. Options such as hiding the taskbar and Alt+Tab and the folders live in the settings behind the gear.
 - **The window itself is never recorded.** While recording it stays visible on your screen but is excluded from capture (`SetWindowDisplayAffinity`). Windows applies this to screenshots as well, so it is only switched on right before a recording starts and off again afterwards.
 - **The taskbar is left out** of the screen track by default, using the work area of the selected monitor.
+- **"Zeigen" shows which screen gets recorded**: a frame in the university's blue goes around exactly the recorded area for a few seconds, with a label in its middle, like "Identify" in the Windows display settings.
 - **The Alt+Tab overview is hidden.** The Windows task switcher cannot be excluded from capture, so the app logs when you press Alt+Tab and freezes the screen track for that moment afterwards, while audio and camera keep running.
 - **Pause and resume** with a button or a global hotkey.
 - **Save, continue or discard**: stopping first pauses the recording and asks what to do, so an accidental stop costs nothing. A discarded recording goes to the recycle bin.
@@ -107,6 +108,7 @@ Settings are stored in `%APPDATA%\flex3-light\settings.json`, the profile in `pr
 | `core.py` | Settings, device selection, recording state, hotkey handling |
 | `delivery.py` | Sessions with their manifest; background threads that process each one-minute segment, file the archive and upload to the server |
 | `server_client.py` | Client for the server's API, standard library only, with an optional bandwidth cap |
+| `identify.py` | Frames the recorded screen area for a moment (Tk, in a thread of its own) |
 | `preview.py` | Camera preview: OBS source screenshots as an MJPEG stream on 127.0.0.1 with a random token in the address |
 | `lecturer_profile.py` | The lecturer's modules: local copy, seeding on the first start, merge with the server entry by entry |
 | `tools/dev_server.py` | Runs the server on this computer and points the app at it |

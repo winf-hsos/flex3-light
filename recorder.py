@@ -60,6 +60,9 @@ class Api:
     def texts(self, module, topic):
         self._core.set_text(module or "", topic or "")
 
+    def identify_screen(self):
+        return self._core.identify_screen()
+
     def save_module(self, entry):
         return self._core.save_module(entry or {})
 

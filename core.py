@@ -19,6 +19,7 @@ import threading
 import time
 from pathlib import Path
 
+import identify
 import monitors                  # sets DPI awareness on import: physical pixels
 import obs_remote as remote
 import obs_scene as scene
@@ -224,6 +225,20 @@ class Core:
                 scene.ensure_profile_and_scene(self.o, self.raw_dir)
             self.apply_devices()
         self.save()
+
+    def identify_screen(self) -> str:
+        """Frame the area of the chosen screen that gets recorded for a moment; returns an error or ''."""
+        name = self.choice.get("screen", "")
+        m = monitors.match_obs_name(name)
+        if not m:
+            return "Dieser Bildschirm lässt sich nicht zuordnen."
+        g = m["margins"] if self.options["hide_taskbar"] else {"top": 0, "bottom": 0, "left": 0, "right": 0}
+        number = next((i + 1 for i, (n, _) in enumerate(self.devices["screen"]) if n == name), 1)
+        detail = " · ".join(filter(None, [name.split(":")[0].strip(), f"Bildschirm {number}",
+                                          "ohne Taskleiste" if self.options["hide_taskbar"] else ""]))
+        identify.show(m["x"] + g["left"], m["y"] + g["top"], m["width"] - g["left"] - g["right"],
+                      m["height"] - g["top"] - g["bottom"], "Dieser Bildschirm wird aufgenommen", detail)
+        return ""
 
     def save_module(self, entry: dict) -> str:
         """Add or change a module in the profile; returns an error message for the UI or ''."""

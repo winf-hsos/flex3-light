@@ -212,7 +212,7 @@
     <div class="fields">
       <div class="field"><label class="row-label">Modul<button class="link" onclick="openModules()">Module verwalten</button></label><input id="module" list="modules" placeholder="Modul wählen oder eintippen" onchange="sendTexts()"><datalist id="modules"></datalist></div>
       <div class="field"><label>Thema der Sitzung, optional</label><input id="topic" placeholder="geht in den Dateinamen" onchange="sendTexts()"></div>
-      <div class="device"><svg class="i"><use href="#i-screen"/></svg><div class="field"><label>Bildschirm</label><select id="screen" onchange="selectDevice(this)"></select></div></div>
+      <div class="device"><svg class="i"><use href="#i-screen"/></svg><div class="field"><label class="row-label">Bildschirm<button class="link" title="Zeigt kurz, welcher Bereich aufgenommen wird" onclick="identifyScreen()">Zeigen</button></label><select id="screen" onchange="selectDevice(this)"></select></div></div>
       <div class="device"><svg class="i"><use href="#i-camera"/></svg><div class="field"><label>Kamera</label><select id="camera" onchange="selectDevice(this)"></select></div></div>
       <div class="device"><svg class="i"><use href="#i-mic"/></svg><div class="field mic"><label>Mikrofon</label><select id="microphone" onchange="selectDevice(this)"></select><div class="meter" title="Mikrofonpegel"><div id="level1"></div></div></div></div>
     </div>
@@ -416,6 +416,10 @@
       + (st.profile_status === "no-profile" ? ". Dieser Zugang hat am Server kein Profil, die Module bleiben lokal." : "");
   }
 
+  async function identifyScreen() {
+    const error = await api().identify_screen();
+    if (error) showHint(error, "error");
+  }
   const selectDevice = el => api().select(el.id, el.value);
   const setOption = el => api().option(el.id, el.checked);
   const sendTexts = () => api().texts($("module").value, $("topic").value);
