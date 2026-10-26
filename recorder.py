@@ -37,7 +37,7 @@ APP_ID = "winf-hsos.Flex3Light"
 LECTURE_RECORDER_MUTEX = "Local\\LectureRecorder"
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))   # unpack folder of the packaged app
 FULL = (900, 440)           # fields left, camera preview right, record button and status below
-BAR = (480, 58)
+BAR = (530, 58)
 ASK = (560, 58)
 
 
@@ -91,6 +91,9 @@ class Api:
 
     def stop(self):
         self._core.stop()
+
+    def toggle_private(self):
+        self._core.toggle_private()
 
     def resume(self):
         self._core.resume()

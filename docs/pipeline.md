@@ -36,12 +36,12 @@ Each step records its state in `pipeline.json` in the folder: done or not, with 
 
 ## The steps
 
-### 1. Recording (exists)
+### 1. Recording (built, together with the session folder, on 2026-10-26)
 
-As today: screen, camera and microphone through OBS, a new file every minute. Two cheap additions during the recording, because they make the cut much easier and need no AI:
+Screen, camera and microphone through OBS, a new file every minute, filed as a session folder. Two cheap additions during the recording, because they make the cut much easier and need no AI (`activity.json` in the session folder, kept local because window titles can hold personal data):
 
 - **Activity log.** Every quarter second FLEX3 Light notes which program is in the foreground (process name and window title), as it already notes Alt+Tab. Afterwards it is known that Outlook was visible from 12:03 to 12:20, without sending a single frame anywhere.
-- **Privacy hotkey.** A hotkey freezes the screen track at once until it is pressed again, with the same freezing that hides Alt+Tab today. Preventing a sensitive picture is more reliable than finding it afterwards.
+- **Privacy key.** Ctrl+Alt+H or the eye button in the recording bar freezes the screen track at once until it is pressed again, with the same freezing that hides Alt+Tab. Preventing a sensitive picture is more reliable than finding it afterwards.
 
 **Why one-minute segments** (the question of 2026-10-26): they let FLEX3 Light process and upload the recording while it is still running, so that a long lecture is filed and on the server seconds after the stop instead of minutes later. They also limit what a crash can cost. OBS writes them at no extra cost; only the processing of each segment costs time. Under principle 3 that processing becomes adaptive: with NVENC and a calm processor it runs as today, on a weak laptop or on battery it waits until after the stop.
 
@@ -116,7 +116,7 @@ Streaming speech recognition during the lecture, shown in a transparent subtitle
 
 ## Order of work
 
-1. Local session folder with `session.json`, the activity log and the privacy hotkey. Useful at once, and the base for everything else.
+1. Local session folder with `session.json`, the activity log and the privacy key. Useful at once, and the base for everything else. Done on 2026-10-26; the program mix is now made for every recording, which adds some load per segment during the lecture until the adaptive processing of principle 3 is built.
 2. Transcription with alignment, word-list correction and subtitles.
 3. Chapters, short clips, YouTube and Opencast packages.
 4. AI content.

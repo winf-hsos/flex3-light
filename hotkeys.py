@@ -3,6 +3,7 @@
 Runs a Windows message loop in its own thread and reports to a queue:
     ("hotkey", 1)   Ctrl+Alt+R
     ("hotkey", 2)   Ctrl+Alt+P
+    ("hotkey", 3)   Ctrl+Alt+H   privacy: freeze the screen track until pressed again
     ("alttab", ("down" | "up", wall_clock_time))
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ import queue
 import threading
 import time
 
-HOTKEY_RECORD, HOTKEY_PAUSE = 1, 2
+HOTKEY_RECORD, HOTKEY_PAUSE, HOTKEY_PRIVATE = 1, 2, 3
 
 
 class GlobalKeys(threading.Thread):
@@ -26,7 +27,8 @@ class GlobalKeys(threading.Thread):
 
     def run(self) -> None:
         u = ctypes.windll.user32
-        for hid, vk, label in ((HOTKEY_RECORD, 0x52, "Strg+Alt+R"), (HOTKEY_PAUSE, 0x50, "Strg+Alt+P")):
+        for hid, vk, label in ((HOTKEY_RECORD, 0x52, "Strg+Alt+R"), (HOTKEY_PAUSE, 0x50, "Strg+Alt+P"),
+                               (HOTKEY_PRIVATE, 0x48, "Strg+Alt+H")):
             if not u.RegisterHotKey(None, hid, self.MODIFIERS, vk):
                 self.failed.append(label)
         self._install_alttab_hook(u)

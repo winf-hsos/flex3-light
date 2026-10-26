@@ -19,12 +19,13 @@ import threading
 import time
 from pathlib import Path
 
+import activity
 import identify
 import monitors                  # sets DPI awareness on import: physical pixels
 import obs_remote as remote
 import obs_scene as scene
 from delivery import Delivery
-from hotkeys import HOTKEY_PAUSE, GlobalKeys
+from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
 from preview import PreviewServer
 from server_client import ServerClient
@@ -134,6 +135,9 @@ class Core:
         self.session = None                       # delivery.Session while recording
         self.offset: float | None = None          # wall clock minus recording time
         self.alttab_start: float | None = None
+        self.private_start: float | None = None   # privacy key pressed at this recording time
+        self.rec_time = 0.0                       # recording time of the last status, also while paused
+        self.tracker: activity.Tracker | None = None
         self.stop_pressed = 0.0
         self.asking = False                       # stopped by the user, waiting for "save or discard"
         self.on_question = lambda: None           # set by the UI: bring the window back for the question
@@ -163,6 +167,7 @@ class Core:
         self.session = self.delivery.running()
         if self.session is not None:
             self.screen_size = tuple(self.session.data["screen_size"])
+            self.tracker = activity.Tracker(self.session.add_activity)
         with self.lock:
             if self.session is None:               # OBS cannot switch profiles while it records
                 scene.ensure_profile_and_scene(self.o, self.raw_dir)
@@ -311,7 +316,8 @@ class Core:
             self.delivery.forget(s)
             raise
         self.session = s
-        self.offset, self.alttab_start = None, None
+        self.tracker = activity.Tracker(s.add_activity)
+        self.offset, self.alttab_start, self.private_start = None, None, None
         self.message = ""
         return ""
 
@@ -349,6 +355,10 @@ class Core:
         """End the recording: archive and deliver it, or move it to the recycle bin (and off the server)."""
         if self.session is None:
             return
+        t = self._now()                           # close what is still open at the end of the recording
+        self._close_private(t)
+        if self.tracker:
+            self.tracker.close(t)
         with self.lock:
             self.o.request("StopRecord")
             # OBS refuses a new record directory until the output has really stopped.
@@ -359,6 +369,29 @@ class Core:
         s, self.session, self.asking = self.session, None, False
         self.delivery.stop(s, save)
         self.message = ""
+
+    def _now(self) -> float:
+        """Current recording time in seconds."""
+        return time.time() - self.offset if self.offset is not None else self.rec_time
+
+    def toggle_private(self) -> None:
+        """Privacy key (Ctrl+Alt+H or the button in the bar): freeze the screen track from now
+        until it is pressed again, while sound and camera go on, as for Alt+Tab."""
+        if self.session is None or self.asking:
+            return
+        if self.private_start is None:
+            self.private_start = self._now()
+            self.session.private_open = True     # no segment is cut until the span is known
+        else:
+            self._close_private(self._now())
+
+    def _close_private(self, t: float) -> None:
+        if self.private_start is None or self.session is None:
+            return
+        # shifted by the video delay like Alt+Tab, with half a second of margin on both sides
+        self.session.add_private(max(0.0, self.private_start + VIDEO_DELAY - 0.5), t + VIDEO_DELAY + 0.5)
+        self.private_start = None
+        self.session.private_open = False
 
     def _result(self) -> Path | None:
         s = self.delivery.latest()
@@ -405,6 +438,7 @@ class Core:
                 "time": self.obs_state["time"], "level": round(db, 1), "splitting": splitting,
                 "progress": round(progress, 3), "message": message, "message_kind": kind,
                 "has_result": bool(info and info["screen"]), "hotkey_errors": list(self.keys.failed),
+                "private": self.private_start is not None,
                 "connection": self.delivery.connection(), "profile_status": self.profile.status,
                 "profile_pending": self.profile.dirty() and self.delivery.connection() != "local",
                 "profile_stamp": f"{self.profile.data['revision']}-{self.profile.data['synced_at']}"}
@@ -416,6 +450,12 @@ class Core:
                     with self.lock:
                         st = self.o.request("GetRecordStatus")
                     self.offset = None if st["outputPaused"] else time.time() - st["outputDuration"] / 1000
+                    self.rec_time = st["outputDuration"] / 1000
+                    if self.tracker:                  # which program is in front, for the cut agent
+                        if self.offset is None:
+                            self.tracker.close(self.rec_time)
+                        else:
+                            self.tracker.sample(self.rec_time)
                     self.obs_state = {"paused": st["outputPaused"], "time": st["outputTimecode"].split(".")[0]}
                 while not self.events.empty():
                     self._handle(*self.events.get())
@@ -432,6 +472,8 @@ class Core:
         if kind == "hotkey":
             if value == HOTKEY_PAUSE:
                 self.pause()
+            elif value == HOTKEY_PRIVATE:
+                self.toggle_private()
             elif self.session is None:
                 error = self.start()
                 if error:

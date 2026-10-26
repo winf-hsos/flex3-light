@@ -35,17 +35,20 @@ VERSION = "0.1.0"
 SEGMENT_MINUTES = 1         # OBS splits the recording this often
 SETTLE = 3.0                # a finished segment must be untouched this long before it is read
 RETRY = (5, 15, 30, 60)     # seconds between attempts while the server is unreachable
-# File names go into a German archive, so the suffixes stay German.
-SCREEN_SUFFIX, CAMERA_SUFFIX = "Bildschirm", "Kamera"
+# File names in a session folder, as the FLEX3 contract has them.
+TRACK_FILES = {"mix": "recording.mp4", "screen": "screen.mp4", "camera": "camera.mp4"}
 
 
 # ------------------------------------------------------------------ helpers
 
-def free_path(path: Path) -> Path:
+def free_dir(path: Path) -> Path:
+    """path, or "path (2)" and so on if it exists; created empty. A name like "Kapitel 2.4"
+    keeps its dot."""
     n, p = 2, path
     while p.exists():
-        p = path.with_name(f"{path.stem} ({n}){path.suffix}")
+        p = path.with_name(f"{path.name} ({n})")
         n += 1
+    p.mkdir(parents=True)
     return p
 
 
@@ -106,6 +109,15 @@ def session_metadata(session_id: str, module: dict, topic: str, started: dt.date
     return meta
 
 
+def session_document(s: "Session") -> dict:
+    """The complete session.json of a recording: metadata, net duration and the extra tracks."""
+    tracks = [{"file": TRACK_FILES["screen"], "kind": "screen"}]
+    if s.data["camera"]:
+        tracks.append({"file": TRACK_FILES["camera"], "kind": "camera"})
+    return {**s.data["meta"], "duration_sec": round(sum(x["duration"] for x in s.data["segments"])),
+            "tracks": tracks}
+
+
 # ------------------------------------------------------------------ session
 
 class Session:
@@ -115,6 +127,7 @@ class Session:
         self.folder, self.data = folder, data
         self.lock = threading.RLock()
         self.alttab_open = False          # Alt+Tab held right now: wait before cutting a segment
+        self.private_open = False         # privacy key pressed and not released: wait as well
 
     @property
     def id(self) -> str:
@@ -132,7 +145,12 @@ class Session:
         return self.parts_dir / f"{index:04d}-{track}.mp4"
 
     def tracks(self) -> list[str]:
-        return ["screen"] + (["camera"] if self.data["camera"] else []) + (["mix"] if self.data["deliver"] else [])
+        """Screen, camera if there is one, and the program mix that the session folder always holds."""
+        return ["screen"] + (["camera"] if self.data["camera"] else []) + ["mix"]
+
+    def freeze_spans(self) -> list[list[float]]:
+        """Spans where the screen track stands still: Alt+Tab (if hidden) and the privacy key."""
+        return (self.data["alttab"] if self.data["hide_alttab"] else []) + self.data.get("private", [])
 
     def save(self) -> None:
         with self.lock:
@@ -143,6 +161,18 @@ class Session:
     def add_span(self, a: float, b: float) -> None:
         with self.lock:
             self.data["alttab"].append([a, b])
+            self.save()
+
+    def add_private(self, a: float, b: float) -> None:
+        """A span the lecturer froze with the privacy key."""
+        with self.lock:
+            self.data.setdefault("private", []).append([a, b])
+            self.save()
+
+    def add_activity(self, start: float, end: float, process: str, title: str) -> None:
+        """Which program was in front from start to end (recording time); for the cut agent."""
+        with self.lock:
+            self.data.setdefault("activity", []).append([round(start, 2), round(end, 2), process, title])
             self.save()
 
 
@@ -216,7 +246,7 @@ class Delivery:
     def stop(self, s: Session, save: bool) -> None:
         with s.lock:
             s.data["state"] = "stopped" if save else "discarded"
-            s.alttab_open = False
+            s.alttab_open = s.private_open = False
             s.save()
         self.wake.set()
 
@@ -324,8 +354,8 @@ class Delivery:
             last = f == files[-1]
             if (last and s.data["state"] == "recording") or time.time() - f.stat().st_mtime < SETTLE:
                 return False                       # OBS is still writing it
-            if s.alttab_open:
-                return False                       # its Alt+Tab span is not known yet
+            if s.alttab_open or s.private_open:
+                return False                       # its freeze span is not known yet
             start = sum(x["duration"] for x in segs)
             with s.lock:
                 segs.append({"raw": f.name, "start": start, "duration": split.duration(f), "processed": False,
@@ -334,8 +364,7 @@ class Delivery:
             pending = len(segs) - 1
         seg = segs[pending]
         a0, d = seg["start"], seg["duration"]
-        spans = [(max(0.0, a - a0), min(d, b - a0)) for a, b in s.data["alttab"] if b > a0 and a < a0 + d] \
-            if s.data["hide_alttab"] else []
+        spans = [(max(0.0, a - a0), min(d, b - a0)) for a, b in s.freeze_spans() if b > a0 and a < a0 + d]
         tracks = s.tracks()
         s.parts_dir.mkdir(exist_ok=True)
         split.split_recording(s.raw_dir / seg["raw"], s.part(pending, "screen"),
@@ -351,7 +380,13 @@ class Delivery:
         return True
 
     def _archive(self, s: Session) -> bool:
-        """After the stop: join the parts into the local archive, then drop the raw segments."""
+        """After the stop: write the session folder in the archive, then drop the raw segments.
+
+        One folder per recording (<archive>\\<term>\\<module>\\<date> - <topic>), with the file
+        names of the FLEX3 contract, so the pipeline and later the server work on the same
+        kind of folder: recording.mp4 (program mix), screen.mp4, camera.mp4, session.json, and
+        activity.json for the cut agent.
+        """
         segs = s.data["segments"]
         if any(not x["processed"] for x in segs):
             return False
@@ -360,15 +395,21 @@ class Delivery:
         if not segs:
             raise RuntimeError("OBS hat keine Datei geschrieben")
         a = s.data["archive"]
-        folder = Path(a["folder"])
-        screen = free_path(folder / f"{a['stem']} - {SCREEN_SUFFIX}.mp4")
-        split.join([s.part(i, "screen") for i in range(len(segs))], screen)
-        camera = None
-        if s.data["camera"]:
-            camera = free_path(folder / f"{a['stem']} - {CAMERA_SUFFIX}.mp4")
-            split.join([s.part(i, "camera") for i in range(len(segs))], camera)
+        folder = free_dir(Path(a["folder"]) / a["stem"])
+        for track in s.tracks():
+            split.join([s.part(i, track) for i in range(len(segs))], folder / TRACK_FILES[track])
+        (folder / "session.json").write_text(json.dumps(session_document(s), ensure_ascii=False, indent=2),
+                                             encoding="utf-8")
+        if s.data.get("activity"):
+            (folder / "activity.json").write_text(json.dumps(
+                {"note": "Program in front during the recording: [start, end, process, window title], "
+                         "seconds of recording time. Local only, for the cut agent.",
+                 "activity": s.data["activity"], "private": s.data.get("private", [])},
+                ensure_ascii=False, indent=1), encoding="utf-8")
         with s.lock:
-            a["screen"], a["camera"] = str(screen), str(camera) if camera else None
+            a["session_folder"] = str(folder)
+            a["screen"] = str(folder / TRACK_FILES["screen"])
+            a["camera"] = str(folder / TRACK_FILES["camera"]) if s.data["camera"] else None
             s.data["state"] = "archived"
             s.save()
         shutil.rmtree(s.raw_dir, ignore_errors=True)
@@ -459,7 +500,7 @@ class Delivery:
         if any(set(x["sha256"]) - set(x["uploaded"]) for x in segs):
             return False
         n = len(segs)
-        meta = {**s.data["meta"], "duration_sec": round(sum(x["duration"] for x in segs))}
+        meta = session_document(s)
         state = self.client.complete(s.id, meta, {t: n for t in s.tracks()})
         while state == "assembling":
             time.sleep(2)

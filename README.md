@@ -29,8 +29,9 @@ While recording, the window shrinks to a slim bar that turns yellow when paused 
 - **"Zeigen" shows which screen gets recorded**: a frame in the university's blue goes around exactly the recorded area for a few seconds, with a label in its middle, like "Identify" in the Windows display settings.
 - **The Alt+Tab overview is hidden.** The Windows task switcher cannot be excluded from capture, so the app logs when you press Alt+Tab and freezes the screen track for that moment afterwards, while audio and camera keep running.
 - **Pause and resume** with a button or a global hotkey.
+- **Privacy key**: the button with the crossed-out eye in the recording bar, or **Ctrl+Alt+H**, freezes the screen track until it is pressed again, while sound and camera go on. Press it before opening mail or a folder that should not end up in the recording.
 - **Save, continue or discard**: stopping first pauses the recording and asks what to do, so an accidental stop costs nothing. A discarded recording goes to the recycle bin.
-- **Two MP4 files per session**, for example `2026-10-09 - Regression - Bildschirm.mp4` and `… - Kamera.mp4`, filed under `<archive>\<term>\<module>\`. Both tracks share the same audio and start at the same instant, so they can be placed side by side in an editor without syncing.
+- **One folder per recording**, `<archive>\<term>\<module>\<date> - <topic>\`, laid out like a FLEX3 session folder: `screen.mp4` and `camera.mp4` (both with the same audio and starting at the same instant, so they can be placed side by side in an editor without syncing), `recording.mp4` (program mix, the screen with the webcam small in a corner), `session.json` (module, language, date, duration and tracks) and `activity.json` (which program was in front when, and the spans frozen with the privacy key). The pipeline of [docs/pipeline.md](docs/pipeline.md) will add transcript, subtitles and the rest to the same folder. `activity.json` holds window titles and stays local.
 - **Done when you stop.** OBS starts a new file every minute, and each finished minute is split in the background while the lecture goes on. After the stop only the last minute is left, so even a three-hour lecture is filed within seconds.
 - **Delivery to the FLEX3 Light server** (`server/`), also during the lecture: each processed minute is uploaded right away, including a program mix in 1920×1080 for the FLEX3 pipeline, and the server builds a session folder after the FLEX3 contract once the recording is complete. Without a configured server, recordings are only filed locally.
 - **Modules come from the lecturer's profile.** "Module verwalten" in the window lists the modules with code, language and optionally ILIAS course and Opencast series. The profile is kept locally and synced with the server, so every device of the same lecturer offers the same list, also after changes made offline. On the first start it takes over the module folders of the current term in the archive and an optional Markdown list (`module_file`); a module typed in when recording joins the profile on its own.
@@ -77,7 +78,7 @@ It bundles the ffmpeg from your `PATH` and writes `dist/flex3-light.exe` (about 
 1. Pick or type the module and optionally a topic for the session; both go into the file name.
 2. Check screen, camera and microphone, watch the level bar and the camera preview.
 3. Click **Aufnahme starten** or press **Ctrl+Alt+R**. The window shrinks to a bar at the top of the screen.
-4. Pause and resume with the pause button or **Ctrl+Alt+P**.
+4. Pause and resume with the pause button or **Ctrl+Alt+P**; freeze the screen picture with the eye button or **Ctrl+Alt+H**.
 5. Stop with the stop button, or press **Ctrl+Alt+R** twice within three seconds (the double press protects against stopping a lecture with a stray keystroke). The recording is paused and the bar asks whether to save it: **Speichern** files it, **Weiter** continues recording, and **Verwerfen** (click twice) moves the raw file to the recycle bin.
 
 While recording, every finished one-minute segment is split into screen and camera (and the program mix, if a server is configured) at low priority, so it never slows OBS down. After stopping, the last segment follows, the parts are joined into the two MP4 files without re-encoding, and the raw segments are deleted only once the result has been checked to be as long as the parts. If anything fails, the raw segments are kept. Closing the window during a recording keeps it as well; if the app ends before the recording is filed, it continues at the next start. **Verwerfen** also deletes whatever was already uploaded.
@@ -109,6 +110,7 @@ Settings are stored in `%APPDATA%\flex3-light\settings.json`, the profile in `pr
 | `core.py` | Settings, device selection, recording state, hotkey handling |
 | `delivery.py` | Sessions with their manifest; background threads that process each one-minute segment, file the archive and upload to the server |
 | `server_client.py` | Client for the server's API, standard library only, with an optional bandwidth cap |
+| `activity.py` | Which program is in front during a recording, merged into spans for the cut agent |
 | `identify.py` | Frames the recorded screen area for a moment (Tk, in a thread of its own) |
 | `preview.py` | Camera preview: OBS source screenshots as an MJPEG stream on 127.0.0.1 with a random token in the address |
 | `lecturer_profile.py` | The lecturer's modules: local copy, seeding on the first start, merge with the server entry by entry |

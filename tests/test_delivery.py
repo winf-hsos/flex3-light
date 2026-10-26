@@ -95,9 +95,14 @@ def test_session_is_archived_and_delivered(tmp_path, server, segments):
     d.stop(s, save=True)
     wait_for(lambda: s.data["state"] == "done")
     a = s.data["archive"]
-    assert Path(a["screen"]).name == f"{s.id[:10]} - Schleifen - Bildschirm.mp4"
-    assert abs(split.duration(Path(a["screen"])) - 9) < 0.5
-    assert abs(split.duration(Path(a["camera"])) - 9) < 0.5
+    local = Path(a["session_folder"])                # one folder per recording in the archive
+    assert local == tmp_path / "archive" / f"{s.id[:10]} - Schleifen"
+    assert sorted(p.name for p in local.iterdir()) == ["camera.mp4", "recording.mp4", "screen.mp4", "session.json"]
+    for name in ("screen.mp4", "camera.mp4", "recording.mp4"):
+        assert abs(split.duration(local / name) - 9) < 0.5
+    local_meta = json.loads((local / "session.json").read_text(encoding="utf-8"))
+    assert local_meta["session_id"] == s.id and local_meta["duration_sec"] == 9
+    assert local_meta["tracks"] == [{"file": "screen.mp4", "kind": "screen"}, {"file": "camera.mp4", "kind": "camera"}]
     folder = data / "sessions" / s.id
     assert sorted(p.name for p in folder.iterdir()) == ["camera.mp4", "recording.mp4", "screen.mp4", "session.json"]
     meta = json.loads((folder / "session.json").read_text(encoding="utf-8"))
@@ -127,9 +132,38 @@ def test_without_server_only_archives(tmp_path, segments):
     s = begin(d, tmp_path / "archive", camera=False)
     (s.raw_dir / segments[0].name).write_bytes(segments[0].read_bytes())
     os.utime(s.raw_dir / segments[0].name, (time.time() - 10,) * 2)
+    s.add_private(1.0, 2.0)
+    s.add_activity(0.0, 1.0, "OUTLOOK.EXE", "Posteingang")
+    s.add_activity(1.0, 3.0, "POWERPNT.EXE", "Folien")
     d.stop(s, save=True)
     wait_for(lambda: s.data["state"] == "done")
-    assert [p.name for p in (tmp_path / "archive").iterdir()] == [f"{s.id[:10]} - Schleifen - Bildschirm.mp4"]
+    local = tmp_path / "archive" / f"{s.id[:10]} - Schleifen"
+    assert [p.name for p in (tmp_path / "archive").iterdir()] == [local.name]
+    assert sorted(p.name for p in local.iterdir()) == ["activity.json", "recording.mp4", "screen.mp4", "session.json"]
+    assert json.loads((local / "session.json").read_text(encoding="utf-8"))["tracks"] == [
+        {"file": "screen.mp4", "kind": "screen"}]
+    activity = json.loads((local / "activity.json").read_text(encoding="utf-8"))
+    assert activity["activity"][0][2] == "OUTLOOK.EXE" and activity["private"] == [[1.0, 2.0]]
+
+
+def test_privacy_freezes_the_screen(tmp_path, segments):
+    """Within a span frozen with the privacy key, the screen track shows one still picture."""
+    d = delivery.Delivery(tmp_path / "raw").start()
+    s = begin(d, tmp_path / "archive", camera=False)
+    (s.raw_dir / segments[0].name).write_bytes(segments[0].read_bytes())
+    os.utime(s.raw_dir / segments[0].name, (time.time() - 10,) * 2)
+    s.add_private(1.0, 2.5)
+    d.stop(s, save=True)
+    wait_for(lambda: s.data["state"] == "done")
+    screen = Path(s.data["archive"]["screen"])
+
+    def frame(t):
+        return subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(screen), "-frames:v", "1",
+                               "-f", "rawvideo", "-pix_fmt", "gray", "-s", "64x36", "-"],
+                              stdin=subprocess.DEVNULL, capture_output=True).stdout
+
+    assert frame(1.3) == frame(2.2)               # frozen: the test picture moves everywhere else
+    assert frame(0.3) != frame(0.6)
 
 
 def test_stop_right_after_the_last_segment_was_written(tmp_path, segments):
@@ -148,6 +182,7 @@ def test_stop_right_after_the_last_segment_was_written(tmp_path, segments):
     wait_for(lambda: s.data["state"] == "done")
     assert len(s.data["segments"]) == 3
     assert abs(split.duration(Path(s.data["archive"]["screen"])) - 9) < 0.5
+    assert abs(split.duration(Path(s.data["archive"]["session_folder"]) / "recording.mp4") - 9) < 0.5
 
 
 def test_unreachable_server_keeps_everything_and_resumes(tmp_path, server, segments):
