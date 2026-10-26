@@ -10,7 +10,7 @@ Receives recordings from FLEX3 Light piece by piece while the lecture is still r
 
 ## API
 
-Every request carries `Authorization: Bearer <token>`. The token decides the `device_id`, and a session belongs to the device that opened it.
+Every request carries `Authorization: Bearer <token>`. The token decides the `device_id` and the lecturer (one token per person and device), and a session belongs to the device that opened it. On completion the server sets `device_id`, `instructor_id` and `instructor_name` in `session.json` from the token, whatever the device sent.
 
 | Request | Purpose |
 |---|---|
@@ -19,6 +19,12 @@ Every request carries `Authorization: Bearer <token>`. The token decides the `de
 | `PUT /sessions/{id}/parts/{track}/{n}` | part `n` of `mix`, `screen` or `camera`; body is the MP4, `X-Content-SHA256` its hash. A part sent twice replaces itself |
 | `POST /sessions/{id}/complete` | `{"session": {...session.json...}, "parts": {"mix": n, "screen": n, "camera": n}}`; answers 202 and joins the parts in the background |
 | `DELETE /sessions/{id}` | throws away a session that is not complete, for "Verwerfen" in the app |
+| `GET /profile` | the lecturer's profile: `user_id`, `user_name` and the modules |
+| `POST /profile/sync` | `{"modules": [...]}`: merges the device's entries and returns all of them |
+
+### Profiles
+
+A profile holds the modules a lecturer records, so that every device of that person offers the same list. Each module is an entry with `id`, `name` (also the folder in the local archive), `code` (used in the session id), `language`, optionally `ilias_course_id` and `opencast_series_id`, plus `updated_at` and `deleted`. Devices work offline on a local copy and send all their entries when they reach the server; the merge goes entry by entry, the newer change wins, and a deleted entry stays as a tombstone so that an old copy on another device cannot bring it back. The app (`lecturer_profile.py`) merges with the same rule (`profiles.py`), checked by a test. A module with both ILIAS course and Opencast series makes its sessions arrive as `assigned`.
 
 Joining copies the streams without re-encoding (ffmpeg concat demuxer, `-c copy`) and checks that every track is as long as its parts. The session folder appears under `sessions/` only when it is complete; until then everything stays under `incoming/`. If joining fails, the session goes back to `open` with an `error`, and the client can complete it again.
 
@@ -30,7 +36,9 @@ Requirements: Python 3.10 or later and ffmpeg on the `PATH`.
 pip install -r server/requirements.txt
 ```
 
-The tokens live in a JSON file that maps each token to a device id, for example `{"<long random token>": "flex3-light-pc1234"}`. It is never logged and does not belong in the repository.
+The tokens live in a JSON file that maps each token to a device and a lecturer, for example `{"<long random token>": {"device_id": "flex3-light-pc1234", "user_id": "jdoe", "user_name": "Jane Doe"}}`. A plain string as value is a device without a lecturer, which can deliver recordings but has no profile. The file is never logged and does not belong in the repository.
+
+To try it on your own computer, `python tools/dev_server.py --configure` creates a token for you, writes server address and token into FLEX3 Light's settings (close the app first), and `python tools/dev_server.py` runs the server on `127.0.0.1:8765` with its data in `%LOCALAPPDATA%\flex3-light-devserver`. Stop it to see the app work offline; `--unconfigure` goes back to recording locally only.
 
 ```bash
 FLEX3_LIGHT_SERVER_DATA=/srv/flex3-light FLEX3_LIGHT_SERVER_TOKENS=/etc/flex3-light/tokens.json uvicorn --app-dir server flex3_light_server.app:app_from_env --factory --host 0.0.0.0 --port 8000
@@ -48,4 +56,4 @@ pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 
-`tests/test_server.py` covers the API, `tests/test_delivery.py` the whole way from synthetic OBS segments through the app's background processing to a running server.
+`tests/test_server.py` covers the API, `tests/test_delivery.py` the whole way from synthetic OBS segments through the app's background processing to a running server, and `tests/test_profile.py` the profile: seeding, offline changes, two devices of one lecturer, and the same merge rule in app and server.

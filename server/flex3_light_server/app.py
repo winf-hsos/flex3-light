@@ -5,15 +5,19 @@
     PUT    /sessions/{id}/parts/{track}/{n}    one part of a track, body is the MP4, X-Content-SHA256 its hash
     POST   /sessions/{id}/complete             session.json and the number of parts per track
     DELETE /sessions/{id}                      throw away a session that is not complete
+    GET    /profile                            the lecturer's profile: who, and the modules
+    POST   /profile/sync                       {"modules": [...]}: merge the device's entries, return all
 
-Every request carries "Authorization: Bearer <token>"; the token decides the device_id.
-On completion the parts of each track are joined without re-encoding into a session
-folder after the FLEX3 contract: recording.mp4 (program mix), screen.mp4, camera.mp4 and
-session.json. Nothing is confirmed before the folder is complete.
+Every request carries "Authorization: Bearer <token>". The token decides the device_id
+and the lecturer it belongs to (one token per person and device). On completion the
+parts of each track are joined without re-encoding into a session folder after the
+FLEX3 contract: recording.mp4 (program mix), screen.mp4, camera.mp4 and session.json.
+Nothing is confirmed before the folder is complete.
 
 Configuration from the environment:
-    FLEX3_LIGHT_SERVER_DATA     data folder (incoming/ and sessions/ below it)
-    FLEX3_LIGHT_SERVER_TOKENS   JSON file {"<token>": "<device_id>", ...}
+    FLEX3_LIGHT_SERVER_DATA     data folder (incoming/, sessions/ and profiles/ below it)
+    FLEX3_LIGHT_SERVER_TOKENS   JSON file {"<token>": {"device_id": "...", "user_id": "...", "user_name": "..."}}
+                                (a plain "<device_id>" as value is a device without a profile)
 """
 from __future__ import annotations
 
@@ -30,6 +34,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from . import profiles
 from .assemble import join
 
 logger = logging.getLogger(__name__)
@@ -43,26 +48,30 @@ REQUIRED = ("session_id", "status", "recorded_at", "duration_sec", "language", "
 MAX_PARTS = 10000
 
 
-def create_app(data_dir: Path, tokens: dict[str, str]) -> FastAPI:
+def create_app(data_dir: Path, tokens: dict[str, str | dict]) -> FastAPI:
     data_dir = Path(data_dir)
-    incoming, sessions = data_dir / "incoming", data_dir / "sessions"
-    incoming.mkdir(parents=True, exist_ok=True)
-    sessions.mkdir(parents=True, exist_ok=True)
+    incoming, sessions, profile_dir = data_dir / "incoming", data_dir / "sessions", data_dir / "profiles"
+    for d in (incoming, sessions, profile_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    identities = {t: v if isinstance(v, dict) else {"device_id": v} for t, v in tokens.items()}
     locks: dict[str, threading.Lock] = {}
     locks_guard = threading.Lock()
     app = FastAPI(title="FLEX3 Light server")
 
-    def lock(sid: str) -> threading.Lock:
+    def lock(key: str) -> threading.Lock:
         with locks_guard:
-            return locks.setdefault(sid, threading.Lock())
+            return locks.setdefault(key, threading.Lock())
 
-    def device(request: Request) -> str:
-        """The device_id that belongs to the bearer token; compared in constant time."""
+    def identity(request: Request) -> dict:
+        """Device and lecturer that belong to the bearer token; compared in constant time."""
         given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-        for token, device_id in tokens.items():
+        for token, who in identities.items():
             if given and hmac.compare_digest(given.encode(), token.encode()):
-                return device_id
+                return who
         raise HTTPException(401, "unknown token")
+
+    def device(who: dict = Depends(identity)) -> str:
+        return who["device_id"]
 
     def folder(sid: str) -> Path:
         if not SESSION_ID.match(sid):
@@ -147,7 +156,8 @@ def create_app(data_dir: Path, tokens: dict[str, str]) -> FastAPI:
         return {"received": index}
 
     @app.post("/sessions/{sid}/complete")
-    def complete(sid: str, body: dict, device_id: str = Depends(device)):
+    def complete(sid: str, body: dict, who: dict = Depends(identity)):
+        device_id = who["device_id"]
         folder(sid)
         with lock(sid):
             state = owned(sid, device_id)
@@ -169,10 +179,11 @@ def create_app(data_dir: Path, tokens: dict[str, str]) -> FastAPI:
                 raise HTTPException(409, {"missing": gaps})
             state.update(state="assembling", error=None)
             write_state(sid, state)
-        threading.Thread(target=assemble, args=(sid, session, counts, device_id), daemon=True).start()
+        threading.Thread(target=assemble, args=(sid, session, counts, who), daemon=True).start()
         return JSONResponse({"state": "assembling"}, status_code=202)
 
-    def assemble(sid: str, session: dict, counts: dict, device_id: str) -> None:
+    def assemble(sid: str, session: dict, counts: dict, who: dict) -> None:
+        device_id = who["device_id"]
         d = incoming / sid
         out = d / "out"
         try:
@@ -186,6 +197,8 @@ def create_app(data_dir: Path, tokens: dict[str, str]) -> FastAPI:
                 if track in TRACK_KINDS:
                     tracks.append({"file": TRACK_FILES[track], "kind": TRACK_KINDS[track]})
             session = {**session, "device_id": device_id}
+            if who.get("user_id"):        # the server knows who recorded, whatever the device claims
+                session.update(instructor_id=who["user_id"], instructor_name=who.get("user_name", ""))
             if tracks:
                 session["tracks"] = tracks
             (out / "session.json").write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -211,6 +224,45 @@ def create_app(data_dir: Path, tokens: dict[str, str]) -> FastAPI:
             shutil.rmtree(d)
             logger.info("Deleted session %s", sid)
         return {"state": "deleted"}
+
+    # ---------------------------------------------------------- profiles
+
+    def lecturer(who: dict = Depends(identity)) -> dict:
+        if not who.get("user_id"):
+            raise HTTPException(403, "this token belongs to no lecturer")
+        return who
+
+    def profile_file(user_id: str) -> Path:
+        return profile_dir / f"{hashlib.sha256(user_id.encode()).hexdigest()[:32]}.json"
+
+    def load_profile(user_id: str) -> dict[str, dict]:
+        try:
+            return {e["id"]: e for e in json.loads(profile_file(user_id).read_text(encoding="utf-8"))["modules"]}
+        except FileNotFoundError:
+            return {}
+
+    def answer(who: dict, modules: dict[str, dict]) -> dict:
+        return {"user_id": who["user_id"], "user_name": who.get("user_name", ""),
+                "modules": sorted(modules.values(), key=lambda e: e["id"])}
+
+    @app.get("/profile")
+    def get_profile(who: dict = Depends(lecturer)):
+        return answer(who, load_profile(who["user_id"]))
+
+    @app.post("/profile/sync")
+    def sync_profile(body: dict, who: dict = Depends(lecturer)):
+        try:
+            entries = [profiles.clean(e) for e in body.get("modules") or []]
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        with lock("profile:" + who["user_id"]):
+            merged = profiles.merge(load_profile(who["user_id"]), entries)
+            f = profile_file(who["user_id"])
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"user_id": who["user_id"], "modules": list(merged.values())},
+                                      ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(tmp, f)
+        return answer(who, merged)
 
     return app
 

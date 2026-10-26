@@ -34,9 +34,14 @@ def clips(tmp_path_factory):
     return [clip(d / f"{i}.mp4", 2, 440) for i in range(3)]
 
 
+LAPTOP, OFFICE = "laptop-token", "office-token"
+
+
 @pytest.fixture
 def server(tmp_path):
-    app = create_app(tmp_path, {TOKEN: "flex3-light-test", OTHER: "flex3-light-other"})
+    app = create_app(tmp_path, {TOKEN: "flex3-light-test", OTHER: "flex3-light-other",
+                                LAPTOP: {"device_id": "flex3-light-laptop", "user_id": "lecturer1", "user_name": "Lecturer One"},
+                                OFFICE: {"device_id": "flex3-light-office", "user_id": "lecturer1", "user_name": "Lecturer One"}})
     return TestClient(app), tmp_path
 
 
@@ -148,3 +153,57 @@ def test_delete_open_session(server, clips):
     assert client.delete(f"/sessions/{SID}", headers=AUTH).json() == {"state": "deleted"}
     assert not (data / "incoming" / SID).exists()
     assert client.delete(f"/sessions/{SID}", headers=AUTH).json() == {"state": "deleted"}
+
+
+# ------------------------------------------------------------------ profiles
+
+def module(mid, name, t, **extra):
+    return {"id": mid, "name": name, "code": extra.pop("code", ""), "language": extra.pop("language", "de"),
+            "updated_at": t, "deleted": extra.pop("deleted", False), **extra}
+
+
+def sync(client, token, modules):
+    r = client.post("/profile/sync", headers={"Authorization": f"Bearer {token}"}, json={"modules": modules})
+    assert r.status_code == 200, r.text
+    return {e["id"]: e for e in r.json()["modules"]}
+
+
+def test_profile_merges_two_devices(server):
+    client, _ = server
+    sync(client, LAPTOP, [module("m1", "Digitalisierung", 1, code="dup")])
+    # the office PC was offline and changed the same module later, and added one
+    got = sync(client, OFFICE, [module("m1", "Digitalisierung und Programmierung", 2, code="dup"),
+                                module("m2", "Applications of AI", 2, code="aai", language="en")])
+    assert got["m1"]["name"] == "Digitalisierung und Programmierung" and got["m2"]["language"] == "en"
+    # the laptop still sends its older state: the newer change stays
+    got = sync(client, LAPTOP, [module("m1", "Digitalisierung", 1, code="dup")])
+    assert got["m1"]["name"] == "Digitalisierung und Programmierung"
+    # a deletion stays as a tombstone and is not brought back by an old copy
+    sync(client, LAPTOP, [module("m2", "", 3, deleted=True)])
+    got = sync(client, OFFICE, [module("m2", "Applications of AI", 2, code="aai")])
+    assert got["m2"]["deleted"] is True
+    r = client.get("/profile", headers={"Authorization": f"Bearer {OFFICE}"}).json()
+    assert r["user_id"] == "lecturer1" and r["user_name"] == "Lecturer One" and len(r["modules"]) == 2
+
+
+def test_profile_needs_a_lecturer_and_valid_entries(server):
+    client, _ = server
+    assert client.get("/profile", headers=AUTH).status_code == 403          # a device token without a person
+    bad = client.post("/profile/sync", headers={"Authorization": f"Bearer {LAPTOP}"},
+                      json={"modules": [module("m1", "X", 1, code="Not Valid")]})
+    assert bad.status_code == 422
+
+
+def test_complete_names_the_lecturer(server, clips):
+    client, data = server
+    auth = {"Authorization": f"Bearer {LAPTOP}"}
+    client.put(f"/sessions/{SID}", headers=auth)
+    put(client, "mix", 0, clips[0], headers=auth)
+    s = {**session_json(), "instructor_id": "someone-else"}
+    client.post(f"/sessions/{SID}/complete", headers=auth, json={"session": s, "parts": {"mix": 1}})
+    end = time.time() + 60
+    while not (data / "sessions" / SID / "session.json").exists() and time.time() < end:
+        time.sleep(0.2)
+    meta = json.loads((data / "sessions" / SID / "session.json").read_text(encoding="utf-8"))
+    assert (meta["instructor_id"], meta["instructor_name"], meta["device_id"]) == \
+        ("lecturer1", "Lecturer One", "flex3-light-laptop")
