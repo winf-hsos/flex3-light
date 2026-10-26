@@ -36,6 +36,8 @@ Folders wait in a local outbox (`%USERPROFILE%\Videos\flex3-light-outbox\<sessio
 
 Nicolas decided on 2026-10-26 that the server receiving the recordings is developed in this repository as well (`server/`).
 
+**Built on 2026-10-26:** `delivery.py`, `server_client.py` and `server/`, with tests in `tests/`. A real recording of 2:30 with OBS, a 10-second pause and an Alt+Tab was filed and on the server 33 seconds after the stop, with all three tracks 140.9 seconds long; the first minute was processed and uploaded 20 seconds after it ended, while OBS kept recording. The sections below describe the design as built.
+
 A lecture of 180 minutes must not end with minutes of converting and uploading after the stop button. FLEX3 Light therefore processes and delivers the recording **piece by piece while it is running**, so that only the last minute is left when the lecturer stops.
 
 ### On the laptop
@@ -49,7 +51,7 @@ At the stop only the last segment is left: OBS closes it, the worker processes i
 
 ### On the server
 
-- `POST /sessions` opens a session and returns its id. `PUT /sessions/{id}/segments/{n}` receives segment `n` with a checksum and confirms it. `POST /sessions/{id}/complete` sends `session.json` with the list of segments.
+- `PUT /sessions/{id}` opens a session under an id that FLEX3 Light chooses (`<date>_<module>_<HHMM>`). `PUT /sessions/{id}/parts/{track}/{n}` receives part `n` of a track with a checksum and confirms it. `POST /sessions/{id}/complete` sends `session.json` with the number of parts per track. Details in `server/README.md`.
 - On completion the server joins the segments of each track without re-encoding (ffmpeg concat with `-c copy`), checks that every track is as long as the sum of its segments, writes the session folder according to the contract and only then confirms the session.
 - `DELETE /sessions/{id}` throws a session away. This matters because segments reach the server before the lecturer decides whether to keep the recording: "Verwerfen" in the window has to delete them there as well.
 - Every request carries the installation's token; the token is stored in the settings and never printed or logged, like the OBS password.
@@ -68,6 +70,7 @@ A test recording of 3:47 on the development machine (OBS 32.2.2, wide canvas, sp
 - **Joining the raw MKV segments directly** leaves a 21 ms gap in the audio timestamps at each boundary, one AAC frame, because the container rounds its duration. The samples are still complete, but the planned way avoids this anyway.
 - **`StopRecord` reports the path of the first segment**, not the last one. FLEX3 Light therefore has to follow the segments through the `RecordFileChanged` event.
 - **Processing time:** splitting a one-minute segment took 13.6 seconds with NVENC and 9.6 seconds with x264 on this machine, each measured with OBS idle. Both are far below the segment length; a weaker laptop without NVENC still has to be measured while OBS records.
+- **Upload volume:** about 57 MB per minute for the camera track, 9 MB for the program mix and 5 MB for the screen, so roughly 9 Mbit/s in total. The camera track dominates because the inherited quality setting (constant quality 21) spends most bits on webcam noise; a lower quality for the camera would cut the upload by more than half.
 
 **Decision:** how a laptop gets its `device_id` and token: per installation (proposed `device_id`: `flex3-light-<computer name>`) or per person. The IT concept only knows "one token per device".
 

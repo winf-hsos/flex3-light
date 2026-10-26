@@ -29,6 +29,9 @@ While recording, the window shrinks to a slim bar that turns yellow when paused 
 - **Pause and resume** with a button or a global hotkey.
 - **Save, continue or discard**: stopping first pauses the recording and asks what to do, so an accidental stop costs nothing. A discarded recording goes to the recycle bin.
 - **Two MP4 files per session**, for example `2026-10-09 - Regression - Bildschirm.mp4` and `… - Kamera.mp4`, filed under `<archive>\<term>\<module>\`. Both tracks share the same audio and start at the same instant, so they can be placed side by side in an editor without syncing.
+- **Done when you stop.** OBS starts a new file every minute, and each finished minute is split in the background while the lecture goes on. After the stop only the last minute is left, so even a three-hour lecture is filed within seconds.
+- **Delivery to the FLEX3 Light server** (`server/`), also during the lecture: each processed minute is uploaded right away, including a program mix in 1920×1080 for the FLEX3 pipeline, and the server builds a session folder after the FLEX3 contract once the recording is complete. Without a configured server, recordings are only filed locally.
+- **Nothing gets lost on the way.** Every session keeps a manifest, so work interrupted by a closed window, a crash or a missing network continues at the next start. Raw files are deleted only after the archive is written and checked, uploaded parts only after the server has confirmed the complete session.
 - **Configurable folders** for the archive and for the raw recordings, plus an "open in folder" button once a recording is filed.
 - **Moderate load and file size**: hardware encoding on NVIDIA (NVENC) with constant quality, about 3.4 GB per hour for the raw recording. Without an NVIDIA GPU the app falls back to x264, which works on any machine but uses noticeably more CPU.
 - **One file to share**: a single `flex3-light.exe` with ffmpeg built in. It sets up OBS on its own, including the remote control.
@@ -72,7 +75,19 @@ It bundles the ffmpeg from your `PATH` and writes `dist/flex3-light.exe` (about 
 4. Pause and resume with the pause button or **Ctrl+Alt+P**.
 5. Stop with the stop button, or press **Ctrl+Alt+R** twice within three seconds (the double press protects against stopping a lecture with a stray keystroke). The recording is paused and the bar asks whether to save it: **Speichern** files it, **Weiter** continues recording, and **Verwerfen** (click twice) moves the raw file to the recycle bin.
 
-After stopping, the recording is split and encoded into the two MP4 files, and the raw MKV is deleted only once both outputs have been checked to be as long as the source. If splitting fails, the raw file is kept. Closing the window during a recording keeps and files it as well.
+While recording, every finished one-minute segment is split into screen and camera (and the program mix, if a server is configured) at low priority, so it never slows OBS down. After stopping, the last segment follows, the parts are joined into the two MP4 files without re-encoding, and the raw segments are deleted only once the result has been checked to be as long as the parts. If anything fails, the raw segments are kept. Closing the window during a recording keeps it as well; if the app ends before the recording is filed, it continues at the next start. **Verwerfen** also deletes whatever was already uploaded.
+
+To deliver recordings to a FLEX3 Light server, add its address and the token of this installation to the settings (the token is never printed or logged):
+
+```json
+"server_url": "https://flex3.example.org",
+"server_token": "…",
+"device_id": "flex3-light-pc1234",
+"language": "de",
+"upload_kbit": 20000
+```
+
+`upload_kbit` caps the upload bandwidth (optional); `device_id` defaults to `flex3-light-<computer name>`, `language` to `de`. The window shows how many parts have been transferred. Recordings go to the server as `unassigned`, with consent restricted to recording and nothing published, until the course is assigned there.
 
 The current term is derived from the date: winter term from 1 September to the end of February, summer term from 1 March. Folder names follow the pattern `2026-27 - WS` and `2026 - SS`. Module suggestions come from the folders that already exist for the term, and optionally from a Markdown file whose `## ` headings are module names (`module_file` in the settings).
 
@@ -84,13 +99,17 @@ Settings are stored in `%APPDATA%\flex3-light\settings.json`.
 |---|---|
 | `recorder.py` | Window and JavaScript bridge (pywebview with Edge WebView2), single instance, capture exclusion |
 | `ui.html` | The user interface |
-| `core.py` | Settings, device selection, recording state, hotkey handling, split after stopping |
+| `core.py` | Settings, device selection, recording state, hotkey handling |
+| `delivery.py` | Sessions with their manifest; background threads that process each one-minute segment, file the archive and upload to the server |
+| `server_client.py` | Client for the server's API, standard library only, with an optional bandwidth cap |
+| `server/` | The receiving server (FastAPI), see [server/README.md](server/README.md) |
 | `obs_remote.py` | Minimal obs-websocket v5 client, OBS startup, switching the remote control on |
 | `obs_scene.py` | OBS profile, scene, sources, encoder settings, screen crop |
 | `monitors.py` | Monitor geometry and taskbar margins from Windows |
 | `hotkeys.py` | Global hotkeys and a low-level keyboard hook that detects Alt+Tab |
 | `hardware.py` | Finds ffmpeg and picks NVENC or x264 |
-| `split.py` | ffmpeg split into screen and camera track, freezing the Alt+Tab spans; also usable on the command line |
+| `split.py` | ffmpeg split into screen and camera track and the program mix, freezing the Alt+Tab spans, and joining parts without re-encoding; also usable on the command line |
+| `tests/` | Tests for the server and for the whole delivery without OBS (`python -m pytest tests`, needs `requirements-dev.txt`) |
 | `tools/benchmark.py` | Test recording that measures CPU, GPU and encoder load |
 | `tools/build_exe.py` | Builds the single exe with PyInstaller |
 
@@ -100,7 +119,8 @@ Hiding Alt+Tab needs a small correction: the time OBS reports runs about 0.55 se
 
 - Windows only. Without an NVIDIA GPU, recording and splitting run on the CPU (x264), which a weaker laptop may struggle with at this canvas size.
 - The camera field is 1920×1080; the screen field holds up to 1920×1200.
-- Streaming, delivery to the FLEX3 server and the virtual camera are not built in yet.
+- Streaming and the virtual camera are not built in yet, and the server settings have no place in the window yet.
+- The layout of the program mix (webcam small in the bottom right corner) is a proposal; the FLEX3 contract leaves it open.
 
 ## Third-party software
 
