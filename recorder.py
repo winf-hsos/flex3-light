@@ -11,8 +11,11 @@ Global hotkeys:
 from __future__ import annotations
 
 import ctypes
+import faulthandler
+import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -22,7 +25,10 @@ import webview
 # inside it must stay a click.
 webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
 
-from core import Core
+from core import APP_DIR, Core
+
+LOG_FILE = APP_DIR / "flex3-light.log"
+HANG_AFTER = 20             # seconds without a status request from the window count as a hang
 
 TITLE = "FLEX3 Light"
 APP_ID = "winf-hsos.Flex3Light"
@@ -44,11 +50,13 @@ class Api:
         self._full_position = None
         self._full_size = FULL
         self._mode = "full"
+        self.last_status = time.time()
 
     def data(self):
         return self._core.data()
 
     def status(self):
+        self.last_status = time.time()            # the window polls every 250 ms; see watch_for_hangs
         return self._core.status()
 
     def select(self, kind, name):
@@ -147,6 +155,38 @@ class Api:
         self._window.destroy()
 
 
+def start_error_log() -> None:
+    """Write errors to %APPDATA%\\flex3-light\\flex3-light.log: uncaught exceptions in any
+    thread, errors pywebview reports from JavaScript calls, and hard crashes (faulthandler).
+    The app has no console, so without this a failure leaves no trace."""
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    if LOG_FILE.exists() and LOG_FILE.stat().st_size > 1_000_000:
+        os.replace(LOG_FILE, LOG_FILE.with_suffix(".old.log"))
+    handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.basicConfig(level=logging.WARNING, handlers=[handler])
+    log = logging.getLogger("flex3-light")
+    log.warning("started")
+    faulthandler.enable(handler.stream)
+    sys.excepthook = lambda t, e, tb: log.error("uncaught error", exc_info=(t, e, tb))
+    threading.excepthook = lambda a: log.error("uncaught error in thread %s", a.thread.name if a.thread else "?",
+                                               exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
+    start_error_log.stream = handler.stream
+
+
+def watch_for_hangs(api: "Api") -> None:
+    """Log where every thread is when the window stops asking for its status: that is what
+    a hang looks like from the outside. Once per hang, so a long one does not fill the log."""
+    reported = False
+    while True:
+        time.sleep(5)
+        stuck = time.time() - api.last_status > HANG_AFTER
+        if stuck and not reported and getattr(start_error_log, "stream", None):
+            logging.getLogger("flex3-light").warning("window did not ask for its status for %d s, threads:", HANG_AFTER)
+            faulthandler.dump_traceback(start_error_log.stream, all_threads=True)
+        reported = stuck
+
+
 def set_topmost(on_top: bool) -> None:
     """Keep the window above all others, or not.
 
@@ -204,6 +244,7 @@ def lecture_recorder_running() -> bool:
 def main(test_func=None) -> None:
     if not single_instance():
         return
+    start_error_log()
     if lecture_recorder_running():
         ctypes.windll.user32.MessageBoxW(None, "Der Lecture Recorder läuft gerade. Beide Programme steuern "
                                          "dasselbe OBS, bitte ihn zuerst schließen.", TITLE, 0x30)
@@ -214,9 +255,11 @@ def main(test_func=None) -> None:
     try:
         core = Core()
     except Exception as e:
+        logging.getLogger("flex3-light").error("OBS could not be prepared", exc_info=True)
         ctypes.windll.user32.MessageBoxW(None, f"OBS ließ sich nicht vorbereiten:\n{e}", TITLE, 0x10)
         sys.exit(1)
     api = Api(core)
+    threading.Thread(target=watch_for_hangs, args=(api,), daemon=True, name="hang-watch").start()
     window = webview.create_window(TITLE, url=str(HERE / "ui.html"), js_api=api,
                                    width=FULL[0], height=FULL[1], min_size=(300, 50), resizable=False,
                                    frameless=True, on_top=False, background_color="#f5f7fa", easy_drag=False)

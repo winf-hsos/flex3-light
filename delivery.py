@@ -163,11 +163,18 @@ class Delivery:
         self._retry = 0
         self.last_exception = ""
 
-    def start(self) -> "Delivery":
-        """Pick up unfinished sessions from earlier runs and start both threads."""
+    def start(self, still_recording: Path | None = None) -> "Delivery":
+        """Pick up unfinished sessions from earlier runs and start both threads.
+
+        still_recording: the raw folder OBS is still recording into, if the app ended
+        without stopping it; that session stays a running recording for the core to take over.
+        """
         for manifest in sorted(self.root.glob("*/manifest.json")):
             s = Session(manifest.parent, json.loads(manifest.read_text(encoding="utf-8")))
-            if s.data["state"] == "recording":       # the app ended during a recording: keep it
+            running = still_recording is not None and s.raw_dir.resolve() == Path(still_recording).resolve()
+            if running and s.data["state"] in ("recording", "stopped"):
+                s.data["state"] = "recording"          # OBS still records it: taken over, not stopped
+            elif s.data["state"] == "recording":       # the app ended during a recording: keep it
                 s.data["state"] = "stopped"
             s.data["error"] = None                   # try again what failed last time
             s.save()
@@ -200,6 +207,11 @@ class Delivery:
         with self.guard:
             self.sessions.append(s)
         return s
+
+    def running(self) -> Session | None:
+        """The session that is still recording, after start(still_recording=...)."""
+        with self.guard:
+            return next((s for s in self.sessions if s.data["state"] == "recording"), None)
 
     def stop(self, s: Session, save: bool) -> None:
         with s.lock:

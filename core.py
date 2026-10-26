@@ -145,13 +145,27 @@ class Core:
         self.profile = Profile(PROFILE_FILE)
         if self.profile.is_new:
             self.profile.seed(seed_entries(self.archive, self.term, self.settings.get("module_file")))
-        # Picks up what an earlier run left unfinished, even before OBS is ready.
-        self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile).start()
+        self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
 
         remote.start(profile=scene.NAME, collection=scene.NAME)
         self.o = remote.Obs().__enter__()
+        # If the app ended during a recording without stopping it, OBS still records into that
+        # session's raw folder: take it over instead of leaving it running with nobody to stop it.
+        still_recording = None
+        if self.o.request("GetRecordStatus")["outputActive"]:
+            folder = Path(self.o.request("GetRecordDirectory")["recordDirectory"])
+            if folder.name != "raw" or not (folder.parent / "manifest.json").exists():
+                raise remote.ObsError("OBS nimmt gerade auf, aber nicht für FLEX3 Light. "
+                                      "Bitte die Aufnahme in OBS beenden und FLEX3 Light neu starten.")
+            still_recording = folder
+        # Picks up what an earlier run left unfinished.
+        self.delivery.start(still_recording)
+        self.session = self.delivery.running()
+        if self.session is not None:
+            self.screen_size = tuple(self.session.data["screen_size"])
         with self.lock:
-            scene.ensure_profile_and_scene(self.o, self.raw_dir)
+            if self.session is None:               # OBS cannot switch profiles while it records
+                scene.ensure_profile_and_scene(self.o, self.raw_dir)
             self.devices = scene.devices(self.o)
         self.devices["camera"] = self.devices["camera"] + [(scene.NO_CAMERA, scene.NO_CAMERA)]
         guess = {"screen": lambda n: "Haupt" in n or "Primary" in n, "camera": lambda n: "C920" in n,
@@ -162,7 +176,8 @@ class Core:
             saved = self.settings.get(kind)
             self.choice[kind] = saved if saved in names else next(
                 (n for n in names if guess[kind](n)), names[0] if names else "")
-        self.apply_devices()
+        if self.session is None:                   # never change the sources of a running recording
+            self.apply_devices()
 
         # Camera preview for the window; it rests while recording or without a camera.
         self.preview = PreviewServer(scene.CAMERA, lambda: self.session is None
