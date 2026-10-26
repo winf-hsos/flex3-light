@@ -31,7 +31,7 @@ APP_ID = "winf-hsos.Flex3Light"
 # the same hotkeys, so only one of them may run at a time.
 LECTURE_RECORDER_MUTEX = "Local\\LectureRecorder"
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))   # unpack folder of the packaged app
-FULL = (470, 640)
+FULL = (470, 660)
 BAR = (480, 58)
 ASK = (560, 58)
 
@@ -169,7 +169,7 @@ def main(test_func=None) -> None:
     api = Api(core)
     window = webview.create_window(TITLE, url=str(HERE / "ui.html"), js_api=api,
                                    width=FULL[0], height=FULL[1], min_size=(300, 50), resizable=False,
-                                   frameless=True, on_top=True, background_color="#16181c", easy_drag=False)
+                                   frameless=True, on_top=True, background_color="#f5f7fa", easy_drag=False)
     api._window = window
     core.on_question = window.restore         # stopped by hotkey while minimized: show the question
     # Closed by Windows (Alt+F4, taskbar) during a recording: keep it, like the close button does,
