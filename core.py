@@ -21,18 +21,22 @@ from pathlib import Path
 
 import activity
 import identify
+import library
+import services
 import monitors                  # sets DPI awareness on import: physical pixels
 import obs_remote as remote
 import obs_scene as scene
 from delivery import Delivery
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
+from pipeline_runner import PipelineRunner
 from preview import PreviewServer
 from server_client import ServerClient
 
 APP_DIR = Path(os.environ["APPDATA"]) / "flex3-light"
 SETTINGS_FILE = APP_DIR / "settings.json"
 PROFILE_FILE = APP_DIR / "profile.json"
+PIPELINE_QUEUE = APP_DIR / "pipeline-queue.json"
 DEFAULT_ARCHIVE = Path.home() / "Videos" / "Lectures"
 DEFAULT_RAW = Path.home() / "Videos" / "flex3-light-raw"   # best outside any cloud-synced folder
 
@@ -150,6 +154,9 @@ class Core:
         if self.profile.is_new:
             self.profile.seed(seed_entries(self.archive, self.term, self.settings.get("module_file")))
         self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
+        # Transcription and the rest of the pipeline run on filed recordings, never during a recording.
+        self.pipeline = PipelineRunner(PIPELINE_QUEUE, lambda: self.session is None, self._terms_for).start()
+        self.delivery.on_archived = self.pipeline.enqueue
 
         remote.start(profile=scene.NAME, collection=scene.NAME)
         self.o = remote.Obs().__enter__()
@@ -186,7 +193,7 @@ class Core:
 
         # Camera preview for the window; it rests while recording or without a camera.
         self.preview = PreviewServer(scene.CAMERA, lambda: self.session is None
-                                     and self.choice.get("camera") != scene.NO_CAMERA)
+                                     and self.choice.get("camera") != scene.NO_CAMERA, self._media)
         self.keys = GlobalKeys(self.events)
         self.keys.start()
         self.meter = LevelMeter()
@@ -199,6 +206,8 @@ class Core:
         return {"term": self.term,
                 "modules": [m["name"] for m in self.profile.modules()],
                 "profile": self.profile.modules(), "user": self.profile.user(), "preview_url": self.preview.url,
+                "media_base": self.preview.media_base,
+                "api_keys": services.status(),
                 "module": self.module,
                 "devices": {k: [n for n, _ in v] for k, v in self.devices.items()},
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
@@ -260,6 +269,28 @@ class Core:
                       m["height"] - g["top"] - g["bottom"], "Dieser Bildschirm wird aufgenommen", detail)
         return ""
 
+    # ---------------------------------------------------------- AI service keys
+
+    def set_api_key(self, service: str, secret: str) -> str:
+        """Store a key from the settings in the Credential Manager; returns an error or ''."""
+        secret = (secret or "").strip()
+        if service not in services.SERVICES:
+            return "Unbekannter Dienst."
+        if not secret:
+            return "Bitte einen Schlüssel einfügen."
+        services.credentials.put(service, secret)
+        return ""
+
+    def delete_api_key(self, service: str) -> None:
+        if service in services.SERVICES:
+            services.credentials.delete(service)
+
+    def check_api_key(self, service: str) -> dict:
+        if service not in services.SERVICES:
+            return {"ok": False, "message": "Unbekannter Dienst."}
+        ok, message = services.check(service)
+        return {"ok": ok, "message": message}
+
     def save_module(self, entry: dict) -> str:
         """Add or change a module in the profile; returns an error message for the UI or ''."""
         name = clean_name(entry.get("name", ""))
@@ -269,6 +300,9 @@ class Core:
         if other and other["id"] != entry.get("id"):
             return "Ein Modul mit diesem Namen gibt es schon."
         fields = {k: entry.get(k, "") for k in ("code", "language", "ilias_course_id", "opencast_series_id")}
+        raw = entry.get("terms", "")             # one per line or separated by commas, from the editor
+        terms = raw if isinstance(raw, list) else re.split(r"[,;\n]", raw or "")
+        fields["terms"] = list(dict.fromkeys(t.strip()[:80] for t in terms if t.strip()))[:300]
         fields["code"] = re.sub(r"[^a-z0-9-]+", "-", fields["code"].lower()).strip("-")[:40]
         fields["language"] = fields["language"] if re.fullmatch(r"[a-z]{2}", fields["language"] or "") else "de"
         if entry.get("id"):
@@ -370,6 +404,11 @@ class Core:
         self.delivery.stop(s, save)
         self.message = ""
 
+    def _terms_for(self, meta: dict) -> list[str]:
+        """The technical terms of the recording's module, for the transcription prompt."""
+        m = self.profile.find(meta.get("course_name", ""))
+        return (m or {}).get("terms", [])
+
     def _now(self) -> float:
         """Current recording time in seconds."""
         return time.time() - self.offset if self.offset is not None else self.rec_time
@@ -397,6 +436,30 @@ class Core:
         s = self.delivery.latest()
         screen = s and s is not self.session and s.data["archive"]["screen"]
         return Path(screen) if screen else None
+
+    # ---------------------------------------------------------- recordings ("Meine Aufnahmen")
+
+    def recordings(self) -> list[dict]:
+        """All session folders in the archive, newest first, with their way through the pipeline."""
+        self._library = library.scan(self.archive)
+        items = [library.summary(f) for f in self._library.values()]
+        return sorted(items, key=lambda r: r["recorded_at"], reverse=True)
+
+    def recording(self, sid: str) -> dict | None:
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None:
+            return None
+        return {**library.detail(folder), "status": self.pipeline.describe(folder)}
+
+    def open_recording(self, sid: str) -> None:
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder and folder.exists():
+            os.startfile(folder)
+
+    def _media(self, sid: str, name: str) -> Path | None:
+        """For the preview server: a video or subtitle file of a listed recording, nothing else."""
+        folder = getattr(self, "_library", {}).get(sid)
+        return folder / name if folder and library.MEDIA.match(name) else None
 
     def open_result(self) -> None:
         f = self._result()
@@ -434,6 +497,9 @@ class Core:
         message, kind = self.message, self.message_kind
         if info and not message:
             message, kind = self._delivery_message(info)
+            step = self.pipeline.describe(info.get("session_folder"))
+            if step and message:
+                message += " · " + step
         return {"recording": self.session is not None, "asking": self.asking, "paused": self.obs_state["paused"],
                 "time": self.obs_state["time"], "level": round(db, 1), "splitting": splitting,
                 "progress": round(progress, 3), "message": message, "message_kind": kind,

@@ -11,6 +11,7 @@ Global hotkeys:
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 import faulthandler
 import logging
 import os
@@ -25,7 +26,7 @@ import webview
 # inside it must stay a click.
 webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
 
-from core import APP_DIR, Core
+from core import APP_DIR, Core, save_settings
 
 LOG_FILE = APP_DIR / "flex3-light.log"
 HANG_AFTER = 20             # seconds without a status request from the window count as a hang
@@ -36,7 +37,8 @@ APP_ID = "winf-hsos.Flex3Light"
 # the same hotkeys, so only one of them may run at a time.
 LECTURE_RECORDER_MUTEX = "Local\\LectureRecorder"
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))   # unpack folder of the packaged app
-FULL = (900, 440)           # fields left, camera preview right, record button and status below
+FULL = (1120, 700)          # sidebar and pages; while recording only the slim bar
+FULL_MIN = (900, 560)       # smaller and the pages would need to scroll sideways
 BAR = (530, 58)
 ASK = (560, 58)
 
@@ -48,7 +50,10 @@ class Api:
         self._core = core
         self._window = None
         self._full_position = None
-        self._full_size = FULL
+        saved = core.settings.get("window_size")
+        self._full_size = tuple(saved) if saved else FULL
+        self._resize_from = self._full_size
+        self._normal_rect = None                  # where the window was before it filled the screen
         self._mode = "full"
         self.last_status = time.time()
 
@@ -70,6 +75,15 @@ class Api:
 
     def identify_screen(self):
         return self._core.identify_screen()
+
+    def set_api_key(self, service, secret):
+        return self._core.set_api_key(service, secret)
+
+    def delete_api_key(self, service):
+        self._core.delete_api_key(service)
+
+    def check_api_key(self, service):
+        return self._core.check_api_key(service)
 
     def save_module(self, entry):
         return self._core.save_module(entry or {})
@@ -104,6 +118,15 @@ class Api:
     def open_result(self):
         self._core.open_result()
 
+    def recordings(self):
+        return self._core.recordings()
+
+    def recording(self, sid):
+        return self._core.recording(sid)
+
+    def open_recording(self, sid):
+        self._core.open_recording(sid)
+
     def view(self, mode):
         """Switch the window between "full" (setup), "bar" (recording) and "ask" (save question).
 
@@ -111,6 +134,8 @@ class Api:
         behaves like any other window.
         """
         w = self._window
+        if mode != "full" and self._normal_rect:     # the bar never fills the screen
+            self.toggle_maximize()
         set_topmost(mode != "full")
         if mode == "full":
             capture_exclusion(False)              # the recording is over: screenshots may show it again
@@ -129,18 +154,49 @@ class Api:
             w.resize(*size)
         self._mode = mode
 
-    def fit(self, delta):
-        """Grow or shrink the setup window by delta CSS pixels, so its content fits exactly.
+    def resize_start(self):
+        """The window has no frame; the page's edge grips resize it relative to this size."""
+        self._resize_from = (self._window.width, self._window.height)
 
-        The inner height of a frameless window falls short of its outer size by a few
-        pixels that depend on Windows and the display scaling, so the page measures
-        itself and asks for the difference.
-        """
-        if self._mode != "full" or not int(delta):
+    def resize_by(self, dx, dy):
+        if self._mode != "full" or self._normal_rect:
             return
-        w = self._window
-        self._full_size = (w.width, min(900, max(300, w.height + int(delta))))
-        w.resize(*self._full_size)
+        w, h = self._resize_from
+        self._full_size = (max(FULL_MIN[0], w + int(dx)), max(FULL_MIN[1], h + int(dy)))
+        self._window.resize(*self._full_size)
+
+    def resize_done(self):
+        self._core.settings["window_size"] = list(self._full_size)
+        save_settings(self._core.settings)
+
+    def toggle_maximize(self):
+        """Fill the work area of the window's monitor, or go back; returns whether it fills it.
+
+        Not through WinForms' maximized state: a frameless form maximized that way covers
+        the taskbar. SetWindowPos with the work area keeps it free and is safe from any thread.
+        """
+        hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
+        if not hwnd:
+            return False
+        if self._normal_rect:
+            x, y, w, h = self._normal_rect
+            self._normal_rect = None
+        else:
+            r = wintypes.RECT()
+            ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(r))
+            self._normal_rect = (r.left, r.top, r.right - r.left, r.bottom - r.top)
+
+            class MonitorInfo(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                            ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+            info = MonitorInfo(cbSize=ctypes.sizeof(MonitorInfo))
+            monitor = ctypes.windll.user32.MonitorFromWindow(hwnd, 2)        # MONITOR_DEFAULTTONEAREST
+            ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(info))
+            work = info.rcWork
+            x, y, w, h = work.left, work.top, work.right - work.left, work.bottom - work.top
+        SWP_NOZORDER, SWP_NOACTIVATE = 0x4, 0x10
+        ctypes.windll.user32.SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
+        return self._normal_rect is not None
 
     def widen(self, width):
         """Make the bar wide enough for its content (CSS pixels), keeping it centered."""
@@ -264,8 +320,8 @@ def main(test_func=None) -> None:
     api = Api(core)
     threading.Thread(target=watch_for_hangs, args=(api,), daemon=True, name="hang-watch").start()
     window = webview.create_window(TITLE, url=str(HERE / "ui.html"), js_api=api,
-                                   width=FULL[0], height=FULL[1], min_size=(300, 50), resizable=False,
-                                   frameless=True, on_top=False, background_color="#f5f7fa", easy_drag=False)
+                                   width=api._full_size[0], height=api._full_size[1], min_size=(300, 50), resizable=False,
+                                   frameless=True, on_top=False, background_color="#f6f8fa", easy_drag=False)
     api._window = window
     core.on_question = window.restore         # stopped by hotkey while minimized: show the question
     core.on_capture = capture_exclusion       # hidden from capture only while recording

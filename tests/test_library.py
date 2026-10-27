@@ -1,0 +1,45 @@
+"""The archive as the page "Meine Aufnahmen" sees it: session folders, stations, media."""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import library  # noqa: E402
+
+
+def _session(archive: Path, sid: str, name: str, steps: dict | None = None) -> Path:
+    folder = archive / "2026-27 - WS" / "Digitalisierung und Programmierung" / name
+    folder.mkdir(parents=True)
+    (folder / "session.json").write_text(json.dumps({"session_id": sid, "course_name": "Digitalisierung und Programmierung",
+                                                     "recorded_at": "2026-10-26T10:15:00", "duration_sec": 90,
+                                                     "tracks": [{"kind": "camera"}]}), encoding="utf-8")
+    if steps is not None:
+        (folder / "pipeline.json").write_text(json.dumps({"steps": steps}), encoding="utf-8")
+    return folder
+
+
+def test_scan_summary_and_stations(tmp_path):
+    a = _session(tmp_path, "s1", "2026-10-26 - Mikrocontroller und LiFi")
+    b = _session(tmp_path, "s2", "2026-10-27 - Sensoren", {"transcribe": {"state": "waiting"}})
+    c = _session(tmp_path, "s3", "2026-10-28 - Licht", {"transcribe": {"state": "done"}, "subtitles": {"state": "done"}})
+    (tmp_path / "2026-27 - WS" / "Lose Datei.mp4").write_bytes(b"")        # older loose recordings are ignored
+    assert library.scan(tmp_path) == {"s1": a, "s2": b, "s3": c}
+    s = library.summary(a)
+    assert s["title"] == "Mikrocontroller und LiFi" and s["camera"] and s["term"] == "2026-27 - WS"
+    assert s["stations"] == {"recorded": "done", "transcript": "queued", "cut": "soon", "content": "soon", "publish": "soon"}
+    assert library.stations(b)["transcript"] == "waiting"
+    assert library.stations(c)["transcript"] == "done"
+
+
+def test_detail_lists_only_media(tmp_path):
+    folder = _session(tmp_path, "s1", "2026-10-26 - Thema", {"transcribe": {"state": "done"}, "subtitles": {"state": "running"}})
+    for name in ("recording.mp4", "screen.mp4", "subtitles.de.vtt", "activity.json", "transcript.raw.json"):
+        (folder / name).write_bytes(b"")
+    (folder / "transcript.json").write_text(json.dumps({"segments": [{"start": 0.0, "end": 2.0, "text": "Hallo."}]}),
+                                            encoding="utf-8")
+    d = library.detail(folder)
+    assert d["media"] == ["recording.mp4", "screen.mp4", "subtitles.de.vtt"]   # never activity.json
+    assert d["segments"] == [{"start": 0.0, "end": 2.0, "text": "Hallo."}]
+    assert d["stations"]["transcript"] == "running"
