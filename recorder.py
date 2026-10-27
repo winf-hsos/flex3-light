@@ -127,6 +127,12 @@ class Api:
     def open_recording(self, sid):
         self._core.open_recording(sid)
 
+    def redo_transcription(self, sid):
+        return self._core.redo_transcription(sid)
+
+    def review_word(self, sid, index, text, as_term=False):
+        return self._core.review_word(sid, index, text, bool(as_term))
+
     def view(self, mode):
         """Switch the window between "full" (setup), "bar" (recording) and "ask" (save question).
 

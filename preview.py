@@ -67,7 +67,8 @@ class PreviewServer:
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                m = re.fullmatch(rf"/{re.escape(preview.token)}/media/([\w.-]+)/([\w.-]+)", self.path)
+                # an optional ?v=... only makes the player load a changed file again
+                m = re.fullmatch(rf"/{re.escape(preview.token)}/media/([\w.-]+)/([\w.-]+)(?:\?[^/]*)?", self.path)
                 if m:
                     self._file(preview.media(m.group(1), m.group(2)))
                     return

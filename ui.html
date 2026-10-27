@@ -203,11 +203,33 @@
   .station.waiting small, .station.failed small { color: #8a6200; }
   .station.soon b { color: var(--slate); font-weight: 500; }
   .transcript { padding: 14px 16px; display: grid; gap: 8px; }
+  #dTerms { margin-top: -6px; font-size: 12px; }
+  #dTerms:empty { display: none; }
+  .spots { padding: 14px 16px; display: grid; gap: 10px; justify-items: start; }
+  .spots > .hint { margin-top: -6px; font-size: 12px; }
+  .spot { display: grid; grid-template-columns: 34px 1fr; gap: 12px; width: 100%; padding: 10px 0 2px; border-top: 1px solid var(--line); }
+  .spot .round { margin-top: 2px; }
+  .spot-text { display: grid; gap: 4px; min-width: 0; }
+  .spot-text p { margin: 0; line-height: 1.5; }
+  .spot-text mark { background: var(--amber-soft); color: inherit; padding: 1px 4px; border-radius: 4px; font-weight: 600; }
+  .spot-text small { color: var(--mist); font-size: 11.5px; }
+  .spot-edit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .spot-edit .field { width: 220px; padding: 5px 10px; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--slate); cursor: pointer; }
+  .check input { accent-color: var(--blue); }
   .lines { display: grid; gap: 2px; max-height: 280px; overflow: auto; }
   .line { display: grid; grid-template-columns: 48px 1fr; gap: 10px; text-align: left; padding: 5px 8px; border-radius: 8px; }
   .line:hover { background: var(--hover); }
   .line.now { background: var(--sky); }
   .line time { color: var(--mist); font-size: 12px; padding-top: 1px; }
+  /* while a transcription runs, the old text blurs under a slow sweep of light, or bars stand in for it */
+  .transcript { position: relative; }
+  .transcript.working .lines { filter: blur(2.5px); opacity: .5; pointer-events: none; transition: filter .4s, opacity .4s; }
+  .transcript.working::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(100deg, transparent 35%, rgba(0, 158, 227, .13) 50%, transparent 65%) 0 0 / 250% 100%;
+    animation: sweep 2.2s linear infinite; }
+  @keyframes sweep { from { background-position: 130% 0; } to { background-position: -30% 0; } }
+  .skeleton { height: 11px; margin: 8px 8px 8px 66px; border-radius: 6px; background: #e3e9ef; }
   .empty { display: grid; place-items: center; align-content: center; gap: 12px; height: 100%; text-align: center; color: var(--slate); }
   .empty h2 { margin: 0; font-family: var(--display); font-size: 19px; font-weight: 600; color: var(--ink); }
   .empty p { margin: 0; max-width: 380px; }
@@ -379,7 +401,7 @@
       </div>
       <div class="empty" id="libraryEmpty" style="display:none">
         <h2>Hier erscheinen deine Aufnahmen</h2>
-        <p>Nach jeder Aufnahme siehst du hier das Video, die Abschrift und wie weit die Aufnahme auf dem Weg zur Veröffentlichung ist.</p>
+        <p>Nach jeder Aufnahme siehst du hier das Video, die Transkription und wie weit die Aufnahme auf dem Weg zur Veröffentlichung ist.</p>
         <button class="btn primary" onclick="showPage('record')">Erste Aufnahme vorbereiten</button>
       </div>
     </section>
@@ -433,14 +455,14 @@
         <div class="settings-col">
           <div class="panel section">
             <div class="panel-head"><h2>KI-Dienste</h2></div>
-            <div class="section-note">Für Abschrift, Untertitel und Inhalte nach der Vorlesung. Die Schlüssel liegen in der Windows-Anmeldeinformationsverwaltung und werden hier nie wieder angezeigt.</div>
+            <div class="section-note">Für Transkription, Untertitel und Inhalte nach der Vorlesung. Die Schlüssel liegen in der Windows-Anmeldeinformationsverwaltung und werden hier nie wieder angezeigt.</div>
             <div class="key-row">
-              <div class="key-head"><b>AssemblyAI</b><span class="key-use">Abschrift und Untertitel</span><span class="key-state" id="state_assemblyai"></span></div>
+              <div class="key-head"><b>AssemblyAI</b><span class="key-use">Transkription und Untertitel</span><span class="key-state" id="state_assemblyai"></span></div>
               <div class="key-edit"><div class="field"><input type="password" id="key_assemblyai" autocomplete="off" spellcheck="false"></div><button class="btn primary" onclick="saveKey('assemblyai')">Speichern</button></div>
               <div class="key-actions"><button class="link" id="chk_assemblyai" onclick="checkKey('assemblyai')">Prüfen</button><button class="link danger" id="del_assemblyai" onclick="deleteKey('assemblyai', 'AssemblyAI')">Entfernen</button><span class="hint" id="msg_assemblyai"></span></div>
             </div>
             <div class="key-row">
-              <div class="key-head"><b>OpenAI</b><span class="key-use">Texte, Abschrift als Rückfall</span><span class="key-state" id="state_openai"></span></div>
+              <div class="key-head"><b>OpenAI</b><span class="key-use">Texte, Transkription als Rückfall</span><span class="key-state" id="state_openai"></span></div>
               <div class="key-edit"><div class="field"><input type="password" id="key_openai" autocomplete="off" spellcheck="false"></div><button class="btn primary" onclick="saveKey('openai')">Speichern</button></div>
               <div class="key-actions"><button class="link" id="chk_openai" onclick="checkKey('openai')">Prüfen</button><button class="link danger" id="del_openai" onclick="deleteKey('openai', 'OpenAI')">Entfernen</button><span class="hint" id="msg_openai"></span></div>
             </div>
@@ -575,7 +597,7 @@
 
   // ---------------------------------------------------------------- my recordings
   let recordings = [], selectedId = null, shownMedia = "";
-  const STATIONS = [["recorded", "Aufgenommen"], ["transcript", "Abschrift"], ["cut", "Schnitt"], ["content", "Inhalte"], ["publish", "Veröffentlichen"]];
+  const STATIONS = [["recorded", "Aufgenommen"], ["transcript", "Transkription"], ["cut", "Schnitt"], ["content", "Inhalte"], ["publish", "Veröffentlichen"]];
   const STATE_TEXT = {done: "erledigt", running: "läuft", waiting: "wartet", failed: "gestoppt", queued: "folgt", soon: "kommt bald"};
   const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "numeric", month: "long", year: "numeric"}) : "";
   const fmtShort = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"}) : "";
@@ -614,7 +636,7 @@
     }
   }
   async function selectRecording(id) {
-    selectedId = id; shownMedia = "";
+    selectedId = id; shownMedia = ""; allSpots = false; stopAt = null;
     renderRecordings();
     await refreshDetail();
   }
@@ -624,42 +646,68 @@
     if (!d) { box.innerHTML = ""; return; }
     const media = d.media.includes("recording.mp4") ? "recording.mp4" : "screen.mp4";
     const subs = d.media.find(n => n.startsWith("subtitles."));
-    const key = d.id + media + (subs || "");
-    if (key !== shownMedia) {                                // a new recording or new subtitles: build the view
+    const textSig = d.segments.length + ":" + d.segments.map(x => x.text).join("").length;
+    const key = [d.id, media].join("|");                   // only another recording rebuilds the view and the player
+    if (key !== shownMedia) {
       shownMedia = key;
       box.innerHTML = `
         <div class="detail-head"><div style="flex:1"><h2 id="dTitle"></h2><p id="dMeta"></p></div>
           <button class="btn" onclick="api().open_recording(selectedId)"><svg class="i"><use href="#i-folder"/></svg>Ordner öffnen</button></div>
         <video class="player" id="player" controls preload="metadata" crossorigin="anonymous"></video>
         <div class="panel way" id="way"></div>
-        <div class="panel transcript"><div class="panel-head"><h2>Abschrift</h2><span class="hint" id="dStatus"></span></div><div class="lines" id="lines"></div></div>`;
+        <div class="panel transcript"><div class="panel-head"><h2>Transkription</h2><span class="hint" id="dStatus"></span>
+          <button class="link" id="redoButton" onclick="redoTranscription()">Erneut transkribieren</button></div>
+          <div class="hint" id="dTerms"></div><div class="lines" id="lines"></div></div>
+        <div class="panel spots" id="spots"></div>`;
       $("dTitle").textContent = d.title;
       $("dMeta").textContent = `${d.module}, ${fmtDate(d.recorded_at)}, ${fmtLength(d.duration)}`;
       const v = $("player");
       v.src = mediaBase + encodeURIComponent(d.id) + "/" + media;
+      v.ontimeupdate = () => {
+        highlightLine(v.currentTime);
+        if (stopAt !== null && v.currentTime >= stopAt) { v.pause(); stopAt = null; }   // end of a listened spot
+      };
+    }
+    // new or corrected subtitles: swap the track; the address changes, so the player loads it again
+    const trackSig = subs ? subs + "|" + d.model + "|" + textSig : "";
+    if ($("player").dataset.track !== trackSig) {
+      const v = $("player");
+      v.dataset.track = trackSig;
+      for (const old of v.querySelectorAll("track")) old.remove();
       if (subs) {
         const t = document.createElement("track");
         Object.assign(t, {kind: "subtitles", srclang: d.language, label: d.language === "en" ? "English" : "Deutsch", default: true,
-                          src: mediaBase + encodeURIComponent(d.id) + "/" + subs});
+                          src: mediaBase + encodeURIComponent(d.id) + "/" + subs + "?v=" + encodeURIComponent(trackSig)});
         v.appendChild(t);
       }
-      v.ontimeupdate = () => highlightLine(v.currentTime);
     }
     $("way").innerHTML = STATIONS.map(([k, name], i) =>
       `<div class="station ${d.stations[k]}"><span class="no">${d.stations[k] === "done" ? '<svg class="i"><use href="#i-check"/></svg>' : i + 1}</span><b>${name}</b><small>${STATE_TEXT[d.stations[k]]}</small></div>`).join("");
-    // while there is no text yet, the line below the heading explains; afterwards the progress stands here
-    $("dStatus").textContent = d.stations.transcript === "done" || !d.segments.length ? "" : (d.status || "");
+    // the progress stands next to the heading; without text and without work the line below explains
+    const working = ["running", "queued"].includes(d.stations.transcript);
+    $("dStatus").textContent = d.stations.transcript === "done" || (!d.segments.length && !working) ? "" : (d.status || "");
     $("dStatus").className = "hint" + (d.stations.transcript === "failed" ? " error" : "");
+    $("redoButton").style.display = ["done", "failed"].includes(d.stations.transcript) ? "" : "none";
+    $("dTerms").textContent = d.stations.transcript !== "done" ? "" : (MODELS[d.model] || d.model) + (d.terms.length
+      ? `, mit ${d.terms.length === 1 ? "einem Fachbegriff" : d.terms.length + " Fachbegriffen"} des Moduls: ${d.terms.join(", ")}`
+      : ", ohne Fachbegriffe. Fachbegriffe trägst du beim Modul ein.");
     const lines = $("lines");
-    if (lines.dataset.count !== String(d.segments.length)) {
-      lines.dataset.count = d.segments.length;
+    lines.closest(".transcript").classList.toggle("working", working);
+    const shown = [textSig, working, d.stations.transcript].join("|");
+    if (lines.dataset.shown !== shown) {
+      lines.dataset.shown = shown;
       lines.innerHTML = "";
-      if (!d.segments.length) {
+      if (!d.segments.length && working) {
+        for (const width of [92, 78, 86, 64, 90, 72]) {
+          const bar = document.createElement("div"); bar.className = "skeleton"; bar.style.width = `calc(${width}% - 74px)`;
+          lines.appendChild(bar);
+        }
+      } else if (!d.segments.length) {
         const h = document.createElement("div"); h.className = "hint";
         h.textContent = d.stations.transcript === "waiting"
-          ? "Die Abschrift entsteht, sobald ein Schlüssel für AssemblyAI oder OpenAI hinterlegt ist. "
-          : d.stations.transcript === "failed" ? (d.status || "Die Abschrift ist gestoppt.")
-          : (d.status || "Die Abschrift entsteht nach der Vorlesung von selbst.");
+          ? "Die Transkription entsteht, sobald ein Schlüssel für AssemblyAI oder OpenAI hinterlegt ist. "
+          : d.stations.transcript === "failed" ? (d.status || "Die Transkription ist gestoppt.")
+          : (d.status || "Die Transkription entsteht nach der Vorlesung von selbst.");
         if (d.stations.transcript === "waiting") {
           const a = document.createElement("button"); a.className = "link"; a.textContent = "Schlüssel hinterlegen";
           a.onclick = () => showPage("settings");
@@ -677,6 +725,89 @@
         lines.appendChild(b);
       }
     }
+    renderSpots(d);
+  }
+
+  // ---------------------------------------------------------------- unsure spots of a transcript
+  let stopAt = null, allSpots = false;
+  const SHOWN_SPOTS = 8;
+  function listen(start, end) {
+    const v = $("player");
+    v.currentTime = Math.max(0, start - 2);
+    stopAt = end + 1.5;
+    v.play();
+  }
+  function renderSpots(d) {
+    const box = $("spots");
+    const visible = d.stations.transcript === "done" && d.rated;
+    box.style.display = visible ? "" : "none";
+    if (!visible) return;
+    const sig = d.uncertain.map(s => s.index).join(",") + "|" + allSpots;
+    const typing = box.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+    if (box.dataset.sig === sig || typing) return;          // never wipe a correction being typed
+    box.dataset.sig = sig;
+    box.innerHTML = "";
+    const head = document.createElement("div"); head.className = "panel-head";
+    const h = document.createElement("h2"); h.textContent = "Unsichere Stellen";
+    const count = document.createElement("span"); count.className = "hint"; count.id = "spotsHint";
+    count.textContent = d.uncertain.length ? `${d.uncertain.length} offen` : "";
+    head.append(h, count);
+    const note = document.createElement("div"); note.className = "hint";
+    note.textContent = d.uncertain.length
+      ? "Hier war sich die Transkription unsicher. Hör kurz rein und korrigiere, wenn nötig; ein Begriff, der öfter vorkommt, gehört in die Fachbegriffe des Moduls."
+      : "Alle unsicheren Stellen sind geprüft.";
+    box.append(head, note);
+    for (const s of d.uncertain.slice(0, allSpots ? undefined : SHOWN_SPOTS)) box.appendChild(spotRow(s));
+    if (d.uncertain.length > SHOWN_SPOTS) {
+      const more = document.createElement("button"); more.className = "link";
+      more.textContent = allSpots ? "Weniger anzeigen" : `Alle ${d.uncertain.length} anzeigen`;
+      more.onclick = () => { allSpots = !allSpots; renderSpots(d); };
+      box.appendChild(more);
+    }
+  }
+  function spotRow(s) {
+    const row = document.createElement("div"); row.className = "spot";
+    const play = document.createElement("button"); play.className = "round"; play.title = "Anhören";
+    play.innerHTML = '<svg class="i"><use href="#i-play"/></svg>';
+    play.onclick = () => listen(s.start, s.end);
+    const text = document.createElement("div"); text.className = "spot-text";
+    const ctx = document.createElement("p");
+    const mark = document.createElement("mark"); mark.textContent = s.word;
+    ctx.append("… " + s.before + " ", mark, " " + s.after + " …");
+    const meta = document.createElement("small"); meta.className = "tabular";
+    meta.textContent = `${fmtClock(s.start)}, Sicherheit ${Math.round(s.confidence * 100)} %`;
+    const edit = document.createElement("div"); edit.className = "spot-edit";
+    const field = document.createElement("div"); field.className = "field";
+    const input = document.createElement("input"); input.value = s.word; input.spellcheck = false;
+    field.appendChild(input);
+    const ok = document.createElement("button"); ok.className = "btn"; ok.textContent = "Stimmt";
+    const termBox = document.createElement("label"); termBox.className = "check";
+    const asTerm = document.createElement("input"); asTerm.type = "checkbox";
+    termBox.append(asTerm, " in die Fachbegriffe");
+    input.oninput = () => {
+      const changed = input.value.trim() !== s.word.trim();
+      ok.textContent = changed ? "Korrigieren" : "Stimmt";
+      ok.classList.toggle("primary", changed);
+    };
+    input.onkeydown = e => { if (e.key === "Enter") ok.click(); };
+    ok.onclick = async () => {
+      const r = await api().review_word(selectedId, s.index, input.value, asTerm.checked);
+      if (r.ok) { $("spots").dataset.sig = ""; document.activeElement.blur(); await refreshDetail(); }
+      $("spotsHint").textContent = r.message || ($("spotsHint").textContent);
+      if (r.message) $("spotsHint").className = "hint " + (r.ok ? "ok" : "error");
+    };
+    edit.append(field, ok, termBox);
+    text.append(ctx, meta, edit);
+    row.append(play, text);
+    return row;
+  }
+  const MODELS = {"assemblyai/universal-3-pro": "AssemblyAI Universal-3 Pro", "openai/whisper-1": "OpenAI whisper-1"};
+  async function redoTranscription() {
+    if (!confirm("Transkription mit den aktuellen Fachbegriffen des Moduls erneut ausführen? "
+                 + "Die bisherige bleibt, bis die neue fertig ist, und wird dann ersetzt.")) return;
+    const error = await api().redo_transcription(selectedId);
+    if (error) { $("dStatus").textContent = error; $("dStatus").className = "hint error"; return; }
+    await loadRecordings();
   }
   function highlightLine(t) {
     let current = null;

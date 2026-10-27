@@ -11,6 +11,8 @@ import json
 import re
 from pathlib import Path
 
+from pipeline import review
+
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
 MEDIA = re.compile(r"^(recording|screen|camera)\.mp4$|^subtitles\.[a-z]{2}\.vtt$")
 
@@ -63,4 +65,7 @@ def detail(folder: Path) -> dict:
     segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in transcript.get("segments", [])]
     media = sorted(p.name for p in folder.iterdir() if MEDIA.match(p.name)) if folder.exists() else []
     return {**summary(folder), "segments": segments, "media": media,
+            "model": transcript.get("model", ""), "terms": transcript.get("terms", []),
+            "uncertain": review.uncertain(transcript) if transcript else [],
+            "rated": any("confidence" in w for w in transcript.get("words", [])),
             "message": _read(folder / "pipeline.json").get("steps", {}).get("transcribe", {}).get("message", "")}

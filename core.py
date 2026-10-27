@@ -29,6 +29,7 @@ import obs_scene as scene
 from delivery import Delivery
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
+from pipeline import review
 from pipeline_runner import PipelineRunner
 from preview import PreviewServer
 from server_client import ServerClient
@@ -450,6 +451,42 @@ class Core:
         if folder is None:
             return None
         return {**library.detail(folder), "status": self.pipeline.describe(folder)}
+
+    def redo_transcription(self, sid: str) -> str:
+        """Queue a recording's transcription again, with the module's current terms; returns an error or ''."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        if not self.pipeline.redo(folder):
+            return "Die Aufnahme wird gerade transkribiert."
+        return ""
+
+    def review_word(self, sid: str, index: int, text: str, as_term: bool = False) -> dict:
+        """Correct or confirm an unsure word of a transcript, optionally adding it to the module's terms.
+
+        Returns {"ok", "message"} for the window.
+        """
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return {"ok": False, "message": "Die Aufnahme ist nicht mehr in der Ablage."}
+        if library.stations(folder)["transcript"] != "done":
+            return {"ok": False, "message": "Die Transkription läuft gerade, danach geht es wieder."}
+        try:
+            old = json.loads((folder / "transcript.json").read_text(encoding="utf-8"))["words"][int(index)]["word"]
+            word = (review.confirm(folder, int(index)) if text.strip() == old.strip()
+                    else review.correct(folder, int(index), text))
+        except (ValueError, IndexError, OSError) as e:
+            return {"ok": False, "message": str(e) or "Das Wort ließ sich nicht ändern."}
+        if not as_term:
+            return {"ok": True, "message": ""}
+        name = json.loads((folder / "session.json").read_text(encoding="utf-8")).get("course_name", "")
+        module, new = self.profile.find(name), review.term(word["word"])
+        if module is None:
+            return {"ok": True, "message": f"Korrigiert, aber das Modul „{name}“ fehlt in deinen Modulen."}
+        if new and new not in module.get("terms", []):
+            self.profile.update(module["id"], terms=(module.get("terms", []) + [new])[:300])
+            self.delivery.wake.set()
+        return {"ok": True, "message": f"„{new}“ steht jetzt in den Fachbegriffen von {module['name']}."}
 
     def open_recording(self, sid: str) -> None:
         folder = getattr(self, "_library", {}).get(sid)
