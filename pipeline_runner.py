@@ -39,6 +39,7 @@ class PipelineRunner:
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.failed: set[str] = set()          # not retried before the next start of the app
+        self.active: str | None = None         # the folder being worked on right now
         try:
             self.queue: list[str] = json.loads(self.queue_file.read_text(encoding="utf-8"))
         except (FileNotFoundError, ValueError):
@@ -55,6 +56,24 @@ class PipelineRunner:
                 self._save()
         self.wake.set()
 
+    def redo(self, folder: Path) -> bool:
+        """Transcribe a recording again, e.g. after the module's terms changed, and write new subtitles.
+
+        The old transcript stays in place until the new one replaces it. False while the
+        recording is being worked on.
+        """
+        folder = Path(folder)
+        with self.lock:
+            if self.active == str(folder):
+                return False
+            data = read_state(folder)
+            for step in STEPS:
+                data["steps"].pop(step, None)
+            self._write_state(folder, data)
+            self.failed.discard(str(folder))
+        self.enqueue(folder)
+        return True
+
     def describe(self, folder: Path | str | None) -> str:
         """One line for the window about where a recording stands in the pipeline."""
         if not folder:
@@ -62,7 +81,7 @@ class PipelineRunner:
         steps = read_state(folder)["steps"]
         t, s = steps.get("transcribe", {}), steps.get("subtitles", {})
         if s.get("state") == "done":
-            return "Abschrift und Untertitel fertig"
+            return "Transkription und Untertitel fertig"
         if t.get("state") in ("running", "waiting", "failed"):
             return t.get("message", "")
         with self.lock:
@@ -80,6 +99,10 @@ class PipelineRunner:
         data = read_state(folder)
         data["steps"][step] = {"state": state, "message": message,
                                "at": dt.datetime.now().astimezone().isoformat(timespec="seconds"), **extra}
+        self._write_state(folder, data)
+
+    @staticmethod
+    def _write_state(folder: Path, data: dict) -> None:
         tmp = folder / "pipeline.json.tmp"
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, folder / "pipeline.json")
@@ -90,10 +113,14 @@ class PipelineRunner:
             try:
                 with self.lock:
                     todo = [f for f in self.queue if f not in self.failed]
-                if todo and self.can_run():
-                    worked = self._process(Path(todo[0]))
+                    if todo and self.can_run():
+                        self.active = todo[0]
+                if self.active:
+                    worked = self._process(Path(self.active))
             except Exception:
                 logging.getLogger("flex3-light").exception("pipeline")
+            finally:
+                self.active = None
             if not worked:
                 self.wake.wait(WAIT)
                 self.wake.clear()

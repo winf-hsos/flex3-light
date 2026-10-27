@@ -100,7 +100,8 @@ class AssemblyAI:
             raise TranscriptionError(f"AssemblyAI antwortet mit Fehler {e.code}: {detail}") from None
 
     def transcribe_file(self, mp3: Path, language: str, terms: list[str]) -> dict:
-        """{"text", "words": [{"word", "start", "end"}], "segments": [{"start", "end", "text"}]}, in seconds."""
+        """{"text", "words": [{"word", "start", "end", "confidence"}], "segments": [{"start", "end", "text"}]},
+        times in seconds, confidence from 0 to 1 as the service rates each word."""
         upload = self._call("POST", "/v2/upload", raw=mp3.read_bytes())
         request = {"audio_url": upload["upload_url"], "language_code": language, "speech_models": [self.MODEL],
                    "punctuate": True, "format_text": True}
@@ -125,8 +126,8 @@ class AssemblyAI:
             except (TranscriptionError, OSError):
                 pass
         return {"text": job.get("text") or "",
-                "words": [{"word": w["text"], "start": w["start"] / 1000, "end": w["end"] / 1000}
-                          for w in job.get("words") or []],
+                "words": [{"word": w["text"], "start": w["start"] / 1000, "end": w["end"] / 1000,
+                           "confidence": round(w.get("confidence", 1.0), 3)} for w in job.get("words") or []],
                 "segments": [{"start": x["start"] / 1000, "end": x["end"] / 1000, "text": x["text"]}
                              for x in sentences]}
 
@@ -215,7 +216,7 @@ def _whole(transcriber, wav, total, quiet, work, language, terms, progress):
     audio.export(wav, 0, total, mp3)
     result = transcriber.transcribe_file(mp3, language, terms)
     mp3.unlink(missing_ok=True)
-    words = [w for w in ({"start": round(w["start"], 3), "end": round(w["end"], 3), "word": w["word"]}
+    words = [w for w in ({**w, "start": round(w["start"], 3), "end": round(w["end"], 3)}
                          for w in result["words"]) if not in_pause(w, quiet)]
     segments = [{"start": round(s["start"], 3), "end": round(s["end"], 3), "text": s["text"].strip()}
                 for s in result["segments"]]

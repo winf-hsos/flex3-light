@@ -108,9 +108,9 @@ def test_runner_waits_for_key_and_for_the_recording(tmp_path, monkeypatch):
     assert "wartet auf einen Schlüssel für AssemblyAI oder OpenAI" in r.describe(folder)
     key["value"] = "sk-test"
     r.wake.set()
-    while r.describe(folder) != "Abschrift und Untertitel fertig" and _time.time() < deadline + 20:
+    while r.describe(folder) != "Transkription und Untertitel fertig" and _time.time() < deadline + 20:
         _time.sleep(0.1)
-    assert r.describe(folder) == "Abschrift und Untertitel fertig"
+    assert r.describe(folder) == "Transkription und Untertitel fertig"
     assert (folder / "subtitles.de.vtt").exists() and json.loads((tmp_path / "queue.json").read_text()) == []
 
 
@@ -151,7 +151,8 @@ def test_assemblyai_adapter_converts_and_deletes(tmp_path, monkeypatch):
     calls = []
     answers = iter([{"upload_url": "https://cdn/x"}, {"id": "t1", "status": "queued"},
                     {"id": "t1", "status": "completed", "text": "Hallo Welt.",
-                     "words": [{"text": "Hallo", "start": 100, "end": 400}, {"text": "Welt.", "start": 450, "end": 900}]},
+                     "words": [{"text": "Hallo", "start": 100, "end": 400, "confidence": 0.99},
+                               {"text": "Welt.", "start": 450, "end": 900, "confidence": 0.4321}]},
                     {"sentences": [{"start": 100, "end": 900, "text": "Hallo Welt."}]}, {}])
     a = transcribe.AssemblyAI("secret", "https://api.eu.assemblyai.com/")
     monkeypatch.setattr(a, "_call", lambda method, path, body=None, raw=None: calls.append((method, path, body))
@@ -161,7 +162,7 @@ def test_assemblyai_adapter_converts_and_deletes(tmp_path, monkeypatch):
     mp3.write_bytes(b"x")
     r = a.transcribe_file(mp3, "de", ["Exposé", "a phrase with far more than six words in it"])
     assert calls[1][2]["speech_models"] == ["universal-3-pro"] and calls[1][2]["keyterms_prompt"] == ["Exposé"]
-    assert r["words"][1] == {"word": "Welt.", "start": 0.45, "end": 0.9} and r["segments"][0]["text"] == "Hallo Welt."
+    assert r["words"][1] == {"word": "Welt.", "start": 0.45, "end": 0.9, "confidence": 0.432} and r["segments"][0]["text"] == "Hallo Welt."
     assert calls[-1][:2] == ("DELETE", "/v2/transcript/t1") and "secret" not in repr(a)
 
 
@@ -179,3 +180,19 @@ def test_runner_falls_back_to_whisper(tmp_path, monkeypatch):
     assert failing.calls and whisper.calls
     step = pipeline_runner.read_state(folder)["steps"]["transcribe"]
     assert step["state"] == "done" and step["model"] == "fake"
+
+
+def test_redo_queues_the_transcription_again(tmp_path):
+    import pipeline_runner
+    folder = tmp_path / "2026-10-27 - Test"
+    folder.mkdir()
+    (folder / "pipeline.json").write_text(json.dumps({"steps": {"transcribe": {"state": "done"},
+                                                                "subtitles": {"state": "done"}}}), encoding="utf-8")
+    r = pipeline_runner.PipelineRunner(tmp_path / "queue.json", lambda: False, lambda meta: [])
+    r.failed.add(str(folder))
+    r.active = str(folder)
+    assert not r.redo(folder)                                      # not while it is being worked on
+    r.active = None
+    assert r.redo(folder)
+    assert pipeline_runner.read_state(folder)["steps"] == {} and str(folder) not in r.failed
+    assert r.describe(folder) == "Transkription folgt"
