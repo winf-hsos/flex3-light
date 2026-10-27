@@ -47,12 +47,32 @@ Screen, camera and microphone through OBS, a new file every minute, filed as a s
 
 ### 2. Transcription (cloud, decision of 2026-10-26)
 
+**Built on 2026-10-26** in `pipeline/` (audio pieces, `whisper-1` adapter, prompt with the module's terms, invented-text check, punctuation, subtitles) and `pipeline_runner.py` (queue after filing, only while not recording, waits for the key). Tested on the German test session: 5 minutes in 23 seconds, 963 words with timestamps, 92 subtitle cues. Still open from this section: the correction by a language model and the check for quiet voices from the room.
+
+**AssemblyAI since 2026-10-27** (decision of the project lead after the comparison below): `transcribe.AssemblyAI` sends the whole recording as one MP3 to Universal-3 Pro, in the region that accepts the key (EU first), with the module's terms as key terms, takes words and sentences as they come and deletes the transcript at AssemblyAI right after fetching it. `whisper-1` remains the fallback in the runner until 2027-02-26. On the German test session through the real runner: 16 seconds, 966 words, 50 sentences, 93 subtitle cues.
+
 The project's video assistant has transcribed about ten lectures this way already (OpenAI `whisper-1`, German and English); its procedure and experience, reported on 2026-10-26, shape this step. Its code can be read under `06 - Kommunikation\03 - Videos\.claude\skills\videoschnitt\werkzeuge\` (`transcribe`, corrections in `vp.py`, editing in `lektorat.py`) and is copied, not changed, where we take something over.
 
 - **Audio:** mono 16 kHz from the recording, cut at speech pauses (ffmpeg `silencedetect`, −35 dB, 0.4 s) into pieces of about ten minutes and sent as MP3 at 48 kbit/s, which keeps each piece well under OpenAI's 25 MB. Word times are shifted back onto the common timeline, finished pieces are cached. Each piece gets context and the module's word list as prompt (with `whisper-1` about 800 characters fit the 224-token limit).
 - **Model and word timestamps.** Word timestamps come directly from the model only with `whisper-1`, which is deprecated and will be shut down on 2027-02-26; the recommended `gpt-transcribe` documents `prompt`, `keywords` and `languages` but no word timestamps ([OpenAI speech-to-text guide](https://developers.openai.com/api/docs/guides/speech-to-text)). The video assistant got a 403 for `gpt-4o-transcribe` with the project key on 2026-10-22. So the transcription sits behind an adapter, and two successors are compared on the two released test sessions of the FLEX3 repository, one German and one English, before `whisper-1` ends:
   1. **ElevenLabs Scribe,** which according to ElevenLabs returns word timestamps, speaker labels and non-speech events directly and states a German word error rate of 3.1 % on FLEURS (vendor figure; whether the API gives word or character timestamps is to be checked in the API reference). It would need no extra alignment, and ElevenLabs is planned anyway for music and dubbing, so one key would serve three steps.
   2. **`gpt-transcribe` plus a local forced alignment** (the method WhisperX uses), which gives every word its time after the lecture, on the CPU.
+  3. **AssemblyAI** (added 2026-10-27; the project lead already uses it for research interviews), with word timestamps from the model and an EU region (`api.eu.assemblyai.com`), where the project's key lives.
+
+  **First comparison, 2026-10-27,** on the German test session (5 minutes, same 48 kbit/s MP3 and the same three terms as for `whisper-1`; Universal-2 takes no terms for German). There is no reference transcript, so the table counts where the models disagree and judges the clear cases from the context:
+
+  | | `whisper-1` | AssemblyAI Universal-3 Pro | Universal-3.5 Pro | Universal-2 |
+  |---|---|---|---|---|
+  | time for 5 min | 23 s | 11 s | 16 s | 7 s |
+  | words | 963 | 967 | 960 | 948 |
+  | "eine KI auf unserem Rechner" | "Klinik" | right | right | – |
+  | "mit er oder es, meine ich den Agenten" | "R oder S" | right | right | "R oder S" |
+  | "Exposé" (a given term) | "Explosion" | right | right | – |
+  | "das geht dich gar nichts an" | right | "sich" | word missing | – |
+  | restarts and fillers ("Genau, die ich hier mal aufliste") | often left out | kept | partly | partly |
+  | price per hour | about 0.36 USD | 0.21 USD (+0.05 for terms) | 0.21 USD | 0.15 USD |
+
+  Word times of Universal-3 Pro and 3.5 Pro agree within 20 ms (95 %), while `whisper-1` differs from both by 30 ms in the median and up to 310 ms; the two AssemblyAI models are probably closer to the truth, which only listening can confirm. Universal-2 misspells "Quarto" and takes no terms in German, so it is out. Prices from [AssemblyAI's pricing](https://www.assemblyai.com/pricing) as of 2026-10-27.
   Measured are errors in technical terms and the accuracy of the word times.
 - **Hallucinations.** In silence Whisper writes "Thank you", "Thanks for watching" or repeats the prompt. Such pieces are recognised and sent again without prompt, and words that fall into silence are dropped.
 - **Correction:** without a word list the model mishears technical terms ("Chat TPT", "Cloud Code" for Claude Code, "Live File" for LiFi, "2 4" for 2.4). The module's word list from the profile goes into the prompt, and afterwards a language model goes over the whole transcript once and fixes the rest without changing the timing, as general replacements plus corrections at single positions (for a three-hour session the video assistant needed about 100 and 40).
@@ -125,7 +145,7 @@ Streaming speech recognition during the lecture, shown in a transparent subtitle
 
 ## Open points
 
-- **Successor of `whisper-1`** before 2027-02-26: the comparison of ElevenLabs Scribe and `gpt-transcribe` with local alignment on the two test sessions. For it, check in the API references (OpenAI's was not reachable on 2026-10-26) whether `gpt-transcribe` returns any timestamps and whether Scribe's are per word or per character, and why the project key got a 403 for `gpt-4o-transcribe`.
+- **Successor of `whisper-1`:** AssemblyAI Universal-3 Pro is built in (2026-10-27). Still to do: the English test session, a listening check of the disputed spots, and whether Universal-3.5 Pro is the better default once it has been compared on more material. For it, check in the API references (OpenAI's was not reachable on 2026-10-26) whether `gpt-transcribe` returns any timestamps and whether Scribe's are per word or per character, and why the project key got a 403 for `gpt-4o-transcribe`.
 - **Prices** for the successors and the language model per lecture hour; OpenAI's pricing page was not reachable either.
 - **Opencast access** from the computing centre for the automated upload.
 - **Rights of the ElevenLabs music** for publication on YouTube, depending on the plan.

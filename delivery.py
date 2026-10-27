@@ -27,6 +27,7 @@ import socket
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 import split
 from server_client import ServerClient, ServerError
@@ -192,6 +193,7 @@ class Delivery:
         self.server_error = ""
         self._retry = 0
         self.last_exception = ""
+        self.on_archived: Callable[[Path], None] | None = None   # the pipeline picks it up
 
     def start(self, still_recording: Path | None = None) -> "Delivery":
         """Pick up unfinished sessions from earlier runs and start both threads.
@@ -276,6 +278,7 @@ class Delivery:
                     "completed": s.data["server"]["completed"], "error": s.data["error"],
                     "server_error": self.server_error if s.data["deliver"] else "",
                     "screen": s.data["archive"]["screen"], "module": s.data["module"],
+                    "session_folder": s.data["archive"].get("session_folder"),
                     "alttab": len(s.data["alttab"]) if s.data["hide_alttab"] else 0}
 
     # ---------------------------------------------------------- threads
@@ -413,6 +416,8 @@ class Delivery:
             s.data["state"] = "archived"
             s.save()
         shutil.rmtree(s.raw_dir, ignore_errors=True)
+        if self.on_archived:
+            self.on_archived(folder)
         if not s.data["deliver"]:
             self._finish(s)
         self.wake.set()

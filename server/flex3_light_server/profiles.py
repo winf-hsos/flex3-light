@@ -14,6 +14,7 @@ import re
 LANGUAGE = re.compile(r"^[a-z]{2}$")
 CODE = re.compile(r"^[a-z0-9-]{0,40}$")
 TEXT_FIELDS = {"name": 200, "ilias_course_id": 100, "opencast_series_id": 100}
+MAX_TERMS, TERM_LIMIT = 300, 80     # the module's technical terms, for transcription and its correction
 
 
 def clean(entry: dict) -> dict:
@@ -37,6 +38,11 @@ def clean(entry: dict) -> dict:
     if not isinstance(language, str) or not LANGUAGE.match(language):
         raise ValueError(f"invalid language in {eid}")
     out["code"], out["language"] = code, language
+    terms = entry.get("terms", [])
+    if not isinstance(terms, list) or len(terms) > MAX_TERMS or any(
+            not isinstance(t, str) or not t.strip() or len(t) > TERM_LIMIT for t in terms):
+        raise ValueError(f"invalid terms in {eid}")
+    out["terms"] = [t.strip() for t in terms]
     if not out["deleted"] and not out["name"]:
         raise ValueError(f"module {eid} has no name")
     return out

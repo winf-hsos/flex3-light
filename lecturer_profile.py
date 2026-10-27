@@ -22,7 +22,7 @@ import time
 import uuid
 from pathlib import Path
 
-FIELDS = ("name", "code", "language", "ilias_course_id", "opencast_series_id")
+FIELDS = ("name", "code", "language", "ilias_course_id", "opencast_series_id", "terms")
 SYNC_EVERY = 300            # seconds between syncs when nothing changed locally
 
 
@@ -124,7 +124,7 @@ class Profile:
 
     def add(self, name: str, **fields) -> dict:
         entry = {"id": uuid.uuid4().hex, "name": name.strip(), "code": "", "language": "de",
-                 "ilias_course_id": "", "opencast_series_id": "", "deleted": False}
+                 "ilias_course_id": "", "opencast_series_id": "", "terms": [], "deleted": False}
         entry.update({k: v for k, v in fields.items() if k in FIELDS})
         if not entry["code"]:
             entry["code"] = code_for(entry["name"])
@@ -148,7 +148,7 @@ class Profile:
                 eid = uuid.uuid4().hex
                 self.data["modules"][eid] = {"id": eid, "name": e["name"], "code": e.get("code", ""),
                                              "language": e.get("language", "de"), "ilias_course_id": "",
-                                             "opencast_series_id": "", "deleted": False, "updated_at": 0.0,
+                                             "opencast_series_id": "", "terms": [], "deleted": False, "updated_at": 0.0,
                                              "seed": True}
             self.data["revision"] += 1
             self.save()
