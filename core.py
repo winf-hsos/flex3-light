@@ -26,7 +26,7 @@ import services
 import monitors                  # sets DPI awareness on import: physical pixels
 import obs_remote as remote
 import obs_scene as scene
-from delivery import Delivery
+from delivery import Delivery, recycle
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
 from pipeline import review
@@ -487,6 +487,20 @@ class Core:
             self.profile.update(module["id"], terms=(module.get("terms", []) + [new])[:300])
             self.delivery.wake.set()
         return {"ok": True, "message": f"„{new}“ steht jetzt in den Fachbegriffen von {module['name']}."}
+
+    def delete_recording(self, sid: str) -> str:
+        """Move a recording's session folder with all its files to the recycle bin; returns an error or ''."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        if not self.pipeline.forget(folder):
+            return "Die Aufnahme wird gerade transkribiert. Lösch sie, wenn das fertig ist."
+        try:
+            recycle(folder)
+        except OSError as e:
+            return f"Löschen fehlgeschlagen: {e}"
+        self._library.pop(sid, None)
+        return ""
 
     def open_recording(self, sid: str) -> None:
         folder = getattr(self, "_library", {}).get(sid)

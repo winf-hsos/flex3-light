@@ -54,7 +54,7 @@ def free_dir(path: Path) -> Path:
 
 
 def recycle(path: Path) -> None:
-    """Move a file to the recycle bin (falls back to deleting it if Windows refuses)."""
+    """Move a file or folder to the recycle bin; a file is deleted if Windows refuses, a folder never."""
     class SHFILEOPSTRUCTW(ctypes.Structure):
         _fields_ = [("hwnd", ctypes.c_void_p), ("wFunc", ctypes.c_uint), ("pFrom", ctypes.c_wchar_p),
                     ("pTo", ctypes.c_wchar_p), ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", ctypes.c_int),
@@ -63,6 +63,8 @@ def recycle(path: Path) -> None:
     op = SHFILEOPSTRUCTW(wFunc=FO_DELETE, pFrom=str(path) + "\0",
                          fFlags=FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI)
     if ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) != 0 and path.exists():
+        if path.is_dir():
+            raise OSError(f"Windows hat {path.name} nicht in den Papierkorb gelegt.")
         path.unlink()
 
 

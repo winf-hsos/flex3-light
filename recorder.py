@@ -130,6 +130,9 @@ class Api:
     def redo_transcription(self, sid):
         return self._core.redo_transcription(sid)
 
+    def delete_recording(self, sid):
+        return self._core.delete_recording(sid)
+
     def review_word(self, sid, index, text, as_term=False):
         return self._core.review_word(sid, index, text, bool(as_term))
 
