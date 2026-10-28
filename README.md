@@ -133,6 +133,7 @@ Settings are stored in `%APPDATA%\flex3-light\settings.json`, the profile in `pr
 | `tests/` | Tests for the server and for the whole delivery without OBS (`python -m pytest tests`, needs `requirements-dev.txt`) |
 | `tools/benchmark.py` | Test recording that measures CPU, GPU and encoder load |
 | `tools/build_exe.py` | Builds the single exe with PyInstaller |
+| `tools/make_icon.py` | Draws the app icon (`assets/icon.ico`, `assets/icon.png`): the blue square with the white dot from the window's sidebar; the window sets it at start, so the taskbar shows it also when run from source |
 
 Hiding Alt+Tab needs a small correction: the time OBS reports runs about 0.55 seconds ahead of the picture that ends up in the file, so the detected spans are shifted by that delay and padded a little on both sides before they are frozen.
 

@@ -20,7 +20,7 @@ if __name__ == "__main__":
         sys.exit("ffmpeg not found on the PATH")
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
                     "--name", "flex3-light", "--icon", str(ROOT / "assets" / "icon.ico"),
-                    "--add-data", f"{ROOT / 'ui.html'};.",
+                    "--add-data", f"{ROOT / 'ui.html'};.", "--add-data", f"{ROOT / 'assets' / 'icon.ico'};assets",
                     "--add-binary", f"{ffmpeg};.",
                     "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build"),
                     "--specpath", str(ROOT / "build"),

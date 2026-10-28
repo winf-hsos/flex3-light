@@ -271,6 +271,28 @@ def set_topmost(on_top: bool) -> None:
                                           SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
 
 
+def set_window_icon(icon: Path) -> None:
+    """Give the window FLEX3 Light's icon in the title and the taskbar.
+
+    WinForms takes the icon of the running program, which is python(w).exe when started
+    from source; the packaged exe carries its own. WM_SETICON is sent, so it is safe
+    from any thread.
+    """
+    hwnd = ctypes.windll.user32.FindWindowW(None, TITLE)
+    if not hwnd or not icon.exists():
+        return
+    user32 = ctypes.windll.user32
+    user32.LoadImageW.restype = ctypes.c_void_p
+    user32.SendMessageW.argtypes = (ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_void_p)
+    IMAGE_ICON, LR_LOADFROMFILE, WM_SETICON, ICON_SMALL, ICON_BIG = 1, 0x10, 0x80, 0, 1
+    SM_CXSMICON, SM_CXICON = 49, 11
+    for kind, metric in ((ICON_SMALL, SM_CXSMICON), (ICON_BIG, SM_CXICON)):
+        size = user32.GetSystemMetrics(metric)
+        handle = user32.LoadImageW(None, str(icon), IMAGE_ICON, size, size, LR_LOADFROMFILE)
+        if handle:
+            user32.SendMessageW(hwnd, WM_SETICON, kind, handle)
+
+
 def capture_exclusion(exclude: bool) -> None:
     """Hide the window from screen capture (WDA_EXCLUDEFROMCAPTURE) or show it again.
 
@@ -337,6 +359,7 @@ def main(test_func=None) -> None:
     # Closed by Windows (Alt+F4, taskbar) during a recording: keep it, like the close button does,
     # instead of leaving OBS recording with nobody to stop it.
     window.events.closing += lambda: core.finish(save=True)
+    window.events.shown += lambda: set_window_icon(HERE / "assets" / "icon.ico")
     if test_func:
         webview.start(test_func, window)
     else:
