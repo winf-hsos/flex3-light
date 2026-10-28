@@ -64,3 +64,18 @@ def test_app_corrects_and_adds_the_term_to_the_module(tmp_path):
     t = json.loads((folder / "transcript.json").read_text(encoding="utf-8"))
     assert t["words"][7]["word"] == "Quarto." and t["words"][6]["checked"] and t["words"][6]["word"] == "das"
     assert module["id"] == c.profile.find("Planung")["id"]
+
+
+def test_files_wait_while_windows_holds_the_file(tmp_path, monkeypatch):
+    from pipeline import files
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError("in use")
+        return "ok"
+    monkeypatch.setattr(files.time, "sleep", lambda s: None)
+    assert files.retry(flaky) == "ok" and calls["n"] == 3
+    files.write_json(tmp_path / "a.json", {"x": 1})
+    assert files.read_json(tmp_path / "a.json") == {"x": 1} and files.read_json(tmp_path / "missing.json", []) == []

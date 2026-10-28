@@ -7,21 +7,17 @@ recorded, transcript, cut, content, publish. The last three are not built yet.
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
-from pipeline import review
+from pipeline import files, review
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
 MEDIA = re.compile(r"^(recording|screen|camera)\.mp4$|^subtitles\.[a-z]{2}\.vtt$")
 
 
 def _read(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, ValueError):
-        return {}
+    return files.read_json(path)
 
 
 def stations(folder: Path) -> dict[str, str]:

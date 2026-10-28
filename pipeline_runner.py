@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 import services
-from pipeline import subtitles, transcribe
+from pipeline import files, subtitles, transcribe
 
 STEPS = ("transcribe", "subtitles")
 WAIT = 30                    # seconds between checks while waiting for a key or for the recording to end
@@ -26,10 +26,7 @@ WHISPER_END = dt.date(2027, 2, 26)   # OpenAI shuts whisper-1 down
 
 
 def read_state(folder: Path) -> dict:
-    try:
-        return json.loads((Path(folder) / "pipeline.json").read_text(encoding="utf-8"))
-    except (FileNotFoundError, ValueError):
-        return {"steps": {}}
+    return files.read_json(Path(folder) / "pipeline.json", {"steps": {}})
 
 
 class PipelineRunner:
@@ -74,6 +71,15 @@ class PipelineRunner:
         self.enqueue(folder)
         return True
 
+    def forget(self, folder: Path) -> bool:
+        """Take a recording out of the queue before it is deleted; False while it is being worked on."""
+        with self.lock:
+            if self.active == str(folder):
+                return False
+            self.failed.discard(str(folder))
+            self._drop(Path(folder))
+        return True
+
     def describe(self, folder: Path | str | None) -> str:
         """One line for the window about where a recording stands in the pipeline."""
         if not folder:
@@ -103,9 +109,7 @@ class PipelineRunner:
 
     @staticmethod
     def _write_state(folder: Path, data: dict) -> None:
-        tmp = folder / "pipeline.json.tmp"
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(tmp, folder / "pipeline.json")
+        files.write_json(folder / "pipeline.json", data)
 
     def _loop(self) -> None:
         while True:

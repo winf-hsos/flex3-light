@@ -15,7 +15,7 @@ import json
 import re
 from pathlib import Path
 
-from . import subtitles
+from . import files, subtitles
 
 UNSURE = 0.6          # below this a word is worth a look ...
 VERY_UNSURE = 0.5     # ... and below this even a short one
@@ -27,14 +27,12 @@ def _letters(word: str) -> int:
 
 
 def _load(session_dir: Path) -> dict:
-    return json.loads((Path(session_dir) / "transcript.json").read_text(encoding="utf-8"))
+    path = Path(session_dir) / "transcript.json"
+    return files.retry(lambda: json.loads(path.read_text(encoding="utf-8")))
 
 
 def _save(session_dir: Path, transcript: dict) -> None:
-    path = Path(session_dir) / "transcript.json"
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(transcript, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(path)
+    files.write_json(Path(session_dir) / "transcript.json", transcript)
 
 
 def uncertain(transcript: dict) -> list[dict]:
