@@ -23,6 +23,7 @@ DEFAULT_POLICY = {
     "suggest_programs": ["outlook.exe", "olk.exe", "hxoutlook.exe", "thunderbird.exe", "whatsapp.exe",
                          "signal.exe", "telegram.exe", "explorer.exe"],
     "cut_titles": ["posteingang", "inbox", "gmail", "whatsapp web", "outlook"],
+    "kinds_off": [],                 # kinds of items the lecturer does not want proposed, e.g. blur or zoom
 }
 EDGE_MIN = 3.0                       # seconds of silence at an edge worth a proposal
 SHORTEST_SPAN = 1.0                  # program spans shorter than this are Alt+Tab blips
@@ -102,4 +103,5 @@ def program_summary(activity: list) -> list[dict]:
 
 def propose(words: list[dict], duration: float, activity: list, settings: dict | None = None) -> list[dict]:
     pol = policy(settings)
-    return edges(words, duration) + pauses(words, pol) + programs(activity, pol)
+    found = edges(words, duration) + pauses(words, pol) + programs(activity, pol)
+    return [x for x in found if x["kind"] not in pol["kinds_off"]]

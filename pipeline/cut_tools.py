@@ -63,6 +63,7 @@ class Workbench:
         self.tracks = {k: self.folder / v for k, v in TRACKS.items() if (self.folder / v).exists()}
         self.duration = float(self.transcript.get("duration") or self.meta.get("duration_sec") or 0)
         self.settings, self.listener = settings or {}, listener
+        self.kinds_off = set(self.settings.get("kinds_off") or [])    # switched off by the lecturer
         self.edit = edit.load(self.folder) or edit.new(self.duration)
         self._work = Path(tempfile.mkdtemp(prefix="flex3-cut-"))
         self._wav: Path | None = None
@@ -234,6 +235,8 @@ class Workbench:
                 **params) -> dict:
         """A decided proposal of the agent (accepted, or rejected to show an alternative it weighed).
         replaces: ids of rule proposals this one stands in for; category: why something is removed."""
+        if kind in self.kinds_off:
+            raise ValueError(f"the lecturer switched {kind} off; do not propose it")
         if kind not in edit.SPANLESS:
             start, end = edit.snap(start, self.words), edit.snap(end, self.words)
         start = max(0.0, start)

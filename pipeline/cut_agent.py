@@ -146,6 +146,30 @@ for t in TOOLS:                                   # loose schemas: params is fre
     t["strict"] = False
 
 
+def tools_for(kinds_off: set[str]) -> list[dict]:
+    """The tools with the kinds the lecturer switched off taken out of propose, so they are not even offered."""
+    if not kinds_off:
+        return TOOLS
+    out = []
+    for t in TOOLS:
+        if t["name"] == "propose":
+            t = json.loads(json.dumps(t))
+            kinds = t["parameters"]["properties"]["kind"]
+            kinds["enum"] = [k for k in kinds["enum"] if k not in kinds_off]
+            t["description"] += " Not available here (switched off by the lecturer): " + ", ".join(sorted(kinds_off)) + "."
+        out.append(t)
+    return out
+
+
+def instructions_for(kinds_off: set[str]) -> str:
+    if not kinds_off:
+        return INSTRUCTIONS
+    names = ", ".join(sorted(kinds_off))
+    return (INSTRUCTIONS + f"\n\nThe lecturer has switched off: {names}. Do not propose these and do not work around "
+            "them with other kinds; where one of them would have been the right answer (say, a pixelation for a mail on "
+            "screen), mention it among the items worth a look or in the notes, so the lecturer can decide.")
+
+
 # what the window says the agent is doing, by tool
 DOING = {"get_words": "liest die Transkription", "search_transcript": "sucht in der Transkription",
          "get_frame": "sieht sich ein Bild an", "get_contact_sheet": "sieht sich eine Strecke in Bildern an",
@@ -279,7 +303,9 @@ class CutAgent:
 
     def run(self) -> str:
         self._log(event="start", model=getattr(self.client, "model", ""), folder=str(self.bench.folder))
-        body = {"instructions": INSTRUCTIONS, "tools": TOOLS, "input": [
+        off = self.bench.kinds_off
+        tools, instructions = tools_for(off), instructions_for(off)
+        body = {"instructions": instructions, "tools": tools, "input": [
             {"role": "user", "content": [{"type": "input_text", "text": self._first_message()}]}]}
         for round_ in range(1, self.max_rounds + 1):
             response = self.client.create(body)
@@ -311,7 +337,7 @@ class CutAgent:
                     pictures.append(picture)
             if self.summary and any(c["name"] == "finish" for c in calls):
                 break
-            body = {"previous_response_id": response["id"], "tools": TOOLS, "instructions": INSTRUCTIONS,
+            body = {"previous_response_id": response["id"], "tools": tools, "instructions": instructions,
                     "input": outputs + pictures}
         else:
             self.summary = self.summary or "Rundenbudget erschöpft; die Liste ist unvollständig."

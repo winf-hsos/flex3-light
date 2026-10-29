@@ -270,3 +270,24 @@ def test_agent_leaves_nothing_open_and_the_summary_has_one_shape(tmp_path):
     assert s["clips"] == ["Wie man anfängt"] and s["chapters"] == ["Einstieg"]
     assert s["check"] == [{"id": pause["id"], "why": "knapp"}] and s["notes"] == ["Mikrofon war anfangs leise."]
     assert s["kept"] < s["duration"]
+
+
+def test_switched_off_kinds_are_not_proposed(tmp_path):
+    off = {"kinds_off": ["blur", "zoom", "pause"]}
+    rules = cut_rules.propose(WORDS, 60.0, [], off)
+    assert rules and all(x["kind"] != "pause" for x in rules)                 # the edges stay, the pause does not
+    tools = cut_agent.tools_for(set(off["kinds_off"]))
+    kinds = next(t for t in tools if t["name"] == "propose")["parameters"]["properties"]["kind"]["enum"]
+    assert "blur" not in kinds and "zoom" not in kinds and "cut" in kinds
+    assert "blur" in next(t for t in cut_agent.TOOLS if t["name"] == "propose")["parameters"]["properties"]["kind"]["enum"]
+    assert "switched off: blur, pause, zoom" in cut_agent.instructions_for(set(off["kinds_off"]))
+    b = cut_tools.Workbench(_session(tmp_path), off)
+    try:
+        try:
+            b.propose("blur", 5, 9, "Mail", 0.8, category="privacy", region=[0.1, 0.1, 0.2, 0.05])
+            raise AssertionError("a switched-off kind must be refused")
+        except ValueError as e:
+            assert "switched blur off" in str(e)
+        assert b.propose("cut", 5.2, 8.3, "Mikrofontest", 0.8, category="technical")["kind"] == "cut"
+    finally:
+        b.close()

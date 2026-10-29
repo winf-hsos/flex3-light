@@ -319,6 +319,7 @@
   .setting-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
   .setting-row select, .setting-row input { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
   .setting-row input { width: 70px; }
+  .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 12px; }
   #dTerms { margin-top: -6px; font-size: 12px; }
   #dTerms:empty { display: none; }
   .spots { padding: 14px 16px; display: grid; gap: 10px; justify-items: start; }
@@ -566,6 +567,8 @@
             <label class="toggle"><input type="checkbox" id="cut_auto" onchange="saveCutSettings()"><span class="knob"></span><span><b>Schnitt von selbst vorschlagen</b><small>Nach der Transkription sieht sich der Schnitt-Agent jede Aufnahme an. Gerendert wird erst nach deiner Freigabe.</small></span></label>
             <div class="setting-row"><span>Lange Pausen ab</span><span><input type="number" id="cut_pause_min" min="10" max="600" onchange="saveCutSettings()"> Sekunden</span></div>
             <div class="setting-row"><span>Lange Pausen</span><select id="cut_pause_mode" onchange="saveCutSettings()"><option value="card">mit Tafel „Pause entfernt“ schneiden</option><option value="shorten">auf zwei Sekunden kürzen</option><option value="cut">ohne Hinweis schneiden</option></select></div>
+            <div class="cut-group"><h3>Was der Schnitt-Agent vorschlagen darf</h3><div class="kinds" id="cutKinds"></div>
+              <div class="section-note">Was ausgeschaltet ist, schlägt er nicht vor; du kannst es selbst setzen. Gilt ab dem nächsten Vorschlag.</div></div>
             <div class="cut-group"><h3>Immer schneiden</h3><div class="chips" id="cutPrograms"></div></div>
             <div class="cut-group"><h3>Immer behalten</h3><div class="chips" id="keepPrograms"></div></div>
             <div class="section-note">Programme legst du in „Meine Aufnahmen“ beim Schnitt einer Aufnahme fest.</div>
@@ -1417,6 +1420,19 @@
     $("cut_auto").checked = cutSettings.auto !== false;
     $("cut_pause_mode").value = cutSettings.pause_mode || "card";
     $("cut_pause_min").value = Math.round(cutSettings.pause_min || 30);
+    const kinds = $("cutKinds"); kinds.innerHTML = "";
+    const off = cutSettings.kinds_off || [];
+    for (const [kind, name] of Object.entries(CUT_KINDS)) {
+      const label = el("label", "check");
+      const box = el("input"); box.type = "checkbox"; box.checked = !off.includes(kind);
+      box.onchange = async () => {
+        const now = box.checked ? off.filter(k => k !== kind) : [...off, kind];
+        await api().set_cut_settings({kinds_off: now});
+        cutSettings = (await api().data()).cut; fillCutSettings();
+      };
+      label.append(box, " " + name);
+      kinds.appendChild(label);
+    }
     for (const [id, key] of [["cutPrograms", "cut_programs"], ["keepPrograms", "keep_programs"]]) {
       const box = $(id); box.innerHTML = "";
       const names = cutSettings[key] || [];

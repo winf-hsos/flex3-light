@@ -463,7 +463,7 @@ class Core:
 
     def set_cut_settings(self, values: dict) -> None:
         current = dict(self.settings.get("cut") or {})
-        for k in ("auto", "pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles"):
+        for k in ("auto", "pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off"):
             if k in values:
                 current[k] = values[k]
         if current.get("pause_mode") not in ("card", "shorten", "cut"):
@@ -471,6 +471,7 @@ class Core:
         current["pause_min"] = min(600.0, max(10.0, float(current.get("pause_min", 30))))
         for k in ("cut_programs", "keep_programs", "cut_titles"):
             current[k] = sorted({str(x).strip().lower() for x in current.get(k, []) if str(x).strip()})
+        current["kinds_off"] = sorted({k for k in current.get("kinds_off", []) if k in edit.KINDS})
         self.settings["cut"] = current
         self.save()
 
