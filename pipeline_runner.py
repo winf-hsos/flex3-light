@@ -5,7 +5,11 @@ worked off only while nothing is being recorded (the guiding principle "little l
 during the lecture"), survives a restart in pipeline-queue.json, and keeps the state
 of every step in pipeline.json inside the session folder, so a step that is done is
 never repeated. The transcription goes to AssemblyAI and, should that fail, to OpenAI's
-whisper-1 until its end; without a key for either it waits instead of failing.
+whisper-1 until its end; without a key for either it waits instead of failing. After the
+subtitles the cut agent proposes the edit list (pipeline/cut_agent.py), unless the
+lecturer switched that off; the list then waits for the lecturer's approval. Once it is
+approved, the videos are rendered (pipeline/render.py), and again whenever an approved
+list differs from the one rendered last.
 """
 from __future__ import annotations
 
@@ -18,9 +22,10 @@ from pathlib import Path
 from typing import Callable
 
 import services
-from pipeline import files, subtitles, transcribe
+from pipeline import cut_agent, edit, files, render, subtitles, transcribe
 
-STEPS = ("transcribe", "subtitles")
+STEPS = ("transcribe", "subtitles", "cut", "render")
+TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
 WAIT = 30                    # seconds between checks while waiting for a key or for the recording to end
 WHISPER_END = dt.date(2027, 2, 26)   # OpenAI shuts whisper-1 down
 
@@ -30,9 +35,13 @@ def read_state(folder: Path) -> dict:
 
 
 class PipelineRunner:
-    def __init__(self, queue_file: Path, can_run: Callable[[], bool], terms_for: Callable[[dict], list[str]]):
+    def __init__(self, queue_file: Path, can_run: Callable[[], bool], terms_for: Callable[[dict], list[str]],
+                 cut_settings: Callable[[], dict] = lambda: {"auto": False}, video_args: list[str] | None = None):
+        """cut_settings: the lecturer's settings for the cut, with "auto" (propose by itself) and the
+        rule policy of pipeline/cut_rules.py."""
         self.queue_file = Path(queue_file)
-        self.can_run, self.terms_for = can_run, terms_for
+        self.can_run, self.terms_for, self.cut_settings = can_run, terms_for, cut_settings
+        self.video_args = video_args
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.failed: set[str] = set()          # not retried before the next start of the app
@@ -64,7 +73,7 @@ class PipelineRunner:
             if self.active == str(folder):
                 return False
             data = read_state(folder)
-            for step in STEPS:
+            for step in TRANSCRIPT_STEPS:
                 data["steps"].pop(step, None)
             self._write_state(folder, data)
             self.failed.discard(str(folder))
@@ -80,14 +89,43 @@ class PipelineRunner:
             self._drop(Path(folder))
         return True
 
+    def redo_cut(self, folder: Path) -> bool:
+        """Let the agent propose the cut again; the old edit list is kept as edit.previous.json."""
+        folder = Path(folder)
+        with self.lock:
+            if self.active == str(folder):
+                return False
+            if (folder / "edit.json").exists():
+                files.retry(lambda: os.replace(folder / "edit.json", folder / "edit.previous.json"))
+            data = read_state(folder)
+            data["steps"].pop("cut", None)
+            data["cut_requested"] = True                  # also when the lecturer switched the agent off
+            self._write_state(folder, data)
+            self.failed.discard(str(folder))
+        self.enqueue(folder)
+        return True
+
     def describe(self, folder: Path | str | None) -> str:
         """One line for the window about where a recording stands in the pipeline."""
         if not folder:
             return ""
         steps = read_state(folder)["steps"]
-        t, s = steps.get("transcribe", {}), steps.get("subtitles", {})
+        t, s, c = steps.get("transcribe", {}), steps.get("subtitles", {}), steps.get("cut", {})
+        r = steps.get("render", {})
+        if r.get("state") in ("running", "failed"):
+            return r.get("message", "")
+        if c.get("state") in ("running", "waiting", "failed"):
+            return c.get("message", "")
+        if c.get("state") == "done":
+            e = edit.load(Path(folder))
+            if e and e.get("approved"):
+                done = files.read_json(Path(folder) / "render.json").get("signature") == render.signature(e)
+                return "Geschnittenes Video fertig" if done else "Schnitt freigegeben, das Video wird gleich gerendert"
+            return "Schnitt vorgeschlagen, wartet auf deine Freigabe"
         if s.get("state") == "done":
-            return "Transkription und Untertitel fertig"
+            with self.lock:
+                queued = str(folder) in self.queue
+            return "Schnitt-Vorschlag folgt" if queued else "Transkription und Untertitel fertig"
         if t.get("state") in ("running", "waiting", "failed"):
             return t.get("message", "")
         with self.lock:
@@ -160,9 +198,36 @@ class PipelineRunner:
                 subtitles.run(folder)
                 self._set(folder, "subtitles", "done")
                 return True
+            settings = self.cut_settings()
+            wanted = settings.get("auto", True) or read_state(folder).get("cut_requested")
+            if wanted and steps.get("cut", {}).get("state") != "done" and not (folder / "edit.json").exists():
+                key = services.key("openai")
+                if not key:
+                    self._set(folder, "cut", "waiting", "Schnitt-Vorschlag wartet auf den OpenAI-Schlüssel "
+                              "(Einstellungen, KI-Dienste)")
+                    return False
+                listener = None
+                aai = services.key("assemblyai")
+                base = aai and services.assemblyai_base(aai)
+                if base:
+                    listener = transcribe.AssemblyAI(aai, base)
+                self._set(folder, "cut", "running", "Der Schnitt-Agent sieht sich die Aufnahme an …")
+                result = cut_agent.run(folder, key, listener, settings, progress=lambda text: self._set(
+                    folder, "cut", "running", text))
+                self._set(folder, "cut", "done", model=(result.get("agent") or {}).get("model", ""))
+                return True
+            e = edit.load(folder)
+            if e and e.get("approved") and \
+                    files.read_json(folder / "render.json").get("signature") != render.signature(e):
+                self._set(folder, "render", "running", "Das Video wird gerendert …")
+                report = render.run(folder, self.video_args, progress=lambda text: self._set(
+                    folder, "render", "running", text))
+                self._set(folder, "render", "done", signature=report["signature"])
+                return True
         except Exception as e:
-            step = "transcribe" if steps.get("transcribe", {}).get("state") != "done" else "subtitles"
-            name = "Transkription" if step == "transcribe" else "Untertitel"
+            step = next(k for k in STEPS if steps.get(k, {}).get("state") != "done")
+            name = {"transcribe": "Transkription", "subtitles": "Untertitel", "cut": "Schnitt-Vorschlag",
+                    "render": "Rendern"}[step]
             self._set(folder, step, "failed", f"{name} fehlgeschlagen: {e}"[:300])
             self.failed.add(str(folder))
             return True

@@ -202,7 +202,7 @@
   .station::before { content: ""; position: absolute; z-index: 0; top: 13px; left: -50%; right: 50%; height: 2px; background: var(--line); }
   .station:first-child::before { display: none; }
   .station.done::before, .station.running::before, .station.waiting::before, .station.failed::before,
-  .station.queued::before { background: var(--green); }
+  .station.queued::before, .station.review::before, .station.open::before { background: var(--green); }
   .station .no { position: relative; z-index: 1; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
     font-size: 12.5px; font-weight: 700; background: var(--surface); border: 2px solid var(--line-strong); color: var(--mist); }
   .station b { font-weight: 600; font-size: 12.5px; }
@@ -217,6 +217,108 @@
   .station.waiting small, .station.failed small { color: #8a6200; }
   .station.soon b { color: var(--slate); font-weight: 500; }
   .transcript { padding: 14px 16px; display: grid; gap: 8px; }
+  /* ---------------------------------------------------------- the cut: approval */
+  /* the video gives the wrap its height; overlays for the preview of the cut lie on top of it */
+  .player-wrap { position: relative; width: min(100%, calc((100vh - 260px) * 16 / 9)); justify-self: center;
+    clip-path: inset(0 round 14px); background: var(--stage); }   /* not overflow: hidden, which lets the grid row collapse */
+  .player-wrap .player { width: 100%; height: auto; border-radius: 0; }
+  .card-overlay { position: absolute; inset: 0; display: none; place-items: center; background: rgba(16, 24, 32, .82);
+    color: #fff; font-family: var(--display); font-size: 22px; font-weight: 600; pointer-events: none; }
+  .card-overlay.show { display: grid; }
+  .region { position: absolute; pointer-events: none; border-radius: 6px; }
+  .region.blur { backdrop-filter: blur(14px); background: rgba(255, 255, 255, .06); }
+  .region.zoom { border: 2px dashed #fff; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .25); }
+  .region.zoom::after { content: "Zoom"; position: absolute; left: 6px; top: 4px; color: #fff; font-size: 12px; font-weight: 600; }
+  .cutpanel { padding: 14px 16px; display: grid; gap: 12px; position: relative; }
+  .cutpanel > .btn { justify-self: start; }
+  .cutpanel.working::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(100deg, transparent 35%, rgba(0, 158, 227, .13) 50%, transparent 65%) 0 0 / 250% 100%;
+    animation: sweep 2.2s linear infinite; }
+  .cut-summary { margin: -4px 0 0; color: var(--slate); font-size: 12.5px; line-height: 1.5; }
+  .results { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--green-soft); }
+  .results h3 { margin: 0 0 2px; font-size: 13px; font-weight: 600; color: #1e5e30; }
+  .result-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; font-size: 13px; }
+  .result-row.on span:first-child { font-weight: 600; }
+  .results .link { justify-self: start; }
+  .cut-sum { display: grid; gap: 8px; }
+  .cut-title { margin: 0; font-family: var(--display); font-size: 15px; font-weight: 600; }
+  .cut-len { margin: 0; font-size: 13px; color: var(--slate); }
+  .cut-len b { color: var(--ink); }
+  .sum-sec h4 { margin: 4px 0 2px; font-size: 12.5px; font-weight: 600; color: var(--slate); }
+  .sum-sec ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13px; line-height: 1.45; }
+  .sum-sec .sum-facts { color: var(--slate); }
+  .sum-sec .link { font-size: 13px; }
+  .cut-details { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 12px; }
+  .cut-details > summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--deep); list-style: none; }
+  .cut-details > summary::before { content: "▸ "; }
+  .cut-details[open] > summary::before { content: "▾ "; }
+  .cut-details:not([open]) > :not(summary) { display: none; }
+  .cut-status { display: inline-flex; align-items: center; gap: 8px; color: var(--deep); font-size: 12.5px; font-weight: 600; }
+  .cut-status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--blue);
+    animation: breathe 1.4s ease-in-out infinite; flex: none; }
+  .cutpanel.working .timeline .span, .cutpanel.working .timeline .tick { opacity: .55; }
+  .cutpanel .skeleton { margin-left: 46px; }
+  .timeline { position: relative; height: 34px; border-radius: 8px; background: #edf1f5; cursor: pointer; overflow: hidden; }
+  .timeline .span { position: absolute; top: 9px; bottom: 9px; border-radius: 3px; min-width: 2px; }
+  .timeline .span.proposed { opacity: .45; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.55) 0 3px, transparent 3px 7px); }
+  .timeline .span.selected { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .timeline .tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--deep); }
+  .timeline .tick.proposed { opacity: .45; }
+  .timeline .head { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--red); pointer-events: none; }
+  .k-cut { background: var(--red); } .k-pause { background: var(--amber); } .k-mute { background: #8e5bd0; }
+  .k-freeze { background: #5f7b95; } .k-blur { background: #2b2b2b; } .k-zoom, .k-layout { background: var(--blue); }
+  .k-clip { background: var(--green); } .k-lower_third, .k-thumbnail, .k-chapter { background: var(--deep); }
+  .cut-stats { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--slate); }
+  .cut-stats b { color: var(--ink); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tab { padding: 7px 12px; border-radius: 8px 8px 0 0; color: var(--slate); font-weight: 500; font-size: 12.5px; }
+  .tab.active { color: var(--deep); box-shadow: inset 0 -2px 0 var(--blue); font-weight: 600; }
+  .tab small { margin-left: 4px; font-size: 11px; color: var(--mist); }
+  .cut-items { display: grid; gap: 0; }
+  .cut-item { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: start; padding: 10px 0;
+    border-top: 1px solid var(--line); }
+  .cut-item:first-child { border-top: 0; }
+  .cut-item.rejected .cut-text { opacity: .5; }
+  .cut-item.selected { background: var(--sky); border-radius: 8px; }
+  .cut-text { display: grid; gap: 4px; min-width: 0; }
+  .cut-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .badge { font-size: 11px; font-weight: 700; color: #fff; padding: 1px 7px; border-radius: 5px; }
+  .cut-text p { margin: 0; line-height: 1.45; }
+  .cut-text small { color: var(--mist); font-size: 11.5px; }
+  .cut-text .link { justify-self: start; text-align: left; }
+  .assess { font-size: 12.5px; line-height: 1.45; padding: 6px 10px; border-radius: 8px; border-left: 3px solid; }
+  .assess.agree { background: var(--green-soft); border-color: var(--green); color: #1e5e30; }
+  .assess.disagree { background: var(--amber-soft); border-color: var(--amber); color: #6b4d00; }
+  .cut-text .field { padding: 5px 10px; max-width: 360px; }
+  .cut-text select { justify-self: start; font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+  .nudge { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--slate); flex-wrap: wrap; }
+  .nudge button { width: 24px; height: 22px; border-radius: 6px; background: var(--hover); font-size: 12px; }
+  .nudge button:hover { background: var(--sky); color: var(--deep); }
+  .decide { display: flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .decide button { padding: 6px 10px; font-size: 12px; font-weight: 500; }
+  .decide button + button { border-left: 1px solid var(--line); }
+  .decide button.on.yes { background: var(--green-soft); color: #1e7e34; font-weight: 600; }
+  .decide button.on.no { background: #fdecea; color: #b3261e; font-weight: 600; }
+  .cut-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .cut-tools .marks { font-size: 12px; color: var(--slate); }
+  .cut-group { display: grid; gap: 8px; padding-top: 4px; }
+  .cut-group h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .programs { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 14px; align-items: center; font-size: 12.5px; }
+  .programs select { font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+  .problems { margin: 0; padding: 8px 12px 8px 28px; background: var(--amber-soft); border-radius: 10px; color: #6b4d00; font-size: 12.5px; }
+  .cut-foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; }
+  .cut-foot .hint { flex: 1; }
+  .station.review .no { border-color: var(--amber); color: #8a6200; background: var(--amber-soft); }
+  .station.review small { color: #8a6200; font-weight: 600; }
+  .station.open small { color: var(--deep); }
+  .mini-way i.review { background: var(--amber); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; background: var(--hover); font-size: 12px; }
+  .chip button { width: 18px; height: 18px; border-radius: 50%; color: var(--slate); }
+  .chip button:hover { background: #fdecea; color: var(--red); }
+  .setting-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
+  .setting-row select, .setting-row input { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .setting-row input { width: 70px; }
   #dTerms { margin-top: -6px; font-size: 12px; }
   #dTerms:empty { display: none; }
   .spots { padding: 14px 16px; display: grid; gap: 10px; justify-items: start; }
@@ -460,6 +562,15 @@
             <label class="toggle"><input type="checkbox" id="hide_alttab" onchange="setOption(this)"><span class="knob"></span><span><b>Alt+Tab ausblenden</b><small>Beim Wechseln der Fenster bleibt das Bild der Aufnahme kurz stehen.</small></span></label>
           </div>
           <div class="panel section">
+            <div class="panel-head"><h2>Schnitt</h2></div>
+            <label class="toggle"><input type="checkbox" id="cut_auto" onchange="saveCutSettings()"><span class="knob"></span><span><b>Schnitt von selbst vorschlagen</b><small>Nach der Transkription sieht sich der Schnitt-Agent jede Aufnahme an. Gerendert wird erst nach deiner Freigabe.</small></span></label>
+            <div class="setting-row"><span>Lange Pausen ab</span><span><input type="number" id="cut_pause_min" min="10" max="600" onchange="saveCutSettings()"> Sekunden</span></div>
+            <div class="setting-row"><span>Lange Pausen</span><select id="cut_pause_mode" onchange="saveCutSettings()"><option value="card">mit Tafel „Pause entfernt“ schneiden</option><option value="shorten">auf zwei Sekunden kürzen</option><option value="cut">ohne Hinweis schneiden</option></select></div>
+            <div class="cut-group"><h3>Immer schneiden</h3><div class="chips" id="cutPrograms"></div></div>
+            <div class="cut-group"><h3>Immer behalten</h3><div class="chips" id="keepPrograms"></div></div>
+            <div class="section-note">Programme legst du in „Meine Aufnahmen“ beim Schnitt einer Aufnahme fest.</div>
+          </div>
+          <div class="panel section">
             <div class="panel-head"><h2>Ablage</h2></div>
             <div class="folders">
               <span>Aufnahmen</span><span class="path" id="archive_dir"></span><button class="link" onclick="pickFolder('archive_dir')">Ändern</button>
@@ -605,6 +716,8 @@
     previewUrl = d.preview_url || "";
     mediaBase = d.media_base || "";
     fillKeys(d.api_keys);
+    cutSettings = d.cut || {};
+    fillCutSettings();
     updatePreview();
     updateReady();
   }
@@ -650,19 +763,26 @@
   // ---------------------------------------------------------------- my recordings
   let recordings = [], selectedId = null, shownMedia = "";
   const STATIONS = [["recorded", "Aufgenommen"], ["transcript", "Transkription"], ["cut", "Schnitt"], ["content", "Inhalte"], ["publish", "Veröffentlichen"]];
-  const STATE_TEXT = {done: "erledigt", running: "läuft", waiting: "wartet", failed: "gestoppt", queued: "folgt", soon: "kommt bald"};
+  const STATE_TEXT = {done: "erledigt", running: "läuft", waiting: "wartet", failed: "gestoppt", queued: "folgt", soon: "kommt bald",
+                      review: "zur Freigabe", open: "offen"};
   const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "numeric", month: "long", year: "numeric"}) : "";
   const fmtShort = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"}) : "";
   const fmtLength = s => { s = Math.round(s || 0); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
     return h ? `${h} h ${m} min` : m ? `${m} min` : `${s} s`; };
   const fmtClock = s => { s = Math.floor(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
-  async function loadRecordings() {
-    recordings = await api().recordings();
-    const busy = recordings.some(r => ["running", "queued"].includes(r.stations.transcript));
+  // the sidebar shows that something is being worked on, on every page: transcription or cut agent
+  function showBadge() {
+    const cutting = recordings.some(r => r.stations.cut === "running");
+    const busy = cutting || recordings.some(r => ["running", "queued"].includes(r.stations.transcript));
     $("libraryBadge").className = busy ? "busy" : recordings.length ? "count" : "";
     $("libraryBadge").textContent = busy ? "" : recordings.length || "";
-    $("libraryBadge").title = busy ? "Eine Aufnahme wird gerade bearbeitet" : "";
+    $("libraryBadge").title = cutting ? "Der Schnitt-Agent arbeitet an einer Aufnahme"
+      : busy ? "Eine Aufnahme wird gerade transkribiert" : "";
+  }
+  async function loadRecordings() {
+    recordings = await api().recordings();
+    showBadge();
     $("library").style.display = recordings.length ? "" : "none";
     $("libraryEmpty").style.display = recordings.length ? "none" : "";
     renderRecordings();
@@ -688,7 +808,8 @@
     }
   }
   async function selectRecording(id) {
-    selectedId = id; shownMedia = ""; allSpots = false; stopAt = null;
+    selectedId = id; shownMedia = ""; allSpots = false; stopAt = null; markIn = markOut = null; selectedItem = null;
+    playing = "original";
     renderRecordings();
     await refreshDetail();
   }
@@ -696,18 +817,24 @@
     const d = await api().recording(selectedId);
     const box = $("detail");
     if (!d) { box.innerHTML = ""; return; }
-    const media = d.media.includes("recording.mp4") ? "recording.mp4" : "screen.mp4";
-    const subs = d.media.find(n => n.startsWith("subtitles."));
+    const original = d.media.includes("recording.mp4") ? "recording.mp4" : "screen.mp4";
+    if (playing !== "original" && !d.media.includes(playing)) playing = "original";   // gone, e.g. rendered anew
+    const media = playing === "original" ? original : playing;
+    const stem = media.replace(/\.mp4$/, "");
+    const subs = playing === "original" ? d.media.find(n => n.startsWith("subtitles."))
+                                        : d.media.find(n => n.startsWith(stem + ".") && n.endsWith(".vtt"));
     const textSig = d.segments.length + ":" + d.segments.map(x => x.text).join("").length;
-    const key = [d.id, media].join("|");                   // only another recording rebuilds the view and the player
+    const key = d.id;                                        // only another recording rebuilds the view
     if (key !== shownMedia) {
       shownMedia = key;
       box.innerHTML = `
         <div class="detail-head"><div style="flex:1"><h2 id="dTitle"></h2><p id="dMeta"></p></div>
           <button class="btn" onclick="api().open_recording(selectedId)"><svg class="i"><use href="#i-folder"/></svg>Ordner öffnen</button>
           <button class="btn danger" onclick="deleteRecording()"><svg class="i"><use href="#i-trash"/></svg>Löschen</button></div>
-        <video class="player" id="player" controls preload="metadata" crossorigin="anonymous"></video>
+        <div class="player-wrap" id="playerWrap"><video class="player" id="player" controls preload="metadata" crossorigin="anonymous"></video>
+          <div class="card-overlay" id="cardOverlay"></div><div id="regions"></div></div>
         <div class="panel way" id="way"></div>
+        <div class="panel cutpanel" id="cut"></div>
         <div class="panel transcript"><div class="panel-head"><h2>Transkription</h2><span class="hint" id="dStatus"></span>
           <button class="link" id="redoButton" onclick="redoTranscription()">Erneut transkribieren</button></div>
           <div class="hint" id="dTerms"></div><div class="lines" id="lines"></div></div>
@@ -715,14 +842,18 @@
       $("dTitle").textContent = d.title;
       $("dMeta").textContent = `${d.module}, ${fmtDate(d.recorded_at)}, ${fmtLength(d.duration)}`;
       const v = $("player");
-      v.src = mediaBase + encodeURIComponent(d.id) + "/" + media;
       v.ontimeupdate = () => {
-        highlightLine(v.currentTime);
-        if (stopAt !== null && v.currentTime >= stopAt) { v.pause(); stopAt = null; }   // end of a listened spot
+        if (playing === "original") highlightLine(v.currentTime);
+        if (stopAt !== null && v.currentTime >= stopAt) { v.pause(); stopAt = null; listening = false; }   // end of a listened spot
       };
     }
+    if ($("player").dataset.media !== media) {              // the original, the long version or a clip
+      const v = $("player");
+      v.dataset.media = media; v.dataset.track = "";
+      v.src = mediaBase + encodeURIComponent(d.id) + "/" + media;
+    }
     // new or corrected subtitles: swap the track; the address changes, so the player loads it again
-    const trackSig = subs ? subs + "|" + d.model + "|" + textSig : "";
+    const trackSig = subs ? subs + "|" + d.model + "|" + textSig + "|" + ((d.cut || {}).render || {}).rendered : "";
     if ($("player").dataset.track !== trackSig) {
       const v = $("player");
       v.dataset.track = trackSig;
@@ -779,6 +910,7 @@
       }
     }
     renderSpots(d);
+    renderCut(d);
   }
 
   // ---------------------------------------------------------------- unsure spots of a transcript
@@ -786,6 +918,7 @@
   const SHOWN_SPOTS = 8;
   function listen(start, end) {
     const v = $("player");
+    listening = true;
     v.currentTime = Math.max(0, start - 2);
     stopAt = end + 1.5;
     v.play();
@@ -867,6 +1000,441 @@
     if (error) { $("dStatus").textContent = error; $("dStatus").className = "hint error"; return; }
     selectedId = null;
     await loadRecordings();
+  }
+
+  // ---------------------------------------------------------------- the cut: approval of the edit list
+  let cutPreview = false, cutTab = "cuts", cutItems = [], cutDuration = 0, cutSettings = {};
+  let markIn = null, markOut = null, selectedItem = null, listening = false, cardUntil = 0, detailsOpen = false;
+  let playing = "original";                                   // or edited.mp4, clip-01.mp4 ...
+  const CUT_KINDS = {cut: "Schnitt", pause: "Pause", mute: "Ton aus", freeze: "Bild anhalten", blur: "Verpixeln",
+                     zoom: "Zoom", layout: "Layout", chapter: "Kapitel", clip: "Clip", lower_third: "Bauchbinde",
+                     thumbnail: "Vorschaubild"};
+  const CUT_TABS = [["cuts", "Schnitte", ["cut", "pause", "mute", "freeze", "blur"]], ["chapters", "Kapitel", ["chapter"]],
+                    ["more", "Weitere", ["zoom", "layout", "clip", "lower_third", "thumbnail"]]];
+  const PAUSE_MODES = {card: "Tafel „Pause entfernt“", shorten: "auf zwei Sekunden kürzen", cut: "ohne Hinweis schneiden"};
+  const SOURCE_TEXT = {rule: "Regel", agent: "Schnitt-Agent", lecturer: "von dir"};
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const button = (cls, text, onclick, title) => { const b = el("button", cls, text); b.onclick = onclick; if (title) b.title = title; return b; };
+  const fine = t => { const s = Math.max(0, t); return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0").replace(".", ",")}`; };
+  const span = x => fine(x.start) + (x.end != null ? "–" + fine(x.end) : "");
+
+  function renderCut(d) {
+    const box = $("cut"), st = d.stations.cut, view = d.cut || {}, e = view.edit;
+    const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
+    const sig = JSON.stringify([st, d.status, e, view.programs, view.render, cutTab, markIn, markOut, selectedItem,
+                                cutPreview, cutSettings, playing]);
+    if (box.dataset.sig === sig || typing) return;
+    box.dataset.sig = sig;
+    cutItems = e ? e.items : [];
+    cutDuration = (e && e.duration) || d.duration || 0;
+    box.innerHTML = "";
+    box.classList.toggle("working", st === "running");
+    const head = el("div", "panel-head");
+    head.append(el("h2", "", "Schnitt"));
+    const hint = el("span", "hint"); hint.id = "cutHint";
+    head.appendChild(hint);
+    box.appendChild(head);
+    if (st === "running" && e && e.approved) {     // approved: the videos are being rendered
+      hint.className = "cut-status"; hint.textContent = d.status || "Das Video wird gerendert …";
+      box.appendChild(summaryBlock(e));
+      box.appendChild(el("p", "cut-summary", "Das geschnittene Video entsteht: Langfassung, Teilvideos, Untertitel und Kapitel. "
+                                             + "Das dauert etwa so lange wie ein Fünftel der Aufnahme; bis dahin kannst du alles andere weiter nutzen."));
+      const pct = /(\d+) %/.exec(d.status || "");
+      const track = el("div", "track"); const bar = el("div"); bar.style.width = (pct ? pct[1] : 3) + "%";
+      track.appendChild(bar); box.appendChild(track);
+      return;
+    }
+    if (st === "running") {                        // like the transcription: what it does now, and placeholders
+      hint.className = "cut-status"; hint.textContent = d.status || "Der Schnitt-Agent arbeitet …";
+      box.appendChild(el("p", "cut-summary", "Der Schnitt-Agent sieht sich die Aufnahme an. Seine Vorschläge erscheinen hier, "
+                                             + "sobald er fertig ist; bis dahin kannst du alles andere weiter nutzen."));
+      if (e) box.appendChild(timeline(e));         // what he proposed so far, on the timeline
+      else box.appendChild(el("div", "timeline"));
+      for (const width of [88, 72, 80, 60]) {
+        const bar = el("div", "skeleton"); bar.style.width = `calc(${width}% - 74px)`;
+        box.appendChild(bar);
+      }
+      return;
+    }
+    if (!e) {                                      // no proposal yet: start it, or say where it stands
+      const p = el("p", "cut-summary");
+      p.textContent = st === "waiting" || st === "failed" ? (d.status || "")
+        : st === "soon" ? "Der Schnitt kommt nach der Transkription."
+        : "Der Schnitt-Agent sieht sich die Aufnahme an und schlägt Schnitte, Kapitel und mehr vor. "
+          + "Gerendert wird erst, wenn du freigibst.";
+      box.appendChild(p);
+      if (st === "open" || st === "failed")
+        box.appendChild(button("btn primary", st === "failed" ? "Erneut versuchen" : "Schnitt vorschlagen lassen", startCut));
+      return;
+    }
+    // first the finished proposal in a few lines, then play and approve; the single items wait folded below
+    box.appendChild(summaryBlock(e));
+    box.appendChild(timeline(e));
+    const open = e.items.filter(x => x.state === "proposed").length;
+    const stats = el("div", "cut-stats");
+    const toggle = el("label", "check");
+    const box2 = el("input"); box2.type = "checkbox"; box2.checked = cutPreview;
+    box2.onchange = () => { cutPreview = box2.checked; $("cut").dataset.sig = ""; };
+    toggle.append(box2, " Mit Schnitt abspielen");
+    stats.appendChild(toggle);
+    box.appendChild(stats);
+    const foot = el("div", "cut-foot");
+    const note = el("span", "hint");
+    if (e.approved) {
+      const made = view.render;
+      note.textContent = made && made.current ? `Freigegeben am ${fmtDate(e.approved)}, gerendert.`
+        : st === "failed" ? (d.status || "Das Rendern ist gescheitert.") : `Freigegeben am ${fmtDate(e.approved)}. Das Video wird gleich gerendert.`;
+      if (st === "failed") note.className = "hint error";
+      foot.append(note);
+      if (st === "failed") foot.appendChild(button("btn primary", "Erneut rendern", () => approve(true)));
+      foot.appendChild(button("btn", "Freigabe zurücknehmen", () => approve(false)));
+      if (made && made.current) box.appendChild(results(made));   // above the foot, which follows
+    } else {
+      note.textContent = open ? `Noch ${open} Vorschläge offen.` : "";
+      const go = button("btn primary", "Schnitt freigeben", () => approve(true));
+      go.disabled = open > 0;
+      foot.append(note, go);
+    }
+    foot.appendChild(button("link", "Neu vorschlagen lassen", redoCut));
+    box.appendChild(foot);
+
+    const det = el("details", "cut-details");
+    det.open = detailsOpen;
+    det.ontoggle = () => { detailsOpen = det.open; };
+    det.appendChild(el("summary", "", `Vorschläge sichten und überarbeiten (${e.items.length})`));
+    box.appendChild(det);
+    const counts = el("div", "cut-stats");
+    counts.appendChild(el("span", "", `${e.items.filter(x => x.state === "accepted").length} übernommen, `
+                                      + `${e.items.filter(x => x.state === "rejected").length} verworfen`
+                                      + (open ? `, ${open} offen` : "")));
+    det.appendChild(counts);
+    // tabs: cuts, chapters, the rest
+    const tabs = el("div", "tabs");
+    for (const [key, name, kinds] of CUT_TABS) {
+      const n = e.items.filter(x => kinds.includes(x.kind) && x.state === "proposed").length;
+      const t = button("tab" + (cutTab === key ? " active" : ""), name, () => { cutTab = key; renderCut(d); });
+      if (n) t.appendChild(el("small", "", `${n} offen`));
+      tabs.appendChild(t);
+    }
+    det.appendChild(tabs);
+    const kinds = CUT_TABS.find(t => t[0] === cutTab)[2];
+    const list = el("div", "cut-items");
+    const mine = e.items.filter(x => kinds.includes(x.kind));
+    for (const x of mine) list.appendChild(cutRow(x));
+    if (!mine.length) list.appendChild(el("div", "hint", "Hier gibt es nichts."));
+    det.appendChild(list);
+    const tools = el("div", "cut-tools");
+    if (mine.some(x => x.state === "proposed")) {
+      tools.append(button("btn", "Alle offenen übernehmen", () => decideAll(mine, "accepted")),
+                   button("btn", "Alle offenen verwerfen", () => decideAll(mine, "rejected")));
+    }
+    if (cutTab === "cuts") {
+      tools.append(button("btn", "Anfang hier", () => { markIn = $("player").currentTime; renderCut(d); }, "Abspielposition als Anfang"),
+                   button("btn", "Ende hier", () => { markOut = $("player").currentTime; renderCut(d); }, "Abspielposition als Ende"),
+                   el("span", "marks", `${markIn == null ? "–" : fmtClock(markIn)} bis ${markOut == null ? "–" : fmtClock(markOut)}`),
+                   button("btn primary", "Herausschneiden", addOwnCut));
+    } else if (cutTab === "chapters") {
+      tools.appendChild(button("btn", "Kapitel an der Abspielposition", () => addOwn("chapter", $("player").currentTime, null, {title: "Neues Kapitel"})));
+    }
+    det.appendChild(tools);
+    det.appendChild(metadata(e));
+    if (view.programs.length) det.appendChild(programList(view.programs));
+    if (e.problems.length) {
+      const ul = el("ul", "problems");
+      for (const p of e.problems) ul.appendChild(el("li", "", p));
+      det.appendChild(ul);
+    }
+  }
+
+  // what the approved cut became: the long version and the clips, to play here
+  function results(made) {
+    const g = el("div", "results");
+    g.appendChild(el("h3", "", "Fertige Videos"));
+    const row = (name, file, length) => {
+      const r = el("div", "result-row" + (playing === file ? " on" : ""));
+      r.append(el("span", "", name), el("span", "tabular hint", fmtLength(length)),
+               button("btn", playing === file ? "Läuft im Player" : "Ansehen", () => play(file)));
+      return r;
+    };
+    g.appendChild(row("Langfassung", "edited.mp4", made.duration));
+    for (const c of made.clips || []) g.appendChild(row("Teilvideo: " + c.title, c.file, c.end - c.start));
+    const back = button("link", "Wieder das Original abspielen", () => play("original"));
+    if (playing !== "original") g.appendChild(back);
+    for (const w of made.warnings || []) g.appendChild(el("div", "hint error", w));
+    return g;
+  }
+  function play(file) {
+    playing = file;
+    if (file !== "original") cutPreview = false;            // the edited video is already cut
+    $("cut").dataset.sig = "";
+    refreshDetail().then(() => { const v = $("player"); v.currentTime = 0; if (file !== "original") v.play(); });
+  }
+
+  // the summary of the agent, always in the same shape: before and after, what is cut by class and why,
+  // the short videos, what else happens, and where a look is worth it
+  function summaryBlock(e) {
+    const sum = e.summary || {}, g = el("div", "cut-sum");
+    if (e.title) g.appendChild(el("h3", "cut-title", e.title));
+    const len = el("p", "cut-len");
+    len.innerHTML = `Aus <b>${fmtLength(sum.duration ?? e.duration)}</b> werden <b>${fmtLength(sum.kept ?? e.kept_seconds)}</b>.`;
+    g.appendChild(len);
+    const section = (title, items) => {
+      if (!items.length) return;
+      const s = el("div", "sum-sec"); s.appendChild(el("h4", "", title));
+      const ul = el("ul"); for (const li of items) ul.appendChild(li); s.appendChild(ul); g.appendChild(s);
+    };
+    if (!(sum.cuts || []).length) section("Was wird geschnitten?", [el("li", "", "Nichts: die Aufnahme bleibt in voller Länge.")]);
+    section("Was wird geschnitten?", (sum.cuts || []).map(c => {
+      const li = el("li");
+      const facts = [c.count ? `${c.count} ${c.count === 1 ? "Stelle" : "Stellen"}, ${fmtLength(c.seconds)}` : "",
+                     c.hidden ? `${c.hidden}× verdeckt oder stumm` : ""].filter(Boolean).join(", ");
+      li.append(el("b", "", c.label), el("span", "sum-facts", ` (${facts})`), c.text ? ": " + c.text : "");
+      return li;
+    }));
+    section("Teilvideos", (sum.clips || []).map(t => el("li", "", t)));
+    const more = [];
+    if ((sum.chapters || []).length) more.push(`${sum.chapters.length} Kapitel: ${sum.chapters.join(", ")}`);
+    if (sum.zooms) more.push(`${sum.zooms} ${sum.zooms === 1 ? "Zoom" : "Zooms"} auf kleine Bildschirminhalte`);
+    section("Außerdem", more.map(t => el("li", "", t)));
+    section("Bitte kurz ansehen", (sum.check || []).map(c => {
+      const x = cutItems.find(i => i.id === c.id);
+      const li = el("li");
+      li.appendChild(button("link", x ? `${CUT_KINDS[x.kind]} ${span(x)}` : c.id, () => x && select(x)));
+      li.append(c.why ? ": " + c.why : "");
+      return li;
+    }));
+    section("Hinweise", (sum.notes || []).map(t => el("li", "", t)));
+    return g;
+  }
+
+  function timeline(e) {
+    const tl = el("div", "timeline");
+    const dur = e.duration || 1;
+    for (const x of e.items) {
+      if (x.state === "rejected") continue;
+      if (x.kind === "chapter") {
+        const t = el("div", "tick " + x.state); t.style.left = (x.start / dur * 100) + "%";
+        t.title = `${fmtClock(x.start)} ${x.params.title || ""}`;
+        tl.appendChild(t);
+      } else if (x.end != null && CUT_TABS[0][2].includes(x.kind)) {   // only what is taken out or hidden
+        const s = el("div", `span k-${x.kind} ${x.state}` + (x.id === selectedItem ? " selected" : ""));
+        s.style.left = (x.start / dur * 100) + "%"; s.style.width = ((x.end - x.start) / dur * 100) + "%";
+        s.title = `${CUT_KINDS[x.kind]} ${span(x)}: ${x.reason}`;
+        s.onclick = ev => { ev.stopPropagation(); select(x); };
+        tl.appendChild(s);
+      }
+    }
+    const head = el("div", "head"); head.id = "playhead";
+    tl.appendChild(head);
+    tl.onclick = ev => { const r = tl.getBoundingClientRect(); $("player").currentTime = (ev.clientX - r.left) / r.width * dur; };
+    return tl;
+  }
+
+  function select(x) {
+    selectedItem = x.id;
+    detailsOpen = true;
+    cutTab = CUT_TABS.find(t => t[2].includes(x.kind))[0];
+    $("player").currentTime = Math.max(0, x.start - 2);
+    $("cut").dataset.sig = "";
+    refreshDetail();
+  }
+
+  function cutRow(x) {
+    const row = el("div", "cut-item " + x.state + (x.id === selectedItem ? " selected" : ""));
+    const play = button("round", "", () => { selectedItem = x.id; listen(x.start, (x.end ?? x.start + 8)); }, "Ansehen und anhören");
+    play.innerHTML = '<svg class="i"><use href="#i-play"/></svg>';
+    const text = el("div", "cut-text");
+    const line = el("div", "cut-line");
+    const badge = el("span", "badge k-" + x.kind, CUT_KINDS[x.kind]);
+    line.append(badge, el("span", "tabular", span(x)));
+    if (x.kind === "chapter" || x.kind === "clip") line.appendChild(el("b", "", x.params.title || ""));
+    text.append(line, el("p", "", x.reason));
+    if (x.assessment) {                            // the agent's view of a rule's proposal; deciding is yours
+      const a = el("div", "assess " + x.assessment.verdict);
+      a.append(el("b", "", x.assessment.verdict === "agree" ? "Schnitt-Agent übernimmt: " : "Schnitt-Agent verwirft: "),
+               x.assessment.reason);
+      text.appendChild(a);
+    }
+    const instead = cutItems.find(o => (o.replaces || []).includes(x.id));
+    if (instead) {
+      const a = button("link", `Stattdessen vorgeschlagen: ${CUT_KINDS[instead.kind]} ${span(instead)}`, () => select(instead));
+      text.appendChild(a);
+    }
+    if (x.decided_by === "fallback") text.appendChild(el("small", "", "Der Agent hat das offen gelassen; FLEX3 Light hat es nach seiner Sicherheit entschieden."));
+    if ((x.replaces || []).length) {
+      text.appendChild(el("small", "", `Soll ${x.replaces.length === 1 ? "einen Regel-Vorschlag" : x.replaces.length + " Regel-Vorschläge"} ersetzen.`));
+    }
+    text.appendChild(el("small", "", `${SOURCE_TEXT[x.source] || x.source}` + (x.source === "lecturer" ? "" : `, Sicherheit ${Math.round(x.confidence * 100)} %`)
+                                     + (x.by_lecturer && x.source !== "lecturer" ? ", von dir geändert" : "")));
+    if (x.kind === "chapter" || x.kind === "clip") {
+      const f = el("div", "field"); const input = el("input"); input.value = x.params.title || "";
+      input.onchange = () => changeItem(x.id, {params: {title: input.value.trim()}});
+      f.appendChild(input); text.appendChild(f);
+    }
+    if (x.kind === "pause") {
+      const sel = el("select");
+      for (const [k, name] of Object.entries(PAUSE_MODES)) { const o = el("option", "", name); o.value = k; sel.appendChild(o); }
+      sel.value = x.params.mode || "card";
+      sel.onchange = () => changeItem(x.id, {params: {mode: sel.value}});
+      text.appendChild(sel);
+    }
+    if (x.end != null) {
+      const n = el("div", "nudge");
+      n.append("Anfang", button("", "‹", () => changeItem(x.id, {start: x.start - 0.5}), "eine halbe Sekunde früher"),
+               button("", "›", () => changeItem(x.id, {start: x.start + 0.5}), "eine halbe Sekunde später"),
+               " Ende", button("", "‹", () => changeItem(x.id, {end: x.end - 0.5}), "eine halbe Sekunde früher"),
+               button("", "›", () => changeItem(x.id, {end: x.end + 0.5}), "eine halbe Sekunde später"));
+      text.appendChild(n);
+    }
+    const decide = el("div", "decide");
+    if (x.source === "lecturer") {
+      decide.appendChild(button("", "Entfernen", () => removeItem(x.id)));
+    } else {
+      decide.append(button("yes" + (x.state === "accepted" ? " on" : ""), "Übernehmen", () => changeItem(x.id, {state: "accepted"})),
+                    button("no" + (x.state === "rejected" ? " on" : ""), "Verwerfen", () => changeItem(x.id, {state: "rejected"})));
+    }
+    row.append(play, text, decide);
+    return row;
+  }
+
+  function metadata(e) {
+    const g = el("div", "cut-group");
+    g.appendChild(el("h3", "", "Titel und Beschreibung"));
+    const f1 = el("div", "field"); f1.appendChild(el("label", "", "Titel"));
+    const title = el("input"); title.value = e.title || ""; f1.appendChild(title);
+    const f2 = el("div", "field"); f2.appendChild(el("label", "", "Beschreibung"));
+    const desc = el("textarea"); desc.rows = 3; desc.value = e.description || ""; f2.appendChild(desc);
+    const save = async () => cutResult(await api().set_cut_metadata(selectedId, title.value, desc.value));
+    title.onchange = desc.onchange = save;
+    g.append(f1, f2);
+    return g;
+  }
+
+  function programList(programs) {
+    const g = el("div", "cut-group");
+    g.appendChild(el("h3", "", "Programme in dieser Aufnahme"));
+    g.appendChild(el("div", "hint", "Was du hier festlegst, gilt ab jetzt für alle Aufnahmen."));
+    const grid = el("div", "programs");
+    for (const p of programs) {
+      const name = p.program.toLowerCase();
+      const sel = el("select");
+      for (const [k, label] of [["", "Agent entscheidet"], ["cut", "immer schneiden"], ["keep", "immer behalten"]]) {
+        const o = el("option", "", label); o.value = k; sel.appendChild(o);
+      }
+      sel.value = (cutSettings.cut_programs || []).includes(name) ? "cut" : (cutSettings.keep_programs || []).includes(name) ? "keep" : "";
+      sel.onchange = async () => {
+        cutResult(await api().set_program_rule(selectedId, p.program, sel.value));
+        cutSettings = (await api().data()).cut || cutSettings;
+        fillCutSettings();
+      };
+      grid.append(el("span", "", p.program), el("span", "tabular hint", fmtLength(p.seconds)), sel);
+    }
+    g.appendChild(grid);
+    return g;
+  }
+
+  async function cutResult(error) {
+    if (error) { $("cutHint").textContent = error; $("cutHint").className = "hint error"; return false; }
+    $("cut").dataset.sig = "";
+    await refreshDetail();
+    return true;
+  }
+  const changeItem = async (id, changes) => cutResult(await api().change_cut_item(selectedId, id, changes));
+  const removeItem = async id => cutResult(await api().remove_cut_item(selectedId, id));
+  const addOwn = async (kind, start, end, params) => cutResult(await api().add_cut_item(selectedId, kind, start, end, params || {}));
+  async function addOwnCut() {
+    if (markIn == null || markOut == null || markOut <= markIn) {
+      $("cutHint").textContent = "Setz zuerst Anfang und Ende an der Abspielposition."; $("cutHint").className = "hint error"; return;
+    }
+    if (await addOwn("cut", markIn, markOut)) { markIn = markOut = null; $("cut").dataset.sig = ""; }
+  }
+  async function decideAll(items, state) {
+    for (const x of items.filter(i => i.state === "proposed")) {
+      const error = await api().change_cut_item(selectedId, x.id, {state});
+      if (error) return cutResult(error);
+    }
+    cutResult("");
+  }
+  async function approve(on) { cutResult(await api().approve_cut(selectedId, on)); }
+  async function startCut() { cutResult(await api().redo_cut(selectedId)); }
+  async function redoCut() {
+    if (!await ask({title: "Schnitt neu vorschlagen lassen?", confirm: "Neu vorschlagen", danger: true,
+                    text: "Der Schnitt-Agent sieht sich die Aufnahme noch einmal an und schlägt alles neu vor. Deine "
+                          + "Entscheidungen in diesem Vorschlag gelten dann nicht mehr; er bleibt als edit.previous.json im Ordner."})) return;
+    cutResult(await api().redo_cut(selectedId));
+  }
+
+  // playing with the cut: accepted removals are skipped, a removed pause can show its card,
+  // muted spans are silent, and blurred and zoomed regions are drawn over the picture
+  function cutAt(t) {
+    const out = {skipTo: null, card: "", muted: false, regions: []};
+    for (const x of cutItems) {
+      if (x.state !== "accepted" || x.end == null) continue;
+      let a = x.start, b = x.end;
+      if (x.kind === "pause" && x.params.mode === "shorten") { a += 1; b -= 1; }
+      if ((x.kind === "cut" || x.kind === "pause") && t >= a && t < b - 0.05) {
+        out.skipTo = b;
+        if (x.kind === "pause" && (x.params.mode || "card") === "card") out.card = "Pause entfernt";
+      }
+      if (t >= x.start && t < x.end) {
+        if (x.kind === "mute") out.muted = true;
+        if ((x.kind === "blur" || x.kind === "zoom") && Array.isArray(x.params.region)) out.regions.push([x.kind, x.params.region]);
+      }
+    }
+    return out;
+  }
+  let mutedByCut = false, shownRegions = "";
+  function previewFrame() {
+    const v = $("player");
+    if (v && cutDuration) {
+      const head = $("playhead");
+      if (head) head.style.left = (v.currentTime / cutDuration * 100) + "%";
+      const c = cutPreview && playing === "original" ? cutAt(v.currentTime) : {skipTo: null, card: "", muted: false, regions: []};
+      if (c.skipTo !== null && !listening && !v.paused) {
+        v.currentTime = c.skipTo;
+        if (c.card) { cardUntil = performance.now() + 1800; $("cardOverlay").textContent = c.card; }
+      }
+      $("cardOverlay").classList.toggle("show", performance.now() < cardUntil);
+      if (c.muted !== mutedByCut) { v.muted = c.muted; mutedByCut = c.muted; }
+      const sig = JSON.stringify(c.regions);
+      if (sig !== shownRegions) {
+        shownRegions = sig;
+        const box = $("regions"); box.innerHTML = "";
+        for (const [kind, [x, y, w, h]] of c.regions) {
+          const r = el("div", "region " + kind);
+          Object.assign(r.style, {left: x * 100 + "%", top: y * 100 + "%", width: w * 100 + "%", height: h * 100 + "%"});
+          box.appendChild(r);
+        }
+      }
+    }
+    requestAnimationFrame(previewFrame);
+  }
+  requestAnimationFrame(previewFrame);
+
+  // ---------------------------------------------------------------- settings: the cut
+  function fillCutSettings() {
+    if (!$("cut_auto")) return;
+    $("cut_auto").checked = cutSettings.auto !== false;
+    $("cut_pause_mode").value = cutSettings.pause_mode || "card";
+    $("cut_pause_min").value = Math.round(cutSettings.pause_min || 30);
+    for (const [id, key] of [["cutPrograms", "cut_programs"], ["keepPrograms", "keep_programs"]]) {
+      const box = $(id); box.innerHTML = "";
+      const names = cutSettings[key] || [];
+      if (!names.length) box.appendChild(el("span", "hint", "keine"));
+      for (const name of names) {
+        const chip = el("span", "chip", name);
+        chip.appendChild(button("", "×", async () => {
+          await api().set_cut_settings({[key]: names.filter(n => n !== name)});
+          cutSettings = (await api().data()).cut; fillCutSettings();
+        }, "entfernen"));
+        box.appendChild(chip);
+      }
+    }
+  }
+  async function saveCutSettings() {
+    await api().set_cut_settings({auto: $("cut_auto").checked, pause_mode: $("cut_pause_mode").value,
+                                  pause_min: +$("cut_pause_min").value || 30});
+    cutSettings = (await api().data()).cut; fillCutSettings();
   }
   const MODELS = {"assemblyai/universal-3-pro": "AssemblyAI Universal-3 Pro", "openai/whisper-1": "OpenAI whisper-1"};
   async function redoTranscription() {
@@ -1076,7 +1644,10 @@
       else showHint(st.hotkey_errors.length ? "Tasten belegt: " + st.hotkey_errors.join(", ") : "", "error");
       updatePreview();
       updateReady();
-      if (page === "library" && !st.recording && ++libraryTick % 20 === 0) loadRecordings();   // every 5 s
+      if (!st.recording && ++libraryTick % 20 === 0) {                                     // every 5 s
+        if (page === "library") loadRecordings();
+        else { recordings = await api().recordings(); showBadge(); }
+      }
     } catch (e) { }
     setTimeout(tick, 250);
   }

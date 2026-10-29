@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 import activity
+import hardware
 import identify
 import library
 import services
@@ -29,7 +30,7 @@ import obs_scene as scene
 from delivery import Delivery, recycle
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
-from pipeline import review
+from pipeline import binaries, cut_rules, edit, review
 from pipeline_runner import PipelineRunner
 from preview import PreviewServer
 from server_client import ServerClient
@@ -156,7 +157,9 @@ class Core:
             self.profile.seed(seed_entries(self.archive, self.term, self.settings.get("module_file")))
         self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
         # Transcription and the rest of the pipeline run on filed recordings, never during a recording.
-        self.pipeline = PipelineRunner(PIPELINE_QUEUE, lambda: self.session is None, self._terms_for).start()
+        binaries.configure(hardware.ffmpeg())   # the bundled ffmpeg too; decoding on the GPU measured slower (2026-10-29)
+        self.pipeline = PipelineRunner(PIPELINE_QUEUE, lambda: self.session is None, self._terms_for,
+                                       lambda: self.cut_settings(), hardware.ffmpeg_video_args()).start()
         self.delivery.on_archived = self.pipeline.enqueue
 
         remote.start(profile=scene.NAME, collection=scene.NAME)
@@ -212,7 +215,7 @@ class Core:
                 "module": self.module,
                 "devices": {k: [n for n, _ in v] for k, v in self.devices.items()},
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
-                "options": dict(self.options)}
+                "options": dict(self.options), "cut": self.cut_settings()}
 
     def _device_id(self, kind: str) -> str | None:
         return next((i for n, i in self.devices[kind] if n == self.choice.get(kind)), None)
@@ -451,6 +454,154 @@ class Core:
         if folder is None:
             return None
         return {**library.detail(folder), "status": self.pipeline.describe(folder)}
+
+    # ---------------------------------------------------------- the cut: settings and approval
+
+    def cut_settings(self) -> dict:
+        """The lecturer's settings for the cut: propose by itself, pauses, programs to cut or keep."""
+        return {"auto": True, **cut_rules.policy(self.settings.get("cut"))}
+
+    def set_cut_settings(self, values: dict) -> None:
+        current = dict(self.settings.get("cut") or {})
+        for k in ("auto", "pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles"):
+            if k in values:
+                current[k] = values[k]
+        if current.get("pause_mode") not in ("card", "shorten", "cut"):
+            current["pause_mode"] = "card"
+        current["pause_min"] = min(600.0, max(10.0, float(current.get("pause_min", 30))))
+        for k in ("cut_programs", "keep_programs", "cut_titles"):
+            current[k] = sorted({str(x).strip().lower() for x in current.get(k, []) if str(x).strip()})
+        self.settings["cut"] = current
+        self.save()
+
+    def _edit_of(self, sid: str):
+        """(folder, edit list) of a recording the lecturer may change now, or an error message."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return None, "Die Aufnahme ist nicht mehr in der Ablage."
+        if self.pipeline.active == str(folder):
+            return None, "Der Schnitt-Agent oder die Transkription arbeitet gerade an dieser Aufnahme."
+        e = edit.load(folder)
+        if e is None:
+            return None, "Für diese Aufnahme gibt es noch keinen Schnitt-Vorschlag."
+        return (folder, e), ""
+
+    def _save_edit(self, folder: Path, e: dict) -> None:
+        e.pop("approved", None)                    # every change asks for a new approval
+        edit.save(folder, e)
+
+    def _words(self, folder: Path) -> list[dict]:
+        return json.loads((folder / "transcript.json").read_text(encoding="utf-8")).get("words", []) \
+            if (folder / "transcript.json").exists() else []
+
+    def change_cut_item(self, sid: str, item_id: str, changes: dict) -> str:
+        """Accept, reject, move the bounds or change the text of one item; returns an error or ''."""
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        x = edit.find(e, item_id)
+        if x is None:
+            return "Diesen Vorschlag gibt es nicht mehr."
+        words = self._words(folder)
+        for k in ("start", "end"):
+            if changes.get(k) is not None and not (k == "end" and x["end"] is None):
+                t = min(e["duration"], max(0.0, float(changes[k])))
+                x[k] = edit.snap(t, words) if x["kind"] not in edit.SPANLESS else round(t, 3)
+        if x["end"] is not None and x["end"] <= x["start"]:
+            return "Das Ende muss nach dem Anfang liegen."
+        if changes.get("state") in edit.STATES:
+            x["state"] = changes["state"]
+        for k, v in (changes.get("params") or {}).items():
+            x["params"][k] = v
+        x["by_lecturer"] = True
+        e["items"].sort(key=lambda i: (i["start"], i["kind"]))
+        self._save_edit(folder, e)
+        return ""
+
+    def add_cut_item(self, sid: str, kind: str, start: float, end: float | None, params: dict | None = None) -> str:
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        words = self._words(folder)
+        try:
+            if kind not in edit.SPANLESS:
+                start, end = edit.snap(float(start), words), edit.snap(float(end), words)
+            x = edit.item(kind, float(start), end, "Von dir gesetzt", "lecturer", 1.0, "accepted", **(params or {}))
+        except (TypeError, ValueError) as ex:
+            return str(ex)
+        edit.add(e, x)
+        self._save_edit(folder, e)
+        return ""
+
+    def remove_cut_item(self, sid: str, item_id: str) -> str:
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        x = edit.find(e, item_id)
+        if x is None or x["source"] != "lecturer":
+            return "Nur selbst gesetzte Einträge lassen sich entfernen; Vorschläge lehnst du ab."
+        e["items"].remove(x)
+        self._save_edit(folder, e)
+        return ""
+
+    def set_cut_metadata(self, sid: str, title: str, description: str) -> str:
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        e["title"], e["description"] = title.strip(), description.strip()
+        self._save_edit(folder, e)
+        return ""
+
+    def set_program_rule(self, sid: str, program: str, choice: str) -> str:
+        """choice "cut" or "keep" remembers the program for all recordings, "" forgets it; the program's
+        spans in this recording are proposed again accordingly."""
+        program = program.strip().lower()
+        policy = self.cut_settings()
+        cut = set(policy["cut_programs"]) - {program}
+        keep = set(policy["keep_programs"]) - {program}
+        (cut if choice == "cut" else keep if choice == "keep" else set()).add(program)
+        self.set_cut_settings({"cut_programs": sorted(cut), "keep_programs": sorted(keep)})
+        found, error = self._edit_of(sid)
+        if error:
+            return "" if "noch keinen" in error else error
+        folder, e = found
+        e["items"] = [x for x in e["items"] if not (x["params"].get("rule") == "program" and not x.get("by_lecturer"))]
+        log = json.loads((folder / "activity.json").read_text(encoding="utf-8")) if (folder / "activity.json").exists() else {}
+        for x in cut_rules.programs(log.get("activity", []), self.cut_settings()):
+            edit.add(e, x)
+        self._save_edit(folder, e)
+        return ""
+
+    def approve_cut(self, sid: str, approved: bool = True) -> str:
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        if approved:
+            open_items = [x for x in e["items"] if x["state"] == "proposed"]
+            if open_items:
+                return f"Noch {len(open_items)} Vorschläge offen: annehmen oder ablehnen, dann freigeben."
+            e["approved"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+            edit.save(folder, e)
+            self.pipeline.failed.discard(str(folder))  # a failed render is tried again
+            self.pipeline.enqueue(folder)            # render it
+        else:
+            self._save_edit(folder, e)
+        return ""
+
+    def redo_cut(self, sid: str) -> str:
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        if library.stations(folder)["transcript"] != "done":
+            return "Der Schnitt braucht zuerst die Transkription."
+        if not self.pipeline.redo_cut(folder):
+            return "An dieser Aufnahme wird gerade gearbeitet."
+        return ""
 
     def redo_transcription(self, sid: str) -> str:
         """Queue a recording's transcription again, with the module's current terms; returns an error or ''."""

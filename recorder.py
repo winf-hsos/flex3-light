@@ -130,6 +130,30 @@ class Api:
     def redo_transcription(self, sid):
         return self._core.redo_transcription(sid)
 
+    def change_cut_item(self, sid, item_id, changes):
+        return self._core.change_cut_item(sid, item_id, changes or {})
+
+    def add_cut_item(self, sid, kind, start, end, params=None):
+        return self._core.add_cut_item(sid, kind, start, end, params)
+
+    def remove_cut_item(self, sid, item_id):
+        return self._core.remove_cut_item(sid, item_id)
+
+    def set_cut_metadata(self, sid, title, description):
+        return self._core.set_cut_metadata(sid, title or "", description or "")
+
+    def set_program_rule(self, sid, program, choice):
+        return self._core.set_program_rule(sid, program, choice or "")
+
+    def approve_cut(self, sid, approved=True):
+        return self._core.approve_cut(sid, bool(approved))
+
+    def redo_cut(self, sid):
+        return self._core.redo_cut(sid)
+
+    def set_cut_settings(self, values):
+        self._core.set_cut_settings(values or {})
+
     def delete_recording(self, sid):
         return self._core.delete_recording(sid)
 

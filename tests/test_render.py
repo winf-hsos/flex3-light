@@ -1,0 +1,117 @@
+"""Rendering an approved edit list: the timeline, and one real ffmpeg pass on a short test video."""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pipeline import edit, render, timeline  # noqa: E402
+
+
+def _edit(duration: float = 60.0) -> dict:
+    e = edit.new(duration)
+    for x in [edit.item("cut", 0, 3.01, "Stille", "rule", 0.9, "accepted", "dead_time"),
+              edit.item("pause", 20, 32, "Übung", "rule", 0.7, "accepted", "pause", mode="card"),
+              edit.item("pause", 40, 46, "Warten", "rule", 0.7, "accepted", "pause", mode="shorten"),
+              edit.item("cut", 50, 52, "verworfen", "agent", 0.3, "rejected", "other"),
+              edit.item("mute", 10, 12, "Stimme aus dem Raum", "agent", 0.7, "accepted", "privacy"),
+              edit.item("blur", 5, 9, "Mail", "agent", 0.8, "accepted", "privacy", region=[0.1, 0.1, 0.3, 0.1]),
+              edit.item("zoom", 13, 16, "klein", "agent", 0.8, "accepted", region=[0.5, 0.5, 0.2, 0.2]),
+              edit.item("freeze", 16, 18, "Fenster", "agent", 0.8, "accepted", "privacy"),
+              edit.item("layout", 33, 38, "Kamera", "agent", 0.8, "accepted", camera="big"),
+              edit.item("chapter", 0, None, "", "agent", 0.9, "accepted", title="Anfang"),
+              edit.item("chapter", 25, None, "", "agent", 0.9, "accepted", title="Nach der Pause"),
+              edit.item("chapter", 47, None, "", "agent", 0.9, "accepted", title="Schluss"),
+              edit.item("clip", 33, 48, "", "agent", 0.9, "accepted", title="Ein Stück"),
+              edit.item("thumbnail", 14, None, "", "agent", 0.9, "accepted", track="program")]:
+        edit.add(e, x)
+    return e
+
+
+def test_plan_maps_times_and_chapters():
+    p = timeline.plan(_edit(), fps=30)
+    # cut 0-3, the pause keeps a 2.5 s card (20-22.5), the shortened pause keeps a second at either end
+    assert p["removed"] == [(0.0, 3.0), (22.5, 32.0), (41.0, 45.0)]
+    assert p["cards"] == [(20.0, 22.5, "Pause entfernt")]
+    assert p["duration"] == 60 - 3 - 9.5 - 4
+    assert timeline.map_time(2.0, p) is None and timeline.map_time(3.0, p) == 0.0
+    assert timeline.map_time(33.0, p) == 33 - 3 - 9.5
+    assert timeline.map_forward(25.0, p) == 22.5 - 3                        # inside the pause: where it goes on
+    chs = timeline.chapters(_edit(), p)
+    assert [c["title"] for c in chs] == ["Anfang", "Nach der Pause", "Schluss"] and chs[0]["start"] == 0.0
+    assert timeline.youtube_chapters(chs).splitlines()[1] == "0:19 Nach der Pause"
+
+
+def _video(path: Path, source: str, seconds: int = 60) -> None:
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"{source}=s=640x360:r=30:d={seconds}",
+                    "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}", "-shortest", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-c:a", "aac", "-ar", "48000", str(path)],
+                   stdin=subprocess.DEVNULL, capture_output=True, check=True)
+
+
+def _duration(path: Path, stream: str) -> float:
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", stream, "-show_entries", "stream=duration",
+                        "-of", "csv=p=0", str(path)], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    return float(r.stdout.strip())
+
+
+def test_render_writes_the_long_version_clips_and_chapters(tmp_path):
+    _video(tmp_path / "recording.mp4", "testsrc2")
+    _video(tmp_path / "camera.mp4", "smptebars")
+    words = [{"word": f"Wort{i}.", "start": i * 1.0 + 0.1, "end": i * 1.0 + 0.6} for i in range(60)]
+    (tmp_path / "transcript.json").write_text(json.dumps({"language": "de", "words": words, "duration": 60}),
+                                              encoding="utf-8")
+    (tmp_path / "session.json").write_text(json.dumps({"session_id": "x", "language": "de"}), encoding="utf-8")
+    e = _edit()
+    e["approved"] = "2026-10-29T10:00:00+01:00"
+    edit.save(tmp_path, e)
+    messages = []
+    report = render.run(tmp_path, progress=messages.append)
+    expected = 60 - 3 - 9.5 - 4
+    assert abs(_duration(tmp_path / "edited.mp4", "v:0") - expected) < 0.1
+    assert abs(_duration(tmp_path / "edited.mp4", "a:0") - expected) < 0.1           # picture and sound together
+    assert report["clips"] == 1 and (tmp_path / "clip-01.mp4").exists() and (tmp_path / "clip-01.de.vtt").exists()
+    assert (tmp_path / "thumbnail.jpg").exists() and report["warnings"] == []
+    vtt = (tmp_path / "edited.de.vtt").read_text(encoding="utf-8")
+    assert "Wort1." not in vtt and "Wort3." in vtt and "Wort25." not in vtt          # cut words are gone
+    chapters = json.loads((tmp_path / "chapters.json").read_text(encoding="utf-8"))
+    assert [c["title"] for c in chapters["chapters"]] == ["Anfang", "Nach der Pause", "Schluss"]
+    assert report["signature"] == render.signature(e) and any("%" in m for m in messages)
+
+
+def test_runner_renders_after_the_approval_and_again_after_changes(tmp_path, monkeypatch):
+    import library
+    import pipeline_runner
+    folder = tmp_path / "2026-10-29 - Test"
+    folder.mkdir()
+    (folder / "session.json").write_text(json.dumps({"session_id": "x"}), encoding="utf-8")
+    (folder / "pipeline.json").write_text(json.dumps({"steps": {"transcribe": {"state": "done"}, "subtitles": {
+        "state": "done"}, "cut": {"state": "done"}}}), encoding="utf-8")
+    e = _edit()
+    edit.save(folder, e)
+    calls = []
+
+    def fake(f, video_args, progress):
+        calls.append(video_args)
+        progress("Langfassung wird gerendert, 50 %")
+        report = {"signature": render.signature(edit.load(f)), "files": ["edited.mp4"]}
+        (f / "render.json").write_text(json.dumps(report), encoding="utf-8")
+        return report
+    monkeypatch.setattr(pipeline_runner.render, "run", fake)
+    r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda: {"auto": True},
+                                       ["-c:v", "h264_nvenc"])
+    r.enqueue(folder)
+    r._process(folder)
+    assert calls == [] and library.stations(folder)["cut"] == "review"      # not approved: nothing rendered
+    e["approved"] = "2026-10-29T10:00:00+01:00"
+    edit.save(folder, e)
+    assert library.stations(folder)["cut"] == "queued"
+    assert r._process(folder) and calls == [["-c:v", "h264_nvenc"]]
+    assert library.stations(folder)["cut"] == "done" and r.describe(folder) == "Geschnittenes Video fertig"
+    r._process(folder)
+    assert len(calls) == 1                                                   # the same list is not rendered twice
+    e["items"][0]["end"] = 4.0
+    edit.save(folder, e)
+    assert library.stations(folder)["cut"] == "queued" and r._process(folder) and len(calls) == 2

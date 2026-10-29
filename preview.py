@@ -26,7 +26,7 @@ import obs_remote as remote
 
 FPS = 25
 WIDTH = 640
-TYPES = {".mp4": "video/mp4", ".vtt": "text/vtt; charset=utf-8"}
+TYPES = {".mp4": "video/mp4", ".vtt": "text/vtt; charset=utf-8", ".jpg": "image/jpeg"}
 
 
 class PreviewServer:
