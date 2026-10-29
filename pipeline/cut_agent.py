@@ -63,6 +63,9 @@ what kind of passages these are and why they go (classes, not single cuts; the c
 short remarks that matter to the lecturer, such as a tip for the next recording (a notification popped up, the
 microphone was too quiet at the start). Clips and chapters are listed from the items by themselves.
 
+The title of the recording and every chapter title also appear on cards in the video (a title card at the start, a
+card at each chapter): keep chapter titles to about five words, and the title to one line of about eight words.
+
 Write every reason, title, description and chapter title in the language of the lecture, short and factual, as the
 lecturer reads them while approving. Times are seconds of the recording. Boundaries of spans are moved out of words
 automatically. Call check_edit before you finish, fix what it reports, then call finish with a short summary."""
@@ -342,6 +345,8 @@ class CutAgent:
         else:
             self.summary = self.summary or "Rundenbudget erschöpft; die Liste ist unvollständig."
         decided_here = self.bench.decide_rest()            # nothing stays open for the lecturer
+        if "cards" not in self.bench.edit:                  # the texts of the added cards, to change before approving
+            self.bench.edit["cards"] = edit.default_cards(self.bench.edit, self.bench.meta, self.bench.settings)
         self.bench.edit["agent"] = {"model": getattr(self.client, "model", ""), "summary": self.summary,
                                     "decided_by_fallback": decided_here,
                                     "images": self.images, "usage": self.usage,

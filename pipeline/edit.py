@@ -199,3 +199,47 @@ def summary(edit: dict) -> dict:
         "check": [{"id": c["id"], "why": c.get("why", "")} for c in told.get("check", []) if c.get("id") in by_id],
         "notes": [n for n in told.get("notes", []) if n][:3],
     }
+
+
+MONTHS = ("Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+          "November", "Dezember")
+CHAPTER_DISPLAYS = ("card", "lower_third", "none")
+
+
+def default_cards(e: dict, meta: dict, settings: dict | None = None) -> dict:
+    """The texts and switches of the added cards, from the recording and the lecturer's settings;
+    the lecturer may change all of them before approving."""
+    settings = settings or {}
+    stamp = meta.get("recorded_at", "")
+    try:
+        d = dt.date.fromisoformat(stamp[:10])
+        date = f"{d.day}. {MONTHS[d.month - 1]} {d.year}"
+    except ValueError:
+        date = ""
+    module, title = meta.get("course_name", ""), e.get("title", "")
+    lecturer = meta.get("instructor_name", "")
+    return {"title": {"on": settings.get("title_card", True), "title": title, "kicker": module,
+                      "footer": "   ".join(x for x in (date, lecturer) if x)},
+            "closing": {"on": settings.get("closing_card", True), "title": "Danke fürs Zuschauen",
+                        "kicker": module, "footer": title},
+            "chapters": settings.get("chapter_display", "card"),
+            "chapter_sound": settings.get("chapter_sound", True),
+            "music": settings.get("music", True)}
+
+
+def clean_cards(cards: dict, current: dict) -> dict:
+    """The lecturer's changes to the cards, checked and merged into what there is."""
+    out = {**current}
+    for part in ("title", "closing"):
+        if isinstance(cards.get(part), dict):
+            merged = {**current.get(part, {}), **{k: v for k, v in cards[part].items() if k in ("on", "title", "kicker", "footer")}}
+            merged["on"] = bool(merged.get("on"))
+            for k in ("title", "kicker", "footer"):
+                merged[k] = str(merged.get(k, "")).strip()[:160]
+            out[part] = merged
+    if cards.get("chapters") in CHAPTER_DISPLAYS:
+        out["chapters"] = cards["chapters"]
+    for k in ("chapter_sound", "music"):
+        if k in cards:
+            out[k] = bool(cards[k])
+    return out

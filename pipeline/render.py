@@ -8,6 +8,11 @@ Into the session folder (names proposed for the FLEX3 contract, docs/pipeline.md
   thumbnail.jpg             the accepted thumbnail, 1280 x 720
   render.json               what was rendered from which list, and what could not be done
 
+Cards that add time (title, chapters, closing; timeline.inserts()) come in a second pass:
+the cut video is read piece by piece between them and joined with the cards and their
+sounds (sounds.py). Lower thirds, also for chapters if the lecturer prefers them to cards,
+are laid over the picture in the first pass.
+
 The pass works on the program picture (recording.mp4) in the times of the recording: held
 pictures, pixelated regions, zooms, the camera big (camera.mp4) or the screen alone
 (screen.mp4) and cards over removed pauses are laid over it, and only then are the removed
@@ -33,13 +38,10 @@ import wave
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image, ImageDraw, ImageFont
-
-from . import binaries, edit, files, timeline
+from . import binaries, cards, edit, files, sounds, timeline
 
 NO_WINDOW, BELOW_NORMAL_PRIORITY = 0x08000000, 0x00004000
 X264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
-BLUE = (0, 158, 227)
 EPS = 0.0005                     # half a millisecond, so that a frame exactly on a bound is decided as intended
 
 
@@ -47,7 +49,7 @@ def signature(e: dict) -> str:
     """Changes whenever what would be rendered changes."""
     accepted = sorted((x for x in e["items"] if x["state"] == "accepted"), key=lambda x: (x["start"], x["id"]))
     keep = [{k: x.get(k) for k in ("kind", "start", "end", "params")} for x in accepted]
-    return hashlib.sha1(json.dumps([e["duration"], keep], sort_keys=True).encode()).hexdigest()[:16]
+    return hashlib.sha1(json.dumps([e["duration"], keep, e.get("cards")], sort_keys=True).encode()).hexdigest()[:16]
 
 
 def probe(video: Path) -> dict:
@@ -76,18 +78,6 @@ def _zoom_box(region, W: int, H: int) -> tuple[int, int, int, int]:
     w, h = min(w, W), min(h, H)
     cx, cy = x + _box(region, W, H)[2] / 2, y + _box(region, W, H)[3] / 2
     return _even(min(max(0, cx - w / 2), W - w)), _even(min(max(0, cy - h / 2), H - h)), w, h
-
-
-def _card(text: str, path: Path, W: int, H: int) -> None:
-    img = Image.new("RGB", (W, H), BLUE)
-    draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype("segoeuib.ttf", H // 14)
-    except OSError:
-        font = ImageFont.load_default(size=H // 14)
-    box = draw.textbbox((0, 0), text, font=font)
-    draw.text(((W - box[2]) / 2, (H - box[3]) / 2), text, fill="white", font=font)
-    img.save(path)
 
 
 def _between(spans) -> str:
@@ -183,11 +173,23 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
         overlay(f"l{i}", 0, 0, x["start"], x["end"])
     # 5. cards over removed pauses
     for i, (a, b, text) in enumerate(p["cards"]):
-        card = work / f"card-{i}.png"
-        _card(text, card, W, H)
+        card = cards.card(work / f"card-{i}.png", W, H, text)
         still_input(card, a, b, f"c{i}")
         overlay(f"c{i}", 0, 0, a, b)
-    # 6. the picture loses the removed spans; the sound is cut separately (sound())
+    # 6. lower thirds: proposed ones, and chapter titles when chapters are shown that way
+    thirds = [(x["start"], x["end"], x["params"].get("text", ""), x["params"].get("kicker", ""))
+              for x in accepted if x["kind"] == "lower_third" and x["params"].get("text")]
+    if (e.get("cards") or {}).get("chapters") == "lower_third":
+        chapters = sorted((x for x in e["items"] if x["kind"] == "chapter" and x["state"] == "accepted"),
+                          key=lambda x: x["start"])
+        for k, x in enumerate(chapters, 1):
+            if x["params"].get("title"):
+                thirds.append((x["start"], min(x["start"] + 5.0, e["duration"]), x["params"]["title"], f"Kapitel {k}"))
+    for i, (a, b, text, kicker) in enumerate(thirds):
+        png = cards.lower_third(work / f"third-{i}.png", W, H, text, kicker)
+        still_input(png, a, b, f"t{i}", "format=rgba")
+        overlay(f"t{i}", 0, 0, a, b)
+    # 7. the picture loses the removed spans; the sound is cut separately (sound())
     keep = "not(" + "+".join(f"gte(t,{a - EPS:.4f})*lt(t,{b - EPS:.4f})" for a, b in p["removed"]) + ")" \
         if p["removed"] else "1"
     graph.append(f"[{cur}]select='{keep}',setpts=N/({fps}*TB)[vout]")
@@ -248,8 +250,61 @@ def _run(args: list[str], total: float, progress: Callable[[float], None] | None
         raise RuntimeError("ffmpeg: " + "".join(errors)[-600:])
 
 
+def compose(cut: Path, ins: list[dict], p: dict, out: Path, work: Path, sound_dir: Path | None,
+            video_args: list[str], say: Callable[[str], None], warnings: list[str]) -> float:
+    """The cut video with the cards between its pieces; returns the final length."""
+    W, H, fps = p["width"], p["height"], p["fps"]
+    inputs, chains, labels = [], [], []
+    n, pos, missing = 0, 0.0, set()
+    pieces = []                                  # ("video", a, b) and ("card", insert)
+    for o in ins:
+        if o["at"] > pos + 0.01:
+            pieces.append(("video", pos, o["at"]))
+        pieces.append(("card", o))
+        pos = max(pos, o["at"])
+    if p["duration"] > pos + 0.01:
+        pieces.append(("video", pos, p["duration"]))
+    for k, piece in enumerate(pieces):
+        if piece[0] == "video":
+            _, a, b = piece
+            inputs += ["-ss", f"{a:.4f}", "-t", f"{b - a:.4f}", "-i", str(cut)]
+            chains.append(f"[{n}:v]setpts=PTS-STARTPTS,format=yuv420p,setsar=1[v{k}]")
+            chains.append(f"[{n}:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{k}]")
+            n += 1
+        else:
+            o = piece[1]
+            png = cards.card(work / f"insert-{k}.png", W, H, o["title"], o["kicker"], o["footer"])
+            inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{o['seconds']:.3f}", "-i", str(png)]
+            chains.append(f"[{n}:v]format=yuv420p,setsar=1,fade=t=in:d=0.25,fade=t=out:st={o['seconds'] - 0.25:.3f}:d=0.25[v{k}]")
+            n += 1
+            clip = sounds.path(sound_dir, o["sound"]) if sound_dir and o["sound"] else None
+            if clip is not None and clip.exists():
+                inputs += ["-i", str(clip)]
+                chains.append(f"[{n}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.7,"
+                              f"apad=whole_dur={o['seconds']:.3f},atrim=0:{o['seconds']:.3f},"
+                              f"afade=t=out:st={max(0.0, o['seconds'] - 0.4):.3f}:d=0.4,asetpts=PTS-STARTPTS[a{k}]")
+            else:
+                if o["sound"]:
+                    missing.add(o["sound"])
+                inputs += ["-f", "lavfi", "-t", f"{o['seconds']:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
+                chains.append(f"[{n}:a]asetpts=PTS-STARTPTS[a{k}]")
+            n += 1
+        labels.append(f"[v{k}][a{k}]")
+    if missing:
+        warnings.append("Ohne Klang gerendert (" + ", ".join(sorted(missing)) + "): die Klänge entstehen mit dem "
+                        "ElevenLabs-Schlüssel aus den Einstellungen")
+    graph = ";\n".join(chains) + ";\n" + "".join(labels) + f"concat=n={len(pieces)}:v=1:a=1[vout][aout]"
+    script = work / "compose.txt"
+    script.write_text(graph, encoding="utf-8")
+    total = p["duration"] + sum(o["seconds"] for o in ins)
+    _run([*inputs, "-/filter_complex", str(script), "-map", "[vout]", "-map", "[aout]", "-r", str(fps),
+          *video_args, "-c:a", "aac", "-b:a", "160k", "-f", "mp4", str(out)], total,
+         lambda share: say(f"Tafeln werden eingefügt, {share * 100:.0f} %"))
+    return round(total, 3)
+
+
 def run(folder: Path, video_args: list[str] | None = None,
-        progress: Callable[[str], None] | None = None) -> dict:
+        progress: Callable[[str], None] | None = None, sound_dir: Path | None = None) -> dict:
     """Render the approved edit list of a session folder; returns render.json."""
     folder = Path(folder)
     e = edit.load(folder)
@@ -268,17 +323,23 @@ def run(folder: Path, video_args: list[str] | None = None,
         say("Ton wird geschnitten …")
         cut_sound = sound(p, work)
         sound_input = inputs.count("-i")                    # its index among the inputs
+        ins = timeline.inserts(e, p)
+        cut_file = work / "cut.mp4" if ins else long_tmp
         say("Langfassung wird gerendert …")
         _run([*inputs, "-i", str(cut_sound), "-/filter_complex", str(script), "-map", "[vout]",
               "-map", f"{sound_input}:a", "-shortest", "-r", str(p["fps"]),
-              *video_args, "-c:a", "aac", "-b:a", "160k", "-f", "mp4", str(long_tmp)], p["duration"],
+              *video_args, "-c:a", "aac", "-b:a", "160k", "-f", "mp4", str(cut_file)], p["duration"],
              lambda share: say(f"Langfassung wird gerendert, {share * 100:.0f} %"))
+        final_duration = p["duration"]
+        if ins:
+            final_duration = compose(cut_file, ins, p, long_tmp, work, sound_dir, video_args, say, warnings)
         os.replace(long_tmp, folder / "edited.mp4")
         written = ["edited.mp4"]
         if transcript:
-            (folder / f"edited.{language}.vtt").write_text(timeline.vtt(timeline.words(transcript, p)), encoding="utf-8")
+            (folder / f"edited.{language}.vtt").write_text(timeline.vtt(timeline.words(transcript, p, ins=ins)),
+                                                           encoding="utf-8")
             written.append(f"edited.{language}.vtt")
-        chs = timeline.chapters(e, p)
+        chs = timeline.chapters(e, p, ins)
         files.write_json(folder / "chapters.json", {"chapters": chs, "youtube": timeline.youtube_chapters(chs)})
         written.append("chapters.json")
         # clips, cut from the long version, so that they carry everything done to it
@@ -288,7 +349,8 @@ def run(folder: Path, video_args: list[str] | None = None,
         accepted_clips = sorted((x for x in e["items"] if x["kind"] == "clip" and x["state"] == "accepted"),
                                 key=lambda x: x["start"])
         for i, x in enumerate(accepted_clips, 1):
-            a, b = timeline.map_forward(x["start"], p), timeline.map_forward(x["end"], p)
+            a = timeline.shift(timeline.map_forward(x["start"], p), ins)
+            b = timeline.shift(timeline.map_forward(x["end"], p), ins)
             if b - a < 3:
                 warnings.append(f"{x['id']}: Clip nach dem Schnitt kürzer als drei Sekunden, ausgelassen")
                 continue
@@ -297,8 +359,8 @@ def run(folder: Path, video_args: list[str] | None = None,
             _run(["-ss", f"{a:.3f}", "-i", str(folder / "edited.mp4"), "-t", f"{b - a:.3f}", *video_args,
                   "-c:a", "aac", "-b:a", "160k", str(folder / f"{name}.mp4")], b - a, None)
             if transcript:
-                (folder / f"{name}.{language}.vtt").write_text(timeline.vtt(timeline.words(transcript, p, a, b)),
-                                                               encoding="utf-8")
+                (folder / f"{name}.{language}.vtt").write_text(
+                    timeline.vtt(timeline.words(transcript, p, a, b, ins)), encoding="utf-8")
             clips.append({"file": f"{name}.mp4", "title": x["params"].get("title", ""),
                           "summary": x["params"].get("summary", ""), "start": a, "end": b,
                           "source_start": x["start"], "source_end": x["end"]})
@@ -306,7 +368,7 @@ def run(folder: Path, video_args: list[str] | None = None,
         files.write_json(folder / "clips.json", {"clips": clips})
         thumb = next((x for x in e["items"] if x["kind"] == "thumbnail" and x["state"] == "accepted"), None)
         if thumb:
-            t = timeline.map_forward(thumb["start"], p)
+            t = timeline.shift(timeline.map_forward(thumb["start"], p), ins)
             subprocess.run([binaries.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(folder / "edited.mp4"),
                             "-frames:v", "1", "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,"
                             "pad=1280:720:(ow-iw)/2:(oh-ih)/2", "-q:v", "3", str(folder / "thumbnail.jpg")],
@@ -314,7 +376,8 @@ def run(folder: Path, video_args: list[str] | None = None,
             if (folder / "thumbnail.jpg").exists():
                 written.append("thumbnail.jpg")
         report = {"rendered": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
-                  "signature": signature(e), "approved": e.get("approved"), "duration": p["duration"],
+                  "signature": signature(e), "approved": e.get("approved"), "duration": final_duration,
+                  "cards": [{"kind": o["kind"], "title": o["title"]} for o in ins],
                   "source_duration": e["duration"], "files": written, "clips": len(clips),
                   "chapters": len(chs), "warnings": warnings, "encoder": video_args[1]}
         files.write_json(folder / "render.json", report)

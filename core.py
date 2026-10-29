@@ -30,7 +30,7 @@ import obs_scene as scene
 from delivery import Delivery, recycle
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
-from pipeline import binaries, cut_rules, edit, review
+from pipeline import binaries, cut_rules, edit, review, sounds
 from pipeline_runner import PipelineRunner
 from preview import PreviewServer
 from server_client import ServerClient
@@ -159,7 +159,8 @@ class Core:
         # Transcription and the rest of the pipeline run on filed recordings, never during a recording.
         binaries.configure(hardware.ffmpeg())   # the bundled ffmpeg too; decoding on the GPU measured slower (2026-10-29)
         self.pipeline = PipelineRunner(PIPELINE_QUEUE, lambda: self.session is None, self._terms_for,
-                                       lambda: self.cut_settings(), hardware.ffmpeg_video_args()).start()
+                                       lambda: self.cut_settings(), hardware.ffmpeg_video_args(),
+                                       APP_DIR / "sounds").start()
         self.delivery.on_archived = self.pipeline.enqueue
 
         remote.start(profile=scene.NAME, collection=scene.NAME)
@@ -458,12 +459,16 @@ class Core:
     # ---------------------------------------------------------- the cut: settings and approval
 
     def cut_settings(self) -> dict:
-        """The lecturer's settings for the cut: propose by itself, pauses, programs to cut or keep."""
-        return {"auto": True, **cut_rules.policy(self.settings.get("cut"))}
+        """The lecturer's settings for the cut: propose by itself, pauses, programs to cut or keep, cards
+        and sounds; "sounds" lists the sounds already made."""
+        return {"auto": True, "title_card": True, "closing_card": True, "chapter_display": "card",
+                "chapter_sound": True, "music": True, **cut_rules.policy(self.settings.get("cut")),
+                "sounds": sorted(sounds.available(APP_DIR / "sounds"))}
 
     def set_cut_settings(self, values: dict) -> None:
         current = dict(self.settings.get("cut") or {})
-        for k in ("auto", "pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off"):
+        for k in ("auto", "pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off",
+                  "title_card", "closing_card", "chapter_display", "chapter_sound", "music"):
             if k in values:
                 current[k] = values[k]
         if current.get("pause_mode") not in ("card", "shorten", "cut"):
@@ -472,6 +477,10 @@ class Core:
         for k in ("cut_programs", "keep_programs", "cut_titles"):
             current[k] = sorted({str(x).strip().lower() for x in current.get(k, []) if str(x).strip()})
         current["kinds_off"] = sorted({k for k in current.get("kinds_off", []) if k in edit.KINDS})
+        if current.get("chapter_display") not in edit.CHAPTER_DISPLAYS:
+            current["chapter_display"] = "card"
+        for k in ("title_card", "closing_card", "chapter_sound", "music"):
+            current[k] = bool(current.get(k, True))
         self.settings["cut"] = current
         self.save()
 
@@ -577,6 +586,17 @@ class Core:
         self._save_edit(folder, e)
         return ""
 
+    def set_cut_cards(self, sid: str, cards: dict) -> str:
+        """The lecturer's texts and switches of the title, chapter and closing cards."""
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        meta = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+        e["cards"] = edit.clean_cards(cards or {}, e.get("cards") or edit.default_cards(e, meta, self.cut_settings()))
+        self._save_edit(folder, e)
+        return ""
+
     def approve_cut(self, sid: str, approved: bool = True) -> str:
         found, error = self._edit_of(sid)
         if error:
@@ -586,6 +606,9 @@ class Core:
             open_items = [x for x in e["items"] if x["state"] == "proposed"]
             if open_items:
                 return f"Noch {len(open_items)} Vorschläge offen: annehmen oder ablehnen, dann freigeben."
+            if "cards" not in e:                      # proposed before there were cards: the defaults
+                meta = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+                e["cards"] = edit.default_cards(e, meta, self.cut_settings())
             e["approved"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
             edit.save(folder, e)
             self.pipeline.failed.discard(str(folder))  # a failed render is tried again

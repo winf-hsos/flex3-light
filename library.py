@@ -99,6 +99,7 @@ def cut_view(folder: Path) -> dict:
         view["edit"]["problems"] = edit.problems(e)
         view["edit"]["kept_seconds"] = round(sum(b - a for a, b in kept), 1)
         view["edit"]["summary"] = edit.summary(e)
+        view["edit"]["cards"] = e.get("cards") or edit.default_cards(e, _read(folder / "session.json"))
         made = _read(folder / "render.json")
         if made:
             view["render"] = {**made, "current": made.get("signature") == render.signature(e),

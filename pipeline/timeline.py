@@ -6,8 +6,10 @@ seconds), shortened to one second at either end, or cut without a trace, as its 
 All bounds are put on frame boundaries, so that picture and sound lose exactly the same
 time and stay in sync however many cuts there are.
 
-map_time() turns a time of the recording into the time in the edited video, which is how
-subtitles, chapters and clips follow the cut.
+map_time() turns a time of the recording into the time in the cut video, which is how
+subtitles, chapters and clips follow the cut. Cards that add time come on top: a title
+card at the start, a card for each chapter and a closing card (inserts()); shift() moves
+a time of the cut video past every card inserted before it.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from . import edit, subtitles
 
 CARD = 2.5                       # seconds a removed pause shows its card
 SHORTENED = 1.0                  # seconds a shortened pause keeps at either end
+TITLE, CHAPTER, CLOSING = 4.0, 2.0, 4.0     # seconds of the inserted cards
 
 
 def _frame(t: float, fps: float) -> float:
@@ -82,14 +85,62 @@ def map_forward(t: float, p: dict) -> float:
     return round(offset, 3)
 
 
-def words(transcript: dict, p: dict, start: float = 0.0, end: float | None = None) -> list[dict]:
-    """The words that remain, with times in the edited video, optionally only those in [start, end)
-    of the edited video and then relative to start (for a clip)."""
+def inserts(e: dict, p: dict) -> list[dict]:
+    """The cards that add time, in order: {"at" (time in the cut video), "seconds", "kind", "title",
+    "kicker", "footer", "sound"}. They follow e["cards"], which the proposal fills from the settings and
+    the lecturer may change."""
+    cfg = e.get("cards") or {}
+    if not cfg:                                  # a list from before there were cards (approve_cut fills them in)
+        return []
+    out = []
+    title = cfg.get("title") or {}
+    if title.get("on"):
+        out.append({"at": 0.0, "seconds": TITLE, "kind": "title", "title": title.get("title", ""),
+                    "kicker": title.get("kicker", ""), "footer": title.get("footer", ""),
+                    "sound": "intro" if cfg.get("music") else None})
+    if cfg.get("chapters", "card") == "card":
+        number = 0
+        for x in sorted((x for x in e["items"] if x["kind"] == "chapter" and x["state"] == "accepted"),
+                        key=lambda x: x["start"]):
+            number += 1
+            at = map_forward(x["start"], p)
+            if (title.get("on") and at < 1.0) or any(abs(at - o["at"]) < 1.0 and o["kind"] == "chapter" for o in out):
+                continue                         # right after the title card, or a second card on the same spot
+            out.append({"at": at, "seconds": CHAPTER, "kind": "chapter", "title": x["params"].get("title", ""),
+                        "kicker": f"Kapitel {number}", "footer": "",
+                        "sound": "swoosh" if cfg.get("chapter_sound", True) else None})
+    closing = cfg.get("closing") or {}
+    if closing.get("on"):
+        out.append({"at": p["duration"], "seconds": CLOSING, "kind": "closing", "title": closing.get("title", ""),
+                    "kicker": closing.get("kicker", ""), "footer": closing.get("footer", ""),
+                    "sound": "outro" if cfg.get("music") else None})
+    return sorted(out, key=lambda o: (o["at"], o["kind"] != "title", o["kind"] == "closing"))
+
+
+def shift(t: float, ins: list[dict] | None) -> float:
+    """A time of the cut video in the final video: past every card inserted at or before it."""
+    return round(t + sum(o["seconds"] for o in ins or [] if o["at"] <= t + 1e-6), 3)
+
+
+def card_starts(ins: list[dict]) -> list[float]:
+    """Where each insert begins in the final video."""
+    out, before = [], 0.0
+    for o in ins:
+        out.append(round(o["at"] + before, 3))
+        before += o["seconds"]
+    return out
+
+
+def words(transcript: dict, p: dict, start: float = 0.0, end: float | None = None,
+          ins: list[dict] | None = None) -> list[dict]:
+    """The words that remain, with times in the final video, optionally only those in [start, end)
+    of it and then relative to start (for a clip)."""
     out = []
     for w in transcript.get("words", []):
         a, b = map_time(w["start"], p), map_time(w["end"], p)
         if a is None or b is None or b < a:
             continue
+        a, b = shift(a, ins), shift(b, ins)
         if a < start or (end is not None and b > end):
             continue
         out.append({**w, "start": round(a - start, 3), "end": round(b - start, 3)})
@@ -103,12 +154,18 @@ def vtt(timed_words: list[dict]) -> str:
     return "\n".join(body)
 
 
-def chapters(e: dict, p: dict) -> list[dict]:
-    """Accepted chapters in the edited video; the first at 0:00, none twice at the same time."""
+def chapters(e: dict, p: dict, ins: list[dict] | None = None) -> list[dict]:
+    """Accepted chapters in the final video, starting with their card where there is one; the first at
+    0:00, none twice at the same time."""
+    ins = ins or []
+    starts = card_starts(ins)
     out = []
     for x in sorted((x for x in e["items"] if x["kind"] == "chapter" and x["state"] == "accepted"),
                     key=lambda x: x["start"]):
-        t = map_forward(x["start"], p)
+        cut_t = map_forward(x["start"], p)
+        card_at = next((s for o, s in zip(ins, starts) if o["kind"] == "chapter" and abs(o["at"] - cut_t) < 1e-6),
+                       None)
+        t = card_at if card_at is not None else shift(cut_t, ins)
         if out and t - out[-1]["start"] < 1.0:
             continue
         out.append({"start": t, "source_start": x["start"], "title": x["params"].get("title", ""),

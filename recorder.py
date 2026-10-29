@@ -145,6 +145,9 @@ class Api:
     def set_program_rule(self, sid, program, choice):
         return self._core.set_program_rule(sid, program, choice or "")
 
+    def set_cut_cards(self, sid, cards):
+        return self._core.set_cut_cards(sid, cards or {})
+
     def approve_cut(self, sid, approved=True):
         return self._core.approve_cut(sid, bool(approved))
 

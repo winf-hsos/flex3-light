@@ -320,6 +320,11 @@
   .setting-row select, .setting-row input { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
   .setting-row input { width: 70px; }
   .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 12px; }
+  .card-edit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .card-edit > .check { grid-column: 1 / -1; font-weight: 600; color: var(--ink); }
+  .card-edit .field { padding: 5px 10px; }
+  .card-edit input:disabled { color: var(--mist); }
+  .cut-group select { font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
   #dTerms { margin-top: -6px; font-size: 12px; }
   #dTerms:empty { display: none; }
   .spots { padding: 14px 16px; display: grid; gap: 10px; justify-items: start; }
@@ -566,6 +571,10 @@
             <div class="panel-head"><h2>Schnitt</h2></div>
             <label class="toggle"><input type="checkbox" id="cut_auto" onchange="saveCutSettings()"><span class="knob"></span><span><b>Schnitt von selbst vorschlagen</b><small>Nach der Transkription sieht sich der Schnitt-Agent jede Aufnahme an. Gerendert wird erst nach deiner Freigabe.</small></span></label>
             <div class="setting-row"><span>Lange Pausen ab</span><span><input type="number" id="cut_pause_min" min="10" max="600" onchange="saveCutSettings()"> Sekunden</span></div>
+            <label class="toggle"><input type="checkbox" id="cut_title_card" onchange="saveCutSettings()"><span class="knob"></span><span><b>Titeltafel und Abspann</b><small>Am Anfang Titel, Modul, Datum und Name, am Ende ein kurzer Abspann. Die Texte änderst du vor der Freigabe.</small></span></label>
+            <div class="setting-row"><span>Kapitel</span><select id="cut_chapter_display" onchange="saveCutSettings()"><option value="card">als Tafel</option><option value="lower_third">als Bauchbinde</option><option value="none">ohne Einblendung</option></select></div>
+            <label class="toggle"><input type="checkbox" id="cut_chapter_sound" onchange="saveCutSettings()"><span class="knob"></span><span><b>Wisch-Geräusch bei Kapiteln</b><small>Ein kurzer, leiser Klang zur Kapiteltafel.</small></span></label>
+            <label class="toggle"><input type="checkbox" id="cut_music" onchange="saveCutSettings()"><span class="knob"></span><span><b>Musik zu Titel und Abspann</b><small id="soundState">Kurze Klänge, einmal mit ElevenLabs erzeugt.</small></span></label>
             <div class="setting-row"><span>Lange Pausen</span><select id="cut_pause_mode" onchange="saveCutSettings()"><option value="card">mit Tafel „Pause entfernt“ schneiden</option><option value="shorten">auf zwei Sekunden kürzen</option><option value="cut">ohne Hinweis schneiden</option></select></div>
             <div class="cut-group"><h3>Was der Schnitt-Agent vorschlagen darf</h3><div class="kinds" id="cutKinds"></div>
               <div class="section-note">Was ausgeschaltet ist, schlägt er nicht vor; du kannst es selbst setzen. Gilt ab dem nächsten Vorschlag.</div></div>
@@ -1140,6 +1149,7 @@
       tools.appendChild(button("btn", "Kapitel an der Abspielposition", () => addOwn("chapter", $("player").currentTime, null, {title: "Neues Kapitel"})));
     }
     det.appendChild(tools);
+    det.appendChild(cardsGroup(e));
     det.appendChild(metadata(e));
     if (view.programs.length) det.appendChild(programList(view.programs));
     if (e.problems.length) {
@@ -1198,6 +1208,13 @@
     const more = [];
     if ((sum.chapters || []).length) more.push(`${sum.chapters.length} Kapitel: ${sum.chapters.join(", ")}`);
     if (sum.zooms) more.push(`${sum.zooms} ${sum.zooms === 1 ? "Zoom" : "Zooms"} auf kleine Bildschirminhalte`);
+    const c = e.cards || {};
+    const added = [c.title && c.title.on ? "Titeltafel" : "",
+                   (sum.chapters || []).length && c.chapters !== "none"
+                     ? (c.chapters === "lower_third" ? "Kapitel als Bauchbinde" : "Kapiteltafeln" + (c.chapter_sound !== false ? " mit Wisch-Geräusch" : ""))
+                     : "",
+                   c.closing && c.closing.on ? "Abspann" : ""].filter(Boolean);
+    if (added.length) more.push(added.join(", ") + (c.music && (c.title?.on || c.closing?.on) ? ", Musik zu Titel und Abspann" : ""));
     section("Außerdem", more.map(t => el("li", "", t)));
     section("Bitte kurz ansehen", (sum.check || []).map(c => {
       const x = cutItems.find(i => i.id === c.id);
@@ -1313,6 +1330,43 @@
     return g;
   }
 
+  // the added cards: title, chapters, closing; texts as proposed, to change before approving
+  function cardsGroup(e) {
+    const c = e.cards || {}, g = el("div", "cut-group");
+    g.appendChild(el("h3", "", "Tafeln"));
+    const save = changes => api().set_cut_cards(selectedId, changes).then(cutResult);
+    const part = (key, name) => {
+      const cfg = c[key] || {}, box = el("div", "card-edit");
+      const on = el("label", "check"); const cb = el("input"); cb.type = "checkbox"; cb.checked = !!cfg.on;
+      cb.onchange = () => save({[key]: {on: cb.checked}});
+      on.append(cb, " " + name);
+      box.appendChild(on);
+      for (const [field, label] of [["kicker", "Zeile darüber"], ["title", "Titel"], ["footer", "Zeile darunter"]]) {
+        const f = el("div", "field"); f.appendChild(el("label", "", label));
+        const input = el("input"); input.value = cfg[field] || ""; input.disabled = !cfg.on;
+        input.onchange = () => save({[key]: {[field]: input.value}});
+        f.appendChild(input); box.appendChild(f);
+      }
+      return box;
+    };
+    g.append(part("title", "Titeltafel am Anfang"), part("closing", "Abspann am Ende"));
+    const row = el("div", "cut-tools");
+    const sel = el("select");
+    for (const [k, name] of [["card", "Kapitel als Tafel"], ["lower_third", "Kapitel als Bauchbinde"], ["none", "Kapitel ohne Einblendung"]]) {
+      const o = el("option", "", name); o.value = k; sel.appendChild(o);
+    }
+    sel.value = c.chapters || "card";
+    sel.onchange = () => save({chapters: sel.value});
+    const toggle = (key, name) => {
+      const l = el("label", "check"); const cb = el("input"); cb.type = "checkbox"; cb.checked = c[key] !== false;
+      cb.onchange = () => save({[key]: cb.checked}); l.append(cb, " " + name); return l;
+    };
+    row.append(sel, toggle("chapter_sound", "Wisch-Geräusch bei Kapiteln"), toggle("music", "Musik zu Titel und Abspann"));
+    g.appendChild(row);
+    g.appendChild(el("div", "hint", "Die Kapiteltitel änderst du oben unter „Kapitel“."));
+    return g;
+  }
+
   function programList(programs) {
     const g = el("div", "cut-group");
     g.appendChild(el("h3", "", "Programme in dieser Aufnahme"));
@@ -1420,6 +1474,13 @@
     $("cut_auto").checked = cutSettings.auto !== false;
     $("cut_pause_mode").value = cutSettings.pause_mode || "card";
     $("cut_pause_min").value = Math.round(cutSettings.pause_min || 30);
+    $("cut_title_card").checked = cutSettings.title_card !== false;
+    $("cut_chapter_display").value = cutSettings.chapter_display || "card";
+    $("cut_chapter_sound").checked = cutSettings.chapter_sound !== false;
+    $("cut_music").checked = cutSettings.music !== false;
+    const made = cutSettings.sounds || [];
+    $("soundState").textContent = made.length >= 3 ? "Kurze Klänge, mit ElevenLabs erzeugt und bereit."
+      : "Die Klänge entstehen einmalig mit dem ElevenLabs-Schlüssel (KI-Dienste), beim ersten Rendern.";
     const kinds = $("cutKinds"); kinds.innerHTML = "";
     const off = cutSettings.kinds_off || [];
     for (const [kind, name] of Object.entries(CUT_KINDS)) {
@@ -1449,7 +1510,10 @@
   }
   async function saveCutSettings() {
     await api().set_cut_settings({auto: $("cut_auto").checked, pause_mode: $("cut_pause_mode").value,
-                                  pause_min: +$("cut_pause_min").value || 30});
+                                  pause_min: +$("cut_pause_min").value || 30,
+                                  title_card: $("cut_title_card").checked, closing_card: $("cut_title_card").checked,
+                                  chapter_display: $("cut_chapter_display").value,
+                                  chapter_sound: $("cut_chapter_sound").checked, music: $("cut_music").checked});
     cutSettings = (await api().data()).cut; fillCutSettings();
   }
   const MODELS = {"assemblyai/universal-3-pro": "AssemblyAI Universal-3 Pro", "openai/whisper-1": "OpenAI whisper-1"};

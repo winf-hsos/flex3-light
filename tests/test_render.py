@@ -93,7 +93,7 @@ def test_runner_renders_after_the_approval_and_again_after_changes(tmp_path, mon
     edit.save(folder, e)
     calls = []
 
-    def fake(f, video_args, progress):
+    def fake(f, video_args, progress, sound_dir=None):
         calls.append(video_args)
         progress("Langfassung wird gerendert, 50 %")
         report = {"signature": render.signature(edit.load(f)), "files": ["edited.mp4"]}
@@ -115,3 +115,40 @@ def test_runner_renders_after_the_approval_and_again_after_changes(tmp_path, mon
     e["items"][0]["end"] = 4.0
     edit.save(folder, e)
     assert library.stations(folder)["cut"] == "queued" and r._process(folder) and len(calls) == 2
+
+
+def test_cards_add_time_and_carry_sound(tmp_path):
+    from pipeline import sounds
+    _video(tmp_path / "recording.mp4", "testsrc2", 30)
+    words = [{"word": f"Wort{i}.", "start": i * 1.0 + 0.1, "end": i * 1.0 + 0.6} for i in range(30)]
+    (tmp_path / "transcript.json").write_text(json.dumps({"language": "de", "words": words, "duration": 30}),
+                                              encoding="utf-8")
+    (tmp_path / "session.json").write_text(json.dumps({"session_id": "x", "language": "de", "course_name": "Modul",
+                                                       "recorded_at": "2026-10-29T10:00:00+01:00"}), encoding="utf-8")
+    e = edit.new(30.0)
+    for x in [edit.item("cut", 0, 2.0, "Stille", "rule", 0.9, "accepted", "dead_time"),
+              edit.item("chapter", 0, None, "", "agent", 0.9, "accepted", title="Anfang"),
+              edit.item("chapter", 12, None, "", "agent", 0.9, "accepted", title="Mitte"),
+              edit.item("lower_third", 20, 24, "", "agent", 0.8, "accepted", text="Prof. Dr. Muster", kicker="Gast")]:
+        edit.add(e, x)
+    e["title"] = "Ein Test"
+    e["cards"] = edit.default_cards(e, json.loads((tmp_path / "session.json").read_text(encoding="utf-8")))
+    assert e["cards"]["title"]["footer"] == "29. Oktober 2026" and e["cards"]["chapters"] == "card"
+    e["approved"] = "2026-10-29T10:00:00+01:00"
+    edit.save(tmp_path, e)
+    p = timeline.plan(e, 30)
+    ins = timeline.inserts(e, p)
+    assert [o["kind"] for o in ins] == ["title", "chapter", "closing"]           # no chapter card right after the title
+    assert timeline.shift(0.0, ins) == 4.0 and timeline.shift(10.0, ins) == 16.0  # 10 s of the cut lies after both cards
+    library = tmp_path / "sounds"
+    library.mkdir()
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=880:duration=1",
+                    str(sounds.path(library, "swoosh"))], stdin=subprocess.DEVNULL, capture_output=True, check=True)
+    report = render.run(tmp_path, sound_dir=library)
+    expected = 28 + 4 + 2 + 4
+    assert abs(_duration(tmp_path / "edited.mp4", "v:0") - expected) < 0.15
+    assert abs(_duration(tmp_path / "edited.mp4", "a:0") - expected) < 0.15
+    assert any("intro" in w and "outro" in w for w in report["warnings"])       # no sounds for those: silent cards
+    chapters = json.loads((tmp_path / "chapters.json").read_text(encoding="utf-8"))["chapters"]
+    assert [c["start"] for c in chapters] == [0.0, 14.0]                        # the second starts with its card
+    assert "00:00:04" in (tmp_path / "edited.de.vtt").read_text(encoding="utf-8")   # the words start after the title

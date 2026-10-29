@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Callable
 
 import services
-from pipeline import cut_agent, edit, files, render, subtitles, transcribe
+from pipeline import cut_agent, edit, files, render, sounds, subtitles, transcribe
 
 STEPS = ("transcribe", "subtitles", "cut", "render")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
@@ -36,12 +36,13 @@ def read_state(folder: Path) -> dict:
 
 class PipelineRunner:
     def __init__(self, queue_file: Path, can_run: Callable[[], bool], terms_for: Callable[[dict], list[str]],
-                 cut_settings: Callable[[], dict] = lambda: {"auto": False}, video_args: list[str] | None = None):
+                 cut_settings: Callable[[], dict] = lambda: {"auto": False}, video_args: list[str] | None = None,
+                 sound_dir: Path | None = None):
         """cut_settings: the lecturer's settings for the cut, with "auto" (propose by itself) and the
         rule policy of pipeline/cut_rules.py."""
         self.queue_file = Path(queue_file)
         self.can_run, self.terms_for, self.cut_settings = can_run, terms_for, cut_settings
-        self.video_args = video_args
+        self.video_args, self.sound_dir = video_args, sound_dir
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.failed: set[str] = set()          # not retried before the next start of the app
@@ -220,8 +221,9 @@ class PipelineRunner:
             if e and e.get("approved") and \
                     files.read_json(folder / "render.json").get("signature") != render.signature(e):
                 self._set(folder, "render", "running", "Das Video wird gerendert …")
+                self._make_sounds(folder)
                 report = render.run(folder, self.video_args, progress=lambda text: self._set(
-                    folder, "render", "running", text))
+                    folder, "render", "running", text), sound_dir=self.sound_dir)
                 self._set(folder, "render", "done", signature=report["signature"])
                 return True
         except Exception as e:
@@ -233,6 +235,19 @@ class PipelineRunner:
             return True
         self._drop(folder)                                     # all steps done
         return True
+
+    def _make_sounds(self, folder: Path) -> None:
+        """The sounds of the cards are made once with ElevenLabs; without its key the cards stay silent."""
+        if not self.sound_dir or len(sounds.available(self.sound_dir)) == len(sounds.LIBRARY):
+            return
+        key = services.key("elevenlabs")
+        if not key:
+            return
+        self._set(folder, "render", "running", "Die Klänge für Tafeln entstehen (einmalig) …")
+        try:
+            sounds.make(self.sound_dir, key)
+        except Exception:
+            logging.getLogger("flex3-light").warning("sounds", exc_info=True)
 
     def _transcribers(self) -> list:
         """AssemblyAI first, whisper-1 as the fallback while it still runs; those with a key."""
