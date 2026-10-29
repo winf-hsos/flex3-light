@@ -99,7 +99,7 @@ class AssemblyAI:
             detail = e.read().decode("utf-8", "replace")[:300]
             raise TranscriptionError(f"AssemblyAI antwortet mit Fehler {e.code}: {detail}") from None
 
-    def transcribe_file(self, mp3: Path, language: str, terms: list[str]) -> dict:
+    def transcribe_file(self, mp3: Path, language: str, terms: list[str], speakers: bool = False) -> dict:
         """{"text", "words": [{"word", "start", "end", "confidence"}], "segments": [{"start", "end", "text"}]},
         times in seconds, confidence from 0 to 1 as the service rates each word."""
         upload = self._call("POST", "/v2/upload", raw=mp3.read_bytes())
@@ -108,6 +108,8 @@ class AssemblyAI:
         keyterms = [t for t in terms if len(t.split()) <= 6][:1000]     # the service's limits
         if keyterms:
             request["keyterms_prompt"] = keyterms
+        if speakers:
+            request["speaker_labels"] = True                          # who speaks: lecturer or room
         job = self._call("POST", "/v2/transcript", request)
         try:
             waited = 0
@@ -127,7 +129,9 @@ class AssemblyAI:
                 pass
         return {"text": job.get("text") or "",
                 "words": [{"word": w["text"], "start": w["start"] / 1000, "end": w["end"] / 1000,
-                           "confidence": round(w.get("confidence", 1.0), 3)} for w in job.get("words") or []],
+                           "confidence": round(w.get("confidence", 1.0), 3),
+                           **({"speaker": w["speaker"]} if speakers and w.get("speaker") else {})}
+                          for w in job.get("words") or []],
                 "segments": [{"start": x["start"] / 1000, "end": x["end"] / 1000, "text": x["text"]}
                              for x in sentences]}
 

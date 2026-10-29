@@ -1,3 +1,5 @@
 pywebview>=6.2
 websockets>=12
 psutil>=5.9   # only for tools/benchmark.py
+numpy>=2.0     # loudness profile for the cut agent
+Pillow>=10.1   # contact sheets for the cut agent, tools/make_icon.py
