@@ -35,7 +35,10 @@ def _get(url: str, headers: dict) -> tuple[int, dict]:
         with urllib.request.urlopen(req, timeout=15) as r:
             return r.status, json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
-        return e.code, {}
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {}
 
 
 _assemblyai_base: dict[str, str] = {}
@@ -62,9 +65,12 @@ def check(service: str, secret: str | None = None) -> tuple[bool, str]:
                 return True, ("Schlüssel gültig. Transkription: " + ", ".join(found)) if found else \
                     "Schlüssel gültig, aber kein Transkriptionsmodell freigegeben."
         elif service == "elevenlabs":
-            code, _ = _get("https://api.elevenlabs.io/v1/user", {"xi-api-key": secret})
+            code, body = _get("https://api.elevenlabs.io/v1/user", {"xi-api-key": secret})
             if code == 200:
                 return True, "Schlüssel gültig."
+            if "missing_permissions" in json.dumps(body):   # a restricted key: fine as long as it may make sounds
+                return True, ("Schlüssel gültig und eingeschränkt. FLEX3 Light braucht nur das Recht „Sound Effects“; "
+                              "fehlt es, meldet sich das beim Erzeugen der Klänge.")
         elif service == "assemblyai":
             for region, base in ASSEMBLYAI_REGIONS.items():
                 code, _ = _get(f"{base}/v2/transcript?limit=1", {"Authorization": secret})
