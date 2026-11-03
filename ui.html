@@ -478,7 +478,8 @@
         <div class="steps">
           <div class="panel step">
             <div class="panel-head"><span class="step-no">1</span><h2>Worum geht es?</h2><button class="link" onclick="showPage('modules')">Module verwalten</button></div>
-            <div class="field"><label>Modul</label><input id="module" list="modules" placeholder="Modul wählen oder eintippen" oninput="updateReady()" onchange="sendTexts()"><datalist id="modules"></datalist></div>
+            <div class="field"><label>Modul</label><select id="module" onchange="pickModule()"></select></div>
+            <div class="field" id="newModuleField" style="display:none"><label>Neues Modul</label><input id="moduleNew" placeholder="Name des Moduls, kommt danach in deine Module" oninput="updateReady()" onchange="sendTexts()"></div>
             <div class="field"><label>Thema der Sitzung, optional</label><input id="topic" placeholder="erscheint im Namen der Aufnahme" onchange="sendTexts()"></div>
           </div>
           <div class="panel step">
@@ -712,16 +713,40 @@
     names.forEach((n, i) => { const o = document.createElement("option"); o.textContent = label(kind, n, i); o.value = n; s.appendChild(o); });
     s.value = chosen;
   }
-  function fillModules(d) {
+  // the module of the next recording: a real list of all modules, so none is hidden by what is already chosen;
+  // the last entry lets you type a new one, which joins the profile when you record
+  function fillModules(d, chosen) {
     profile = d.profile;
-    const list = $("modules"); list.innerHTML = "";
-    for (const m of d.modules) { const o = document.createElement("option"); o.value = m; list.appendChild(o); }
+    const s = $("module"), names = [...d.modules];
+    let current = chosen !== undefined ? chosen : s.value;
+    if (current === "__new__" && names.includes($("moduleNew").value.trim())) current = $("moduleNew").value.trim();
+    const typing = current === "__new__";         // a new name being typed survives a refresh of the list
+    if (current && !typing && !names.includes(current)) names.push(current);
+    s.innerHTML = "";
+    const add = (value, text) => { const o = document.createElement("option"); o.value = value; o.textContent = text; s.appendChild(o); };
+    if (!current) add("", "Modul wählen");
+    for (const n of names) add(n, n);
+    add("__new__", "Neues Modul …");
+    s.value = current || "";
+    if (!typing) $("newModuleField").style.display = "none";
     if (page === "modules") renderModules();
+  }
+  function moduleValue() {
+    const s = $("module");
+    return s.value === "__new__" ? $("moduleNew").value.trim() : s.value;
+  }
+  function showNewModule(on) {
+    $("newModuleField").style.display = on ? "" : "none";
+    if (on) { $("moduleNew").value = ""; $("moduleNew").focus(); }
+  }
+  function pickModule() {
+    showNewModule($("module").value === "__new__");
+    updateReady();
+    if ($("module").value !== "__new__") sendTexts();
   }
   async function load() {
     const d = await api().data();
-    fillModules(d);
-    $("module").value = d.module;
+    fillModules(d, d.module || "");
     for (const kind of ["screen", "camera", "microphone"]) fillSelect(kind, d.devices[kind], d.choice[kind]);
     for (const k in d.options) $(k).checked = d.options[k];
     for (const k of ["archive_dir", "raw_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
@@ -751,7 +776,7 @@
   });
   function updateReady() {
     const camera = $("camera").value;
-    $("readyModule").classList.toggle("ok", !!$("module").value.trim());
+    $("readyModule").classList.toggle("ok", !!moduleValue());
     $("readySound").classList.toggle("ok", Date.now() - lastLevelAt < 2500);
     $("readyCamera").textContent = camera === "keine" ? "Ohne Kamera" : "Kamera läuft";
     $("readyCamera").classList.toggle("ok", camera === "keine" || $("preview").classList.contains("live"));
@@ -762,7 +787,7 @@
   }
   const selectDevice = el => { api().select(el.id, el.value); updatePreview(); updateReady(); };
   const setOption = el => api().option(el.id, el.checked);
-  const sendTexts = () => api().texts($("module").value, $("topic").value);
+  const sendTexts = () => api().texts(moduleValue(), $("topic").value);
   async function pickFolder(kind) { await api().folder(kind); load(); }
   async function startRecording() {
     await sendTexts();
