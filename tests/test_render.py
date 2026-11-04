@@ -152,3 +152,40 @@ def test_cards_add_time_and_carry_sound(tmp_path):
     chapters = json.loads((tmp_path / "chapters.json").read_text(encoding="utf-8"))["chapters"]
     assert [c["start"] for c in chapters] == [0.0, 14.0]                        # the second starts with its card
     assert "00:00:04" in (tmp_path / "edited.de.vtt").read_text(encoding="utf-8")   # the words start after the title
+
+
+def _gray(path: Path, t: float) -> bytes:
+    """One frame at t as 640x360 gray bytes."""
+    return subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", str(path), "-frames:v", "1",
+                           "-f", "rawvideo", "-pix_fmt", "gray", "-"], stdin=subprocess.DEVNULL,
+                          capture_output=True, check=True).stdout
+
+
+def _diff(a: bytes, b: bytes, box: tuple[int, int, int, int]) -> float:
+    x, y, w, h = box
+    total = sum(abs(a[r * 640 + c] - b[r * 640 + c]) for r in range(y, y + h) for c in range(x, x + w))
+    return total / (w * h)
+
+
+def test_late_regions_are_read_for_their_span_and_keep_the_layout_around_them(tmp_path):
+    # A region late in the lecture used to be a split-off branch of the main picture, which overlay
+    # buffered from the start: a pixelated box at 2:42 h filled the memory (2026-11-04).
+    _video(tmp_path / "recording.mp4", "testsrc2")
+    _video(tmp_path / "screen.mp4", "smptebars")
+    e = edit.new(60.0)
+    for x in [edit.item("layout", 0, 60, "Kamera schwarz", "agent", 0.8, "accepted", camera="hidden"),
+              edit.item("blur", 50, 52, "Mail", "agent", 0.8, "accepted", "privacy", region=[0.0, 0.0, 0.5, 0.5]),
+              edit.item("zoom", 51, 55, "klein", "agent", 0.8, "accepted", region=[0.0, 0.0, 0.5, 0.5])]:
+        edit.add(e, x)
+    _, graph, _, warnings = render.build(tmp_path, e, tmp_path)
+    assert "split" not in graph and "trim=" not in graph and warnings == []
+    assert render._without(0, 60, [(50, 52)]) == [(0, 50), (52, 60)]
+    e["approved"] = "2026-11-04T10:00:00+01:00"
+    edit.save(tmp_path, e)
+    report = render.run(tmp_path)
+    assert report["warnings"] == [] and abs(_duration(tmp_path / "edited.mp4", "v:0") - 60) < 0.1
+    out, rec, screen = tmp_path / "edited.mp4", tmp_path / "recording.mp4", tmp_path / "screen.mp4"
+    whole, box, rest = (0, 0, 640, 360), (16, 16, 288, 148), (336, 196, 288, 148)
+    assert _diff(_gray(out, 30), _gray(screen, 30), whole) < 8               # the screen alone outside the box's time
+    assert _diff(_gray(out, 50.5), _gray(rec, 50.5), rest) < 8               # the program picture while it is pixelated
+    assert _diff(_gray(out, 50.5), _gray(rec, 50.5), box) > 8                # and the box is pixelated

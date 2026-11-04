@@ -18,8 +18,12 @@ pictures, pixelated regions, zooms, the camera big (camera.mp4) or the screen al
 (screen.mp4) and cards over removed pauses are laid over it, and only then are the removed
 spans taken out of the picture with select, which keeps memory flat however long the
 lecture is. Every overlay only costs where it applies: other tracks are read just for
-their span (-ss/-t), regions are cropped from a trimmed copy, still pictures last as long
-as their span, and the graphics card decodes where it can (binaries.hwaccel()). The sound is cut to the sample
+their span (-ss/-t), still pictures last as long as their span, and the graphics card
+decodes where it can (binaries.hwaccel()). Regions to pixelate or zoom are read the same
+way, as a second reading of the recording for their span with the held pictures (and, for a
+zoom, the pixelation) laid over it again. They must not be a split-off branch of the main
+picture: overlay waits for that branch's first frame and keeps every frame before it, so a
+region late in a long lecture filled the memory (2026-11-04, a region at 2:42 h). The sound is cut to the sample
 outside ffmpeg: its aselect lets every packet through in version 8.0.1 (found on
 2026-10-29), so the sound with its silenced spans is written once as WAV and the kept
 spans are copied from it. Frame-aligned bounds (timeline.py) keep picture and sound together.
@@ -80,6 +84,20 @@ def _zoom_box(region, W: int, H: int) -> tuple[int, int, int, int]:
     return _even(min(max(0, cx - w / 2), W - w)), _even(min(max(0, cy - h / 2), H - h)), w, h
 
 
+def _without(a: float, b: float, spans) -> list[tuple[float, float]]:
+    """The parts of a..b outside the given spans, leaving out slivers shorter than a tenth of a second."""
+    pieces, pos = [], a
+    for sa, sb in sorted(spans):
+        if sb <= pos or sa >= b:
+            continue
+        if sa > pos:
+            pieces.append((pos, sa))
+        pos = max(pos, sb)
+    if pos < b:
+        pieces.append((pos, b))
+    return [(x, y) for x, y in pieces if y - x >= 0.1]
+
+
 def _between(spans) -> str:
     return "+".join(f"between(t,{a:.4f},{b:.4f})" for a, b in spans) or "0"
 
@@ -99,12 +117,15 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
     cur = "v0"
     graph.append(f"[0:v]setpts=PTS-STARTPTS,format=yuv420p[{cur}]")
 
-    def overlay(src_label: str, x: int, y: int, a: float, b: float) -> None:
-        """Lay a picture over the main one between a and b; the main one goes on alone after it ends."""
-        nonlocal cur
+    def laid(base: str, src_label: str, x: int, y: int, a: float, b: float) -> str:
+        """base with a picture over it between a and b; base goes on alone after the picture ends."""
         nxt = f"v{len(graph)}"
-        graph.append(f"[{cur}][{src_label}]overlay={x}:{y}:eof_action=pass:enable='between(t,{a:.4f},{b:.4f})'[{nxt}]")
-        cur = nxt
+        graph.append(f"[{base}][{src_label}]overlay={x}:{y}:eof_action=pass:enable='between(t,{a:.4f},{b:.4f})'[{nxt}]")
+        return nxt
+
+    def overlay(src_label: str, x: int, y: int, a: float, b: float) -> None:
+        nonlocal cur
+        cur = laid(cur, src_label, x, y, a, b)
 
     def span_input(args: list[str], a: float, b: float, label: str, chain: str) -> None:
         """An input read only from a to b, its picture placed at a on the recording's clock."""
@@ -117,14 +138,38 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
     def still_input(path: Path, a: float, b: float, label: str, chain: str = "format=yuv420p") -> None:
         span_input(["-loop", "1", "-framerate", str(fps), "-i", str(path)], a, b, label, chain)
 
-    def trimmed(a: float, b: float) -> str:
-        """A branch of the current picture that only carries the frames from a to b."""
-        nonlocal cur
-        src = cur
-        graph.append(f"[{src}]split[{src}k][{src}t]")
-        graph.append(f"[{src}t]trim=start={a:.4f}:end={b:.4f}[{src}s]")
-        cur = f"{src}k"
-        return f"{src}s"
+    def unique(prefix: str) -> str:
+        return f"{prefix}{len(graph)}_{n}"
+
+    stills: list[tuple[Path, float, float]] = []       # held pictures, also laid over the regions' readings
+    regions: list[tuple[tuple[int, int, int, int], float, float]] = []   # pixelated boxes
+
+    def pixelated(box: tuple[int, int, int, int], a: float, b: float) -> str:
+        """The box from a to b, pixelated, from its own reading of the recording."""
+        bx, by, bw, bh = box
+        src = program(a, b, with_regions=False)
+        label = unique("b")
+        graph.append(f"[{src}]crop={bw}:{bh}:{bx}:{by},scale={max(2, bw // 24)}:{max(2, bh // 24)},"
+                     f"scale={bw}:{bh}:flags=neighbor[{label}]")
+        return label
+
+    def program(a: float, b: float, with_regions: bool) -> str:
+        """The program picture from a to b as the steps before have made it: a reading of the recording
+        for this span only, with the held pictures and, if asked, the pixelated boxes laid over it."""
+        label = unique("r")
+        span_input([*binaries.hwaccel(), "-ss", f"{a:.4f}", "-i", str(source)], a, b, label, "format=yuv420p")
+        for still, fa, fb in stills:
+            if fa < b and a < fb:
+                lo, hi = max(a, fa), min(b, fb)
+                held = unique("h")
+                still_input(still, lo, hi, held, f"scale={W}:{H},format=yuv420p")
+                label = laid(label, held, 0, 0, lo, hi)
+        if with_regions:
+            for box, ra, rb in regions:
+                if ra < b and a < rb:
+                    lo, hi = max(a, ra), min(b, rb)
+                    label = laid(label, pixelated(box, lo, hi), box[0], box[1], lo, hi)
+        return label
 
     # 1. held pictures: the frame just before the span stays on screen
     for i, x in enumerate(x for x in accepted if x["kind"] == "freeze"):
@@ -135,28 +180,32 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
         if r.returncode == 0 and still.exists():
             still_input(still, x["start"], x["end"], f"f{i}", f"scale={W}:{H},format=yuv420p")
             overlay(f"f{i}", 0, 0, x["start"], x["end"])
+            stills.append((still, x["start"], x["end"]))
     # 2. pixelated regions
-    for i, x in enumerate(x for x in accepted if x["kind"] == "blur"):
+    for x in accepted:
+        if x["kind"] != "blur":
+            continue
         if not isinstance(x["params"].get("region"), list):
             warnings.append(f"{x['id']}: Verpixeln ohne Bereich ausgelassen")
             continue
-        bx, by, bw, bh = _box(x["params"]["region"], W, H)
-        part = trimmed(x["start"], x["end"])
-        graph.append(f"[{part}]crop={bw}:{bh}:{bx}:{by},scale={max(2, bw // 24)}:{max(2, bh // 24)},"
-                     f"scale={bw}:{bh}:flags=neighbor[b{i}]")
-        overlay(f"b{i}", bx, by, x["start"], x["end"])
+        box = _box(x["params"]["region"], W, H)
+        overlay(pixelated(box, x["start"], x["end"]), box[0], box[1], x["start"], x["end"])
+        regions.append((box, x["start"], x["end"]))
     # 3. zooms into the screen
-    for i, x in enumerate(x for x in accepted if x["kind"] == "zoom"):
-        if not isinstance(x["params"].get("region"), list):
+    for x in accepted:
+        if x["kind"] != "zoom" or not isinstance(x["params"].get("region"), list):
             continue
         zx, zy, zw, zh = _zoom_box(x["params"]["region"], W, H)
-        part = trimmed(x["start"], x["end"])
-        graph.append(f"[{part}]crop={zw}:{zh}:{zx}:{zy},scale={W}:{H}:flags=lanczos[z{i}]")
-        overlay(f"z{i}", 0, 0, x["start"], x["end"])
-    # 4. layout: the camera big, or the screen alone (never where something is pixelated: the region
-    #    was found on the program picture and would not cover the same content on the screen track)
-    blurs = [(x["start"], x["end"]) for x in accepted if x["kind"] == "blur"]
-    for i, x in enumerate(x for x in accepted if x["kind"] == "layout"):
+        src, label = program(x["start"], x["end"], with_regions=True), unique("z")
+        graph.append(f"[{src}]crop={zw}:{zh}:{zx}:{zy},scale={W}:{H}:flags=lanczos[{label}]")
+        overlay(label, 0, 0, x["start"], x["end"])
+    # 4. layout: the camera big, or the screen alone (not while something is pixelated: the region
+    #    was found on the program picture and would not cover the same content on the screen track,
+    #    so the program picture stays for those seconds and the screen alone goes on after them)
+    blurs = [(a, b) for _, a, b in regions]
+    for x in accepted:
+        if x["kind"] != "layout":
+            continue
         mode = x["params"].get("camera", "small")
         track = {"big": "camera.mp4", "hidden": "screen.mp4"}.get(mode)
         if track is None:
@@ -164,13 +213,12 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
         if not (folder / track).exists():
             warnings.append(f"{x['id']}: Layout „{mode}“ braucht {track}, die es nicht gibt")
             continue
-        if mode == "hidden" and any(a < x["end"] and x["start"] < b for a, b in blurs):
-            warnings.append(f"{x['id']}: Bildschirm allein nicht gezeigt, weil dort etwas verpixelt wird")
-            continue
-        span_input([*binaries.hwaccel(), "-ss", f"{x['start']:.4f}", "-i", str(folder / track)], x["start"],
-                   x["end"], f"l{i}", f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
-                                      f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,format=yuv420p")
-        overlay(f"l{i}", 0, 0, x["start"], x["end"])
+        spans = _without(x["start"], x["end"], blurs) if mode == "hidden" else [(x["start"], x["end"])]
+        for a, b in spans:
+            label = unique("l")
+            span_input([*binaries.hwaccel(), "-ss", f"{a:.4f}", "-i", str(folder / track)], a, b, label,
+                       f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,format=yuv420p")
+            overlay(label, 0, 0, a, b)
     # 5. cards over removed pauses
     for i, (a, b, text) in enumerate(p["cards"]):
         card = cards.card(work / f"card-{i}.png", W, H, text)
@@ -232,7 +280,8 @@ def sound(p: dict, work: Path) -> Path:
 
 def _run(args: list[str], total: float, progress: Callable[[float], None] | None) -> None:
     """ffmpeg with its progress on stdout; progress(share) between 0 and 1."""
-    proc = subprocess.Popen([binaries.ffmpeg(), "-hide_banner", "-nostats", "-progress", "pipe:1", "-y", *args],
+    proc = subprocess.Popen([binaries.ffmpeg(), "-hide_banner", "-v", "error", "-nostats", "-progress", "pipe:1",
+                             "-y", *args],
                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace", creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
     errors: list[str] = []
@@ -247,7 +296,7 @@ def _run(args: list[str], total: float, progress: Callable[[float], None] | None
     proc.wait()
     reader.join(timeout=5)
     if proc.returncode != 0:
-        raise RuntimeError("ffmpeg: " + "".join(errors)[-600:])
+        raise RuntimeError("ffmpeg: " + "".join(errors)[:600])         # the first errors name the cause
 
 
 def compose(cut: Path, ins: list[dict], p: dict, out: Path, work: Path, sound_dir: Path | None,
