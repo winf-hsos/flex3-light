@@ -63,6 +63,10 @@ class PipelineRunner:
                 self._save()
         self.wake.set()
 
+    def queued(self, folder: Path | str) -> bool:
+        with self.lock:
+            return str(folder) in self.queue
+
     def redo(self, folder: Path) -> bool:
         """Transcribe a recording again, e.g. after the module's terms changed, and write new subtitles.
 

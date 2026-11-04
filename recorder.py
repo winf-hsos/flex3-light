@@ -130,6 +130,12 @@ class Api:
     def redo_transcription(self, sid):
         return self._core.redo_transcription(sid)
 
+    def start_transcription(self, sid):
+        return self._core.start_transcription(sid)
+
+    def set_after_recording(self, value):
+        self._core.set_after_recording(value)
+
     def change_cut_item(self, sid, item_id, changes):
         return self._core.change_cut_item(sid, item_id, changes or {})
 

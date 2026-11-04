@@ -567,10 +567,11 @@
             <div class="panel-head"><h2>Aufnahme</h2></div>
             <label class="toggle"><input type="checkbox" id="hide_taskbar" onchange="setOption(this)"><span class="knob"></span><span><b>Taskleiste nicht aufnehmen</b><small>Der Bildschirm wird ohne die Windows-Taskleiste aufgezeichnet.</small></span></label>
             <label class="toggle"><input type="checkbox" id="hide_alttab" onchange="setOption(this)"><span class="knob"></span><span><b>Alt+Tab ausblenden</b><small>Beim Wechseln der Fenster bleibt das Bild der Aufnahme kurz stehen.</small></span></label>
+            <div class="setting-row"><span>Nach der Aufnahme</span><select id="after_recording" onchange="setAfterRecording(this.value)"><option value="nothing">nur speichern</option><option value="transcribe">transkribieren</option><option value="cut">transkribieren und Schnitt vorschlagen</option></select></div>
+            <div class="section-note">Was nicht von selbst startet, startest du unter „Meine Aufnahmen“ bei der Aufnahme.</div>
           </div>
           <div class="panel section">
             <div class="panel-head"><h2>Schnitt</h2></div>
-            <label class="toggle"><input type="checkbox" id="cut_auto" onchange="saveCutSettings()"><span class="knob"></span><span><b>Schnitt von selbst vorschlagen</b><small>Nach der Transkription sieht sich der Schnitt-Agent jede Aufnahme an. Gerendert wird erst nach deiner Freigabe.</small></span></label>
             <div class="setting-row"><span>Lange Pausen ab</span><span><input type="number" id="cut_pause_min" min="10" max="600" onchange="saveCutSettings()"> Sekunden</span></div>
             <label class="toggle"><input type="checkbox" id="cut_title_card" onchange="saveCutSettings()"><span class="knob"></span><span><b>Titeltafel und Abspann</b><small>Am Anfang Titel, Modul, Datum und Name, am Ende ein kurzer Abspann. Die Texte änderst du vor der Freigabe.</small></span></label>
             <div class="setting-row"><span>Kapitel</span><select id="cut_chapter_display" onchange="saveCutSettings()"><option value="card">als Tafel</option><option value="lower_third">als Bauchbinde</option><option value="none">ohne Einblendung</option></select></div>
@@ -749,6 +750,7 @@
     fillModules(d, d.module || "");
     for (const kind of ["screen", "camera", "microphone"]) fillSelect(kind, d.devices[kind], d.choice[kind]);
     for (const k in d.options) $(k).checked = d.options[k];
+    $("after_recording").value = d.after_recording || "nothing";
     for (const k of ["archive_dir", "raw_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
     previewUrl = d.preview_url || "";
     mediaBase = d.media_base || "";
@@ -787,6 +789,7 @@
   }
   const selectDevice = el => { api().select(el.id, el.value); updatePreview(); updateReady(); };
   const setOption = el => api().option(el.id, el.checked);
+  const setAfterRecording = value => api().set_after_recording(value);
   const sendTexts = () => api().texts(moduleValue(), $("topic").value);
   async function pickFolder(kind) { await api().folder(kind); load(); }
   async function startRecording() {
@@ -873,7 +876,8 @@
         <div class="panel way" id="way"></div>
         <div class="panel cutpanel" id="cut"></div>
         <div class="panel transcript"><div class="panel-head"><h2>Transkription</h2><span class="hint" id="dStatus"></span>
-          <button class="link" id="redoButton" onclick="redoTranscription()">Erneut transkribieren</button></div>
+          <button class="link" id="redoButton" onclick="redoTranscription()">Erneut transkribieren</button>
+          <button class="link" id="startTranscription" onclick="startTranscription()">Transkription starten</button></div>
           <div class="hint" id="dTerms"></div><div class="lines" id="lines"></div></div>
         <div class="panel spots" id="spots"></div>`;
       $("dTitle").textContent = d.title;
@@ -909,6 +913,7 @@
     $("dStatus").textContent = d.stations.transcript === "done" || (!d.segments.length && !working) ? "" : (d.status || "");
     $("dStatus").className = "hint" + (d.stations.transcript === "failed" ? " error" : "");
     $("redoButton").style.display = ["done", "failed"].includes(d.stations.transcript) ? "" : "none";
+    $("startTranscription").style.display = d.stations.transcript === "open" ? "" : "none";
     $("dTerms").textContent = d.stations.transcript !== "done" ? "" : (MODELS[d.model] || d.model) + (d.terms.length
       ? `, mit ${d.terms.length === 1 ? "einem Fachbegriff" : d.terms.length + " Fachbegriffen"} des Moduls: ${d.terms.join(", ")}`
       : ", ohne Fachbegriffe. Fachbegriffe trägst du beim Modul ein.");
@@ -928,7 +933,9 @@
         h.textContent = d.stations.transcript === "waiting"
           ? "Die Transkription entsteht, sobald ein Schlüssel für AssemblyAI oder OpenAI hinterlegt ist. "
           : d.stations.transcript === "failed" ? (d.status || "Die Transkription ist gestoppt.")
-          : (d.status || "Die Transkription entsteht nach der Vorlesung von selbst.");
+          : d.stations.transcript === "open" ? "Diese Aufnahme ist noch nicht transkribiert. Ob die Transkription "
+            + "nach einer Aufnahme von selbst startet, legst du in den Einstellungen fest."
+          : (d.status || "Die Transkription folgt.");
         if (d.stations.transcript === "waiting") {
           const a = document.createElement("button"); a.className = "link"; a.textContent = "Schlüssel hinterlegen";
           a.onclick = () => showPage("settings");
@@ -1495,8 +1502,7 @@
 
   // ---------------------------------------------------------------- settings: the cut
   function fillCutSettings() {
-    if (!$("cut_auto")) return;
-    $("cut_auto").checked = cutSettings.auto !== false;
+    if (!$("cut_pause_min")) return;
     $("cut_pause_mode").value = cutSettings.pause_mode || "card";
     $("cut_pause_min").value = Math.round(cutSettings.pause_min || 30);
     $("cut_title_card").checked = cutSettings.title_card !== false;
@@ -1534,7 +1540,7 @@
     }
   }
   async function saveCutSettings() {
-    await api().set_cut_settings({auto: $("cut_auto").checked, pause_mode: $("cut_pause_mode").value,
+    await api().set_cut_settings({pause_mode: $("cut_pause_mode").value,
                                   pause_min: +$("cut_pause_min").value || 30,
                                   title_card: $("cut_title_card").checked, closing_card: $("cut_title_card").checked,
                                   chapter_display: $("cut_chapter_display").value,
@@ -1542,6 +1548,11 @@
     cutSettings = (await api().data()).cut; fillCutSettings();
   }
   const MODELS = {"assemblyai/universal-3-pro": "AssemblyAI Universal-3 Pro", "openai/whisper-1": "OpenAI whisper-1"};
+  async function startTranscription() {
+    const error = await api().start_transcription(selectedId);
+    if (error) { $("dStatus").textContent = error; $("dStatus").className = "hint error"; return; }
+    await loadRecordings();
+  }
   async function redoTranscription() {
     if (!await ask({title: "Erneut transkribieren?", confirm: "Erneut transkribieren",
                     text: "Die Aufnahme wird mit den aktuellen Fachbegriffen des Moduls noch einmal transkribiert, "

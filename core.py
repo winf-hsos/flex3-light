@@ -161,7 +161,7 @@ class Core:
         self.pipeline = PipelineRunner(PIPELINE_QUEUE, lambda: self.session is None, self._terms_for,
                                        lambda: self.cut_settings(), hardware.ffmpeg_video_args(),
                                        APP_DIR / "sounds").start()
-        self.delivery.on_archived = self.pipeline.enqueue
+        self.delivery.on_archived = self._archived
 
         remote.start(profile=scene.NAME, collection=scene.NAME)
         self.o = remote.Obs().__enter__()
@@ -216,7 +216,7 @@ class Core:
                 "module": self.module,
                 "devices": {k: [n for n, _ in v] for k, v in self.devices.items()},
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
-                "options": dict(self.options), "cut": self.cut_settings()}
+                "options": dict(self.options), "cut": self.cut_settings(), "after_recording": self.after_recording()}
 
     def _device_id(self, kind: str) -> str | None:
         return next((i for n, i in self.devices[kind] if n == self.choice.get(kind)), None)
@@ -447,27 +447,55 @@ class Core:
     def recordings(self) -> list[dict]:
         """All session folders in the archive, newest first, with their way through the pipeline."""
         self._library = library.scan(self.archive)
-        items = [library.summary(f) for f in self._library.values()]
+        items = [library.summary(f, self.pipeline.queued(f)) for f in self._library.values()]
         return sorted(items, key=lambda r: r["recorded_at"], reverse=True)
 
     def recording(self, sid: str) -> dict | None:
         folder = getattr(self, "_library", {}).get(sid)
         if folder is None:
             return None
-        return {**library.detail(folder), "status": self.pipeline.describe(folder)}
+        return {**library.detail(folder, self.pipeline.queued(folder)), "status": self.pipeline.describe(folder)}
+
+    # ---------------------------------------------------------- after a recording
+
+    AFTER_RECORDING = ("nothing", "transcribe", "cut")
+
+    def after_recording(self) -> str:
+        """What starts by itself once a recording is filed: nothing (the default, decided 2026-11-04),
+        the transcription, or the transcription and then the cut proposal."""
+        value = self.settings.get("after_recording")
+        return value if value in self.AFTER_RECORDING else "nothing"
+
+    def set_after_recording(self, value: str) -> None:
+        if value in self.AFTER_RECORDING:
+            self.settings["after_recording"] = value
+            self.save()
+
+    def _archived(self, folder: Path) -> None:
+        if self.after_recording() != "nothing":
+            self.pipeline.enqueue(folder)
+
+    def start_transcription(self, sid: str) -> str:
+        """Transcribe a recording by hand that was only filed; returns an error or ''."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        self.pipeline.enqueue(folder)
+        return ""
 
     # ---------------------------------------------------------- the cut: settings and approval
 
     def cut_settings(self) -> dict:
         """The lecturer's settings for the cut: propose by itself, pauses, programs to cut or keep, cards
         and sounds; "sounds" lists the sounds already made."""
-        return {"auto": True, "title_card": True, "closing_card": True, "chapter_display": "card",
+        return {"title_card": True, "closing_card": True, "chapter_display": "card",
                 "chapter_sound": True, "music": True, **cut_rules.policy(self.settings.get("cut")),
+                "auto": self.after_recording() == "cut",       # the cut follows the transcription by itself
                 "sounds": sorted(sounds.available(APP_DIR / "sounds"))}
 
     def set_cut_settings(self, values: dict) -> None:
         current = dict(self.settings.get("cut") or {})
-        for k in ("auto", "pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off",
+        for k in ("pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off",
                   "title_card", "closing_card", "chapter_display", "chapter_sound", "music"):
             if k in values:
                 current[k] = values[k]

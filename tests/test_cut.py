@@ -291,3 +291,25 @@ def test_switched_off_kinds_are_not_proposed(tmp_path):
         assert b.propose("cut", 5.2, 8.3, "Mikrofontest", 0.8, category="technical")["kind"] == "cut"
     finally:
         b.close()
+
+
+def test_nothing_starts_after_a_recording_unless_set(tmp_path):
+    import core
+    import pipeline_runner
+    c = core.Core.__new__(core.Core)
+    c.settings, c.save = {}, lambda: None
+    c.pipeline = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: False, lambda m: [])
+    folder = tmp_path / "rec"
+    folder.mkdir()
+    assert c.after_recording() == "nothing" and c.cut_settings()["auto"] is False
+    c._archived(folder)
+    assert not c.pipeline.queued(folder)                  # only filed
+    c._library = {"x": folder}
+    assert c.start_transcription("x") == "" and c.pipeline.queued(folder)
+    c.set_after_recording("cut")
+    assert c.after_recording() == "cut" and c.cut_settings()["auto"] is True
+    c.settings["cut"] = {"auto": True}                    # an older stored switch does not count any more
+    c.set_after_recording("transcribe")
+    assert c.cut_settings()["auto"] is False
+    c.set_after_recording("everything")                   # unknown values are ignored
+    assert c.after_recording() == "transcribe"

@@ -31,6 +31,8 @@ def test_scan_summary_and_stations(tmp_path):
     assert s["stations"] == {"recorded": "done", "transcript": "queued", "cut": "soon", "content": "soon", "publish": "soon"}
     assert library.stations(b)["transcript"] == "waiting"
     assert library.stations(c)["transcript"] == "done"
+    assert library.stations(a, queued=False)["transcript"] == "open"           # only filed: started by hand
+    assert library.stations(a, queued=True)["transcript"] == "queued"
 
 
 def test_detail_lists_only_media(tmp_path):

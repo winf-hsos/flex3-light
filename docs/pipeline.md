@@ -19,10 +19,12 @@ Each recording card shows its steps, the current one highlighted, with one butto
 | Step | Runs | The lecturer |
 |---|---|---|
 | **Aufgenommen** | automatically at the stop | – |
-| **Transkribiert** | automatically, in the cloud | – |
+| **Transkribiert** | in the cloud, started by hand unless the settings say otherwise | starts it on the recording |
 | **Schnitt prüfen** | the agent proposes, ffmpeg renders after approval | looks at the proposals on a timeline, changes or accepts them |
 | **Inhalte prüfen** | summary, quiz, simple language, subtitles in more languages | reads, corrects, approves |
 | **Bereit** | YouTube and Opencast packages written; Opencast upload once automated | copies title and description, uploads the video |
+
+**Nothing starts by itself after a recording** (decision of the project lead, 2026-11-04): by default a recording is only filed, and transcription and cut are started on the recording under "Meine Aufnahmen". The setting "Nach der Aufnahme" can instead start the transcription, or the transcription and then the cut proposal, on its own.
 
 A first-start assistant asks only for screen, camera, microphone and the first module. API keys for OpenAI and ElevenLabs are entered in the settings and kept in the Windows Credential Manager. A step whose key is missing shows one line of explanation and a button "Schlüssel hinterlegen".
 

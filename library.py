@@ -22,9 +22,10 @@ def _read(path: Path) -> dict:
     return files.read_json(path)
 
 
-def stations(folder: Path) -> dict[str, str]:
+def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
     """State per station: done, running, waiting, failed, queued, review (waits for the lecturer),
-    open (can be started) or soon (not built yet)."""
+    open (can be started) or soon (not built yet). queued says whether the recording waits in the
+    pipeline's queue; False makes an untouched transcript "open", None leaves it "queued"."""
     steps = _read(folder / "pipeline.json").get("steps", {})
     t, s = steps.get("transcribe", {}).get("state"), steps.get("subtitles", {}).get("state")
     if s == "done":
@@ -34,7 +35,7 @@ def stations(folder: Path) -> dict[str, str]:
     elif t == "done" or s == "running":
         transcript = "running"
     else:
-        transcript = "queued"
+        transcript = "open" if queued is False else "queued"
     edit_list = _read(folder / "edit.json")
     c = steps.get("cut", {}).get("state")
     r = steps.get("render", {}).get("state")
@@ -64,22 +65,22 @@ def scan(archive: Path) -> dict[str, Path]:
     return found
 
 
-def summary(folder: Path) -> dict:
+def summary(folder: Path, queued: bool | None = None) -> dict:
     meta = _read(folder / "session.json")
     topic = folder.name.split(" - ", 1)[1] if " - " in folder.name else folder.name
     return {"id": meta.get("session_id", ""), "title": topic, "module": meta.get("course_name", folder.parent.name),
             "term": folder.parent.parent.name, "recorded_at": meta.get("recorded_at", ""),
             "duration": meta.get("duration_sec", 0), "language": meta.get("language", "de"),
             "camera": any(t.get("kind") == "camera" for t in meta.get("tracks", [])),
-            "stations": stations(folder)}
+            "stations": stations(folder, queued)}
 
 
-def detail(folder: Path) -> dict:
+def detail(folder: Path, queued: bool | None = None) -> dict:
     """What the detail view needs beyond the summary: the transcript by sentence, and the media."""
     transcript = _read(folder / "transcript.json")
     segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in transcript.get("segments", [])]
     media = sorted(p.name for p in folder.iterdir() if MEDIA.match(p.name)) if folder.exists() else []
-    return {**summary(folder), "segments": segments, "media": media,
+    return {**summary(folder, queued), "segments": segments, "media": media,
             "model": transcript.get("model", ""), "terms": transcript.get("terms", []),
             "uncertain": review.uncertain(transcript) if transcript else [],
             "rated": any("confidence" in w for w in transcript.get("words", [])),
