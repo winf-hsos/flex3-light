@@ -249,12 +249,36 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
 RATE = 48000
 
 
+DEAD_CHANNEL_DB = 30            # a channel this much quieter than the other carries nothing
+
+
+def channel_levels(source: str | Path) -> list[float]:
+    """RMS level in dB per channel of the first sound track, over the whole file (about 20 s for 3 h)."""
+    r = subprocess.run([binaries.ffmpeg(), "-hide_banner", "-i", str(source), "-map", "0:a:0",
+                        "-af", "astats=measure_overall=none:measure_perchannel=RMS_level", "-f", "null", "-"],
+                       stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
+    return [float(v) if v not in ("-inf", "inf", "nan") else -200.0
+            for v in re.findall(r"RMS level dB: (\S+)", r.stderr)]
+
+
+def both_ears(levels: list[float]) -> str:
+    """A filter that puts the one live channel on both sides, or '' if the sound is fine as it is.
+    A stereo microphone input that only uses its first channel (common with USB interfaces) is
+    recorded by OBS as left only, so the lecture would be heard on one ear (found 2026-11-05)."""
+    if len(levels) != 2 or abs(levels[0] - levels[1]) < DEAD_CHANNEL_DB:
+        return ""
+    live = 0 if levels[0] > levels[1] else 1
+    return f"pan=stereo|c0=c{live}|c1=c{live},"
+
+
 def sound(p: dict, work: Path) -> Path:
     """The sound of the edited video as WAV: silenced spans are silent, removed spans are gone, to the sample."""
     full, cut = work / "sound-full.wav", work / "sound.wav"
     silence = f",volume=0:enable='{_between(p['silent'])}'" if p["silent"] else ""
+    pan = both_ears(channel_levels(p["source"]))
     r = subprocess.run([binaries.ffmpeg(), "-y", "-v", "error", "-i", p["source"], "-vn",
-                        "-af", f"aformat=sample_rates={RATE}:channel_layouts=stereo{silence}",
+                        "-af", f"{pan}aformat=sample_rates={RATE}:channel_layouts=stereo{silence}",
                         "-c:a", "pcm_s16le", str(full)], stdin=subprocess.DEVNULL, capture_output=True, text=True,
                        creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
     if r.returncode != 0:

@@ -189,3 +189,20 @@ def test_late_regions_are_read_for_their_span_and_keep_the_layout_around_them(tm
     assert _diff(_gray(out, 30), _gray(screen, 30), whole) < 8               # the screen alone outside the box's time
     assert _diff(_gray(out, 50.5), _gray(rec, 50.5), rest) < 8               # the program picture while it is pixelated
     assert _diff(_gray(out, 50.5), _gray(rec, 50.5), box) > 8                # and the box is pixelated
+
+
+def test_sound_on_one_channel_is_put_on_both(tmp_path):
+    # OBS records a stereo microphone input that only uses its first channel as left only.
+    src = tmp_path / "left.wav"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-filter_complex",
+                    "[0:a][1:a]amerge=inputs=2,atrim=0:2[a]", "-map", "[a]", "-ar", "48000", str(src)],
+                   stdin=subprocess.DEVNULL, capture_output=True, check=True)
+    levels = render.channel_levels(src)
+    assert levels[0] > -30 and levels[1] < -100
+    assert render.both_ears(levels) == "pan=stereo|c0=c0|c1=c0,"
+    assert render.both_ears([-30.0, -33.0]) == "" and render.both_ears([-30.0]) == ""
+    p = {"source": str(src), "silent": [], "kept": [(0.0, 2.0)]}
+    out = render.sound(p, tmp_path)
+    left, right = render.channel_levels(out)
+    assert abs(left - right) < 0.5
