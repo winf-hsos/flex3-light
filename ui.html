@@ -306,6 +306,7 @@
   .programs { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 14px; align-items: center; font-size: 12.5px; }
   .programs select { font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
   .problems { margin: 0; padding: 8px 12px 8px 28px; background: var(--amber-soft); border-radius: 10px; color: #6b4d00; font-size: 12.5px; }
+  .publish-files { margin: 0; padding-left: 18px; color: var(--slate); font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
   .cut-foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; }
   .cut-foot .hint { flex: 1; }
   .station.review .no { border-color: var(--amber); color: #8a6200; background: var(--amber-soft); }
@@ -589,6 +590,7 @@
             <div class="folders">
               <span>Aufnahmen</span><span class="path" id="archive_dir"></span><button class="link" onclick="pickFolder('archive_dir')">Ändern</button>
               <span>Rohdateien</span><span class="path" id="raw_dir"></span><button class="link" onclick="pickFolder('raw_dir')">Ändern</button>
+              <span>Veröffentlichen</span><span class="path" id="publish_dir"></span><button class="link" onclick="pickFolder('publish_dir')">Ändern</button>
             </div>
           </div>
         </div>
@@ -751,7 +753,7 @@
     for (const kind of ["screen", "camera", "microphone"]) fillSelect(kind, d.devices[kind], d.choice[kind]);
     for (const k in d.options) $(k).checked = d.options[k];
     $("after_recording").value = d.after_recording || "nothing";
-    for (const k of ["archive_dir", "raw_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
+    for (const k of ["archive_dir", "raw_dir", "publish_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
     previewUrl = d.preview_url || "";
     mediaBase = d.media_base || "";
     fillKeys(d.api_keys);
@@ -876,6 +878,7 @@
         <div class="panel way" id="way"></div>
         <div class="panel cutpanel" id="cut"></div>
         <div class="panel cutpanel" id="content"></div>
+        <div class="panel cutpanel" id="publish"></div>
         <div class="panel transcript"><div class="panel-head"><h2>Transkription</h2><span class="hint" id="dStatus"></span>
           <button class="link" id="redoButton" onclick="redoTranscription()">Erneut transkribieren</button>
           <button class="link" id="startTranscription" onclick="startTranscription()">Transkription starten</button></div>
@@ -957,6 +960,59 @@
     renderSpots(d);
     renderCut(d);
     renderContent(d);
+    renderPublish(d);
+  }
+
+  // ---------------------------------------------------------------- publishing: the files leave for the upload folder
+  let publishPlan = {id: "", sig: "", plan: null};
+  async function renderPublish(d) {
+    const box = $("publish"), st = d.stations.publish, p = d.publish || {};
+    const planSig = JSON.stringify([d.id, st, p.signature, (d.cut && d.cut.render || {}).signature, d.content && d.content.current]);
+    if (st === "open" && publishPlan.sig !== planSig) {
+      publishPlan = {id: d.id, sig: planSig, plan: await api().publish_plan(d.id)};
+    }
+    const plan = st === "open" ? publishPlan.plan : null;
+    const sig = JSON.stringify([st, p, plan]);
+    if (box.dataset.sig === sig) return;
+    box.dataset.sig = sig;
+    box.innerHTML = "";
+    const head = el("div", "panel-head");
+    const hint = el("span", "hint"); hint.id = "publishHint";
+    head.append(el("h2", "", "Veröffentlichen"), hint);
+    box.appendChild(head);
+    const note = el("p", "cut-summary");
+    box.appendChild(note);
+    const list = names => { const ul = el("ul", "publish-files"); for (const n of names) ul.appendChild(el("li", "", n)); return ul; };
+    if (st === "soon") {
+      note.textContent = "Wenn das geschnittene Video fertig ist, wandern hier Videos, Untertitel und Zusammenfassung "
+                         + "in den Ordner, aus dem du sie hochlädst, benannt nach Datum, Modul und Titel.";
+      return;
+    }
+    const foot = el("div", "cut-foot");
+    if (st === "done") {
+      const names = Object.values(p.files || {}).map(f => f.split(/[\\/]/).pop()).sort();
+      note.textContent = `Am ${fmtDate(p.published)} verschoben nach ${p.folder}.`;
+      box.appendChild(list(names));
+      foot.append(button("btn primary", "Ordner öffnen", () => api().open_published(selectedId)),
+                  button("link", "Erneut veröffentlichen", doPublish));
+    } else {
+      note.textContent = (p.signature ? "Das Video wurde seit dem letzten Veröffentlichen neu gerendert. " : "")
+        + `Diese Dateien werden aus dem Ordner der Aufnahme verschoben nach ${plan ? plan.folder : "…"}:`;
+      if (plan) box.appendChild(list(plan.files));
+      if (d.content && !d.content.current)
+        box.appendChild(el("p", "hint", "Die Zusammenfassung ist noch nicht fertig. Sie wandert mit, wenn du danach erneut veröffentlichst."));
+      foot.append(button("btn primary", "Veröffentlichen", doPublish));
+    }
+    box.appendChild(foot);
+  }
+  async function doPublish() {
+    if (!await ask({title: "Dateien verschieben?", confirm: "Veröffentlichen",
+                    text: "Videos, Untertitel und Zusammenfassung wandern aus dem Ordner der Aufnahme in den Ordner zum Hochladen. "
+                          + "FLEX3 Light spielt sie dort weiter ab; eine ältere Fassung im Ziel wird ersetzt."})) return;
+    const error = await api().publish(selectedId);
+    if (error) { $("publishHint").textContent = error; $("publishHint").className = "hint error"; return; }
+    $("publish").dataset.sig = ""; publishPlan.sig = "";
+    await refreshDetail();
   }
 
   // ---------------------------------------------------------------- contents: the one-page summary

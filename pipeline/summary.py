@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from . import binaries, cut_agent, files
+from . import binaries, cut_agent, files, publish
 
 HERE = Path(__file__).resolve().parent
 PROMPT, TEMPLATE = HERE / "prompts" / "summary.md", HERE / "templates" / "summary.typ"
@@ -60,7 +60,7 @@ MONTHS = {"de": ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "
 def current(folder: Path) -> bool:
     """True if summary.pdf belongs to the video rendered last."""
     made = files.read_json(Path(folder) / "render.json").get("signature")
-    return bool(made) and (Path(folder) / "summary.pdf").exists() and \
+    return bool(made) and publish.locate(Path(folder), "summary.pdf") is not None and \
         files.read_json(Path(folder) / "summary.json").get("signature") == made
 
 

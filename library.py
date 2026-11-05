@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pipeline import cut_rules, edit, files, render, review
+from pipeline import cut_rules, edit, files, publish, render, review
 from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
@@ -62,7 +62,13 @@ def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
         content = "open" if queued is False else "queued"
     else:
         content = "soon"
-    return {"recorded": "done", "transcript": transcript, "cut": cut, "content": content, "publish": "soon"}
+    if cut != "done":
+        out = "soon"
+    elif publish.current(folder):
+        out = "done"
+    else:
+        out = "open"                       # moving the files is the lecturer's step, never automatic
+    return {"recorded": "done", "transcript": transcript, "cut": cut, "content": content, "publish": out}
 
 
 def scan(archive: Path) -> dict[str, Path]:
@@ -90,11 +96,14 @@ def detail(folder: Path, queued: bool | None = None) -> dict:
     transcript = _read(folder / "transcript.json")
     segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in transcript.get("segments", [])]
     media = sorted(p.name for p in folder.iterdir() if MEDIA.match(p.name)) if folder.exists() else []
+    media = sorted(set(media) | {n for n in publish.published(folder).get("files", {})     # moved by publishing
+                                 if MEDIA.match(n) and publish.locate(folder, n)})
     return {**summary(folder, queued), "segments": segments, "media": media,
             "model": transcript.get("model", ""), "terms": transcript.get("terms", []),
             "uncertain": review.uncertain(transcript) if transcript else [],
             "rated": any("confidence" in w for w in transcript.get("words", [])),
             "cut": cut_view(folder), "content": content_view(folder),
+            "publish": {**publish.published(folder), "current": publish.current(folder)},
             "message": _read(folder / "pipeline.json").get("steps", {}).get("transcribe", {}).get("message", "")}
 
 
@@ -102,7 +111,7 @@ def content_view(folder: Path) -> dict:
     """What the window shows of the summary: whether there is one for the current video, and the step's message."""
     made = _read(folder / "summary.json")
     step = _read(folder / "pipeline.json").get("steps", {}).get("summary", {})
-    return {"file": "summary.pdf" if (folder / "summary.pdf").exists() else "", "current": summary_step.current(folder),
+    return {"file": "summary.pdf" if publish.locate(folder, "summary.pdf") else "", "current": summary_step.current(folder),
             "created": made.get("created", ""), "message": step.get("message", ""),
             "overview": (made.get("de") or {}).get("overview", "")}
 

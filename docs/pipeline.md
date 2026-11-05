@@ -22,7 +22,7 @@ Each recording card shows its steps, the current one highlighted, with one butto
 | **Transkribiert** | in the cloud, started by hand unless the settings say otherwise | starts it on the recording |
 | **Schnitt prüfen** | the agent proposes, ffmpeg renders after approval | looks at the proposals on a timeline, changes or accepts them |
 | **Inhalte prüfen** | one-page summary in German and English as PDF (2026-11-05); quiz, simple language, subtitles in more languages later | reads, corrects, approves |
-| **Bereit** | YouTube and Opencast packages written; Opencast upload once automated | copies title and description, uploads the video |
+| **Veröffentlichen** | on the lecturer's click, the finished files move to the upload folder under Opencast names (2026-11-05); Opencast upload once automated | publishes, then uploads the files by hand |
 
 **Nothing starts by itself after a recording** (decision of the project lead, 2026-11-04): by default a recording is only filed, and transcription and cut are started on the recording under "Meine Aufnahmen". The setting "Nach der Aufnahme" can instead start the transcription, or the transcription and then the cut proposal, on its own.
 
@@ -142,6 +142,15 @@ WebVTT from the corrected transcript, cut at sentence and pause boundaries (`sub
 Summary, a version in simple language, topic overview and quiz from `transcript.json`, with prompts kept as files in the repository so that they can be improved without programming. Everything is marked as AI-generated and approved by the lecturer before anyone else sees it.
 
 **Built first: a one-page summary as PDF, one page in German and one in English** (decision of the project lead, 2026-11-05; nothing more at this station for now). It follows every new render by itself (`pipeline/summary.py`): the language model gets the chapters of the edited video and what is said in each of them, taken from `edited.<language>.vtt`, so nothing that was cut reaches the summary. It returns both languages at once in a fixed structure: overview, five to seven key points, four to eight terms, notes on tasks and dates only if they were said, and the chapter titles. The prompt is `pipeline/prompts/summary.md`, the page layout `pipeline/templates/summary.typ`; Typst sets each page at the largest text size that fits on one A4 page. The footer marks the page as made automatically. Output: `summary.pdf` and `summary.json`, which records the render it belongs to. Approval before publication comes with the publish station.
+
+**Publishing, first part: the files move to the upload folder** (decision of the project lead, 2026-11-05). The Opencast upload is still manual, and Opencast wants file names that begin with the ISO date of the recording, followed by the module and the title, each separated by " - ". The button "Veröffentlichen" (`pipeline/publish.py`) moves, never copies, everything the last render made into `<Veröffentlichen>\<term>\<module>\`, by default next to the recordings in the archive and changeable in the settings:
+
+    2026-11-04 - Digitalisierung und Programmierung - Algorithmen.mp4
+    2026-11-04 - Digitalisierung und Programmierung - Algorithmen.de.vtt
+    2026-11-04 - Digitalisierung und Programmierung - Algorithmen - <clip title>.mp4   (and its .vtt)
+    2026-11-04 - Digitalisierung und Programmierung - Algorithmen - Zusammenfassung.pdf
+
+The title is the one on the title card, otherwise the topic of the recording. Characters Windows does not allow are dropped, a colon becomes a dash, and a " - " inside a part becomes " – ", so that the separators stay unambiguous; two clips with the same title get "(2)". The summary goes along only if it belongs to the same render. `publish.json` in the session folder records where each file went, so the window still plays the videos and opens the PDF from there. After a new render, or after a summary that was finished later, the station is open again; publishing once more replaces the old files and sends files that are no longer wanted, such as a clip that was dropped, to the recycle bin. A file at the target that FLEX3 Light did not put there is never overwritten; publishing then stops before anything moves.
 
 ### 7. Dubbing
 

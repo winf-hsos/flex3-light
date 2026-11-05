@@ -30,7 +30,7 @@ import obs_scene as scene
 from delivery import Delivery, recycle
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
-from pipeline import binaries, cut_rules, edit, review, sounds
+from pipeline import binaries, cut_rules, edit, publish, review, sounds
 from pipeline_runner import PipelineRunner
 from preview import PreviewServer
 from server_client import ServerClient
@@ -217,6 +217,7 @@ class Core:
                 "module": self.module,
                 "devices": {k: [n for n, _ in v] for k, v in self.devices.items()},
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
+                "publish_dir": str(self.publish_dir()),
                 "options": dict(self.options), "cut": self.cut_settings(), "after_recording": self.after_recording()}
 
     def _device_id(self, kind: str) -> str | None:
@@ -254,6 +255,8 @@ class Core:
             return
         if kind == "archive_dir":
             self.archive = Path(path)
+        elif kind == "publish_dir":
+            self.settings["publish_dir"] = str(Path(path))
         elif kind == "raw_dir":
             self.raw_dir = self.delivery.root = Path(path)
             with self.lock:
@@ -669,11 +672,48 @@ class Core:
 
     def open_summary(self, sid: str) -> str:
         folder = getattr(self, "_library", {}).get(sid)
-        pdf = folder / "summary.pdf" if folder else None
-        if pdf is None or not pdf.exists():
+        pdf = publish.locate(folder, "summary.pdf") if folder else None
+        if pdf is None:
             return "Es gibt noch keine Zusammenfassung."
         os.startfile(pdf)
         return ""
+
+    # ---------------------------------------------------------- publishing
+
+    def publish_dir(self) -> Path:
+        """Root of the folders the lecturer uploads from; next to the recordings unless chosen."""
+        return Path(self.settings.get("publish_dir") or self.archive / "Veröffentlichen")
+
+    def publish_plan(self, sid: str) -> dict:
+        """Where the files of a recording would go, for the window to show before moving them."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return {"folder": "", "files": []}
+        moves = publish.plan(folder, self.publish_dir())
+        return {"folder": str(publish.target_dir(folder, self.publish_dir())), "files": [t.name for _, t in moves]}
+
+    def publish(self, sid: str) -> str:
+        """Move the finished files of a recording into the publish folder; returns an error or ''."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        if library.stations(folder)["cut"] != "done":
+            return "Veröffentlichen geht erst, wenn das geschnittene Video fertig ist."
+        with self.pipeline.lock:
+            if self.pipeline.active == str(folder):
+                return "An dieser Aufnahme wird gerade gearbeitet. Versuch es gleich noch einmal."
+            try:
+                publish.run(folder, self.publish_dir(), discard=recycle)
+            except (OSError, ValueError) as e:
+                return str(e) if isinstance(e, (FileExistsError, FileNotFoundError, ValueError)) \
+                    else f"Verschieben fehlgeschlagen: {e}"
+        return ""
+
+    def open_published(self, sid: str) -> None:
+        folder = getattr(self, "_library", {}).get(sid)
+        target = publish.published(folder).get("folder") if folder else None
+        if target and Path(target).exists():
+            os.startfile(target)
 
     def redo_transcription(self, sid: str) -> str:
         """Queue a recording's transcription again, with the module's current terms; returns an error or ''."""
@@ -733,7 +773,7 @@ class Core:
     def _media(self, sid: str, name: str) -> Path | None:
         """For the preview server: a video or subtitle file of a listed recording, nothing else."""
         folder = getattr(self, "_library", {}).get(sid)
-        return folder / name if folder and library.MEDIA.match(name) else None
+        return publish.locate(folder, name) if folder and library.MEDIA.match(name) else None
 
     def open_result(self) -> None:
         f = self._result()

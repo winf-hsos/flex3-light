@@ -92,7 +92,8 @@ class Api:
         self._core.delete_module(eid)
 
     def folder(self, kind):
-        current = self._core.archive if kind == "archive_dir" else self._core.raw_dir
+        current = {"archive_dir": self._core.archive, "raw_dir": self._core.raw_dir,
+                   "publish_dir": self._core.publish_dir()}[kind]
         picked = self._window.create_file_dialog(webview.FOLDER_DIALOG, directory=str(current))
         if picked:
             self._core.set_folder(kind, picked[0] if isinstance(picked, (list, tuple)) else picked)
@@ -159,6 +160,15 @@ class Api:
 
     def redo_cut(self, sid):
         return self._core.redo_cut(sid)
+
+    def publish_plan(self, sid):
+        return self._core.publish_plan(sid)
+
+    def publish(self, sid):
+        return self._core.publish(sid)
+
+    def open_published(self, sid):
+        self._core.open_published(sid)
 
     def make_summary(self, sid):
         return self._core.make_summary(sid)
