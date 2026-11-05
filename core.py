@@ -141,6 +141,7 @@ class Core:
         self.session = None                       # delivery.Session while recording
         self.offset: float | None = None          # wall clock minus recording time
         self.alttab_start: float | None = None
+        self.popup_start: float | None = None     # a pop-up of the taskbar is visible on the recorded screen
         self.private_start: float | None = None   # privacy key pressed at this recording time
         self.rec_time = 0.0                       # recording time of the last status, also while paused
         self.tracker: activity.Tracker | None = None
@@ -356,7 +357,7 @@ class Core:
             raise
         self.session = s
         self.tracker = activity.Tracker(s.add_activity)
-        self.offset, self.alttab_start, self.private_start = None, None, None
+        self.offset, self.alttab_start, self.private_start, self.popup_start = None, None, None, None
         self.message = ""
         return ""
 
@@ -809,11 +810,29 @@ class Core:
             edge, wall = value
             if edge == "down":
                 self.alttab_start = wall - self.offset
-                self.session.alttab_open = True        # no segment is cut until the span is known
             elif self.alttab_start is not None:
-                # shift by the video delay, plus margin for the switcher fading in and out
-                a = self.alttab_start + VIDEO_DELAY - 0.25
-                b = wall - self.offset + VIDEO_DELAY + 0.5
-                self.session.add_span(max(0.0, a), b)
+                self._add_switch_span(self.alttab_start, wall - self.offset)
                 self.alttab_start = None
-                self.session.alttab_open = False
+            self.session.alttab_open = self.alttab_start is not None or self.popup_start is not None
+        elif kind == "popup" and self.session is not None and self.offset is not None:
+            # previews over the taskbar show small pictures of all windows: hidden like Alt+Tab,
+            # but only when they open on the recorded screen
+            edge, wall, point = value
+            if edge == "down" and self._on_recorded_screen(point):
+                self.popup_start = wall - self.offset
+            elif edge == "up" and self.popup_start is not None:
+                self._add_switch_span(self.popup_start, wall - self.offset)
+                self.popup_start = None
+            self.session.alttab_open = self.alttab_start is not None or self.popup_start is not None
+
+    def _add_switch_span(self, start: float, end: float) -> None:
+        """Freeze the screen track from start to end (recording time), shifted by the video delay,
+        with margin for the switcher or pop-up fading in and out."""
+        self.session.add_span(max(0.0, start + VIDEO_DELAY - 0.25), end + VIDEO_DELAY + 0.5)
+
+    def _on_recorded_screen(self, point) -> bool:
+        m = monitors.match_obs_name(self.choice.get("screen", ""))
+        if not m or not point:
+            return True                                  # unsure: rather hide it
+        x, y = point
+        return m["x"] <= x < m["x"] + m["width"] and m["y"] <= y < m["y"] + m["height"]

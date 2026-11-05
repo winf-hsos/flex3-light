@@ -28,7 +28,7 @@ While recording, the window shrinks to a slim bar that turns yellow when paused 
 - **The window itself is never recorded.** While recording it stays visible on your screen but is excluded from capture (`SetWindowDisplayAffinity`). Windows applies this to screenshots as well, so it is only switched on right before a recording starts and off again afterwards.
 - **The taskbar is left out** of the screen track by default, using the work area of the selected monitor.
 - **"Zeigen" shows which screen gets recorded**: a frame in the university's blue goes around exactly the recorded area for a few seconds, with a label in its middle, like "Identify" in the Windows display settings.
-- **The Alt+Tab overview is hidden.** The Windows task switcher cannot be excluded from capture, so the app logs when you press Alt+Tab and freezes the screen track for that moment afterwards, while audio and camera keep running.
+- **The Alt+Tab overview and the taskbar previews are hidden.** The Windows task switcher and the small window previews over the taskbar cannot be excluded from capture, so the app logs when you press Alt+Tab or a preview opens on the recorded screen and freezes the screen track for that moment afterwards, while audio and camera keep running.
 - **Pause and resume** with a button or a global hotkey.
 - **Privacy key**: the button with the crossed-out eye in the recording bar, or **Ctrl+Alt+H**, freezes the screen track until it is pressed again, while sound and camera go on. Press it before opening mail or a folder that should not end up in the recording.
 - **Save, continue or discard**: stopping first pauses the recording and asks what to do, so an accidental stop costs nothing. A discarded recording goes to the recycle bin.
@@ -128,7 +128,7 @@ Settings are stored in `%APPDATA%\flex3-light\settings.json`, the profile in `pr
 | `obs_remote.py` | Minimal obs-websocket v5 client, OBS startup, switching the remote control on |
 | `obs_scene.py` | OBS profile, scene, sources, encoder settings, screen crop |
 | `monitors.py` | Monitor geometry and taskbar margins from Windows |
-| `hotkeys.py` | Global hotkeys and a low-level keyboard hook that detects Alt+Tab |
+| `hotkeys.py` | Global hotkeys, a low-level keyboard hook that detects Alt+Tab, and an event hook that notices the shell's previews over the taskbar |
 | `hardware.py` | Finds ffmpeg and picks NVENC or x264 |
 | `split.py` | ffmpeg split into screen and camera track and the program mix, freezing the Alt+Tab spans, and joining parts without re-encoding; also usable on the command line |
 | `tests/` | Tests for the server and for the whole delivery without OBS (`python -m pytest tests`, needs `requirements-dev.txt`) |
