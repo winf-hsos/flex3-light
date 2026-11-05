@@ -9,7 +9,8 @@ whisper-1 until its end; without a key for either it waits instead of failing. A
 subtitles the cut agent proposes the edit list (pipeline/cut_agent.py), unless the
 lecturer switched that off; the list then waits for the lecturer's approval. Once it is
 approved, the videos are rendered (pipeline/render.py), and again whenever an approved
-list differs from the one rendered last.
+list differs from the one rendered last. Each new render is followed by the one-page
+summary in German and English (pipeline/summary.py), which needs the OpenAI key.
 """
 from __future__ import annotations
 
@@ -22,9 +23,9 @@ from pathlib import Path
 from typing import Callable
 
 import services
-from pipeline import cut_agent, edit, files, render, sounds, subtitles, transcribe
+from pipeline import cut_agent, edit, files, render, sounds, subtitles, summary, transcribe
 
-STEPS = ("transcribe", "subtitles", "cut", "render")
+STEPS = ("transcribe", "subtitles", "cut", "render", "summary")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
 WAIT = 30                    # seconds between checks while waiting for a key or for the recording to end
 WHISPER_END = dt.date(2027, 2, 26)   # OpenAI shuts whisper-1 down
@@ -105,6 +106,20 @@ class PipelineRunner:
             data = read_state(folder)
             data["steps"].pop("cut", None)
             data["cut_requested"] = True                  # also when the lecturer switched the agent off
+            self._write_state(folder, data)
+            self.failed.discard(str(folder))
+        self.enqueue(folder)
+        return True
+
+    def redo_summary(self, folder: Path) -> bool:
+        """Write the summary again, e.g. after the prompt changed; False while the recording is worked on."""
+        folder = Path(folder)
+        with self.lock:
+            if self.active == str(folder):
+                return False
+            data = read_state(folder)
+            data["steps"].pop("summary", None)
+            data["summary_requested"] = True
             self._write_state(folder, data)
             self.failed.discard(str(folder))
         self.enqueue(folder)
@@ -230,10 +245,26 @@ class PipelineRunner:
                     folder, "render", "running", text), sound_dir=self.sound_dir)
                 self._set(folder, "render", "done", signature=report["signature"])
                 return True
+            if (folder / "render.json").exists() and                     (not summary.current(folder) or read_state(folder).get("summary_requested")):
+                key = services.key("openai")
+                if not key:
+                    self._set(folder, "summary", "waiting", "Zusammenfassung wartet auf den OpenAI-Schlüssel "
+                              "(Einstellungen, KI-Dienste)")
+                    return False
+                self._set(folder, "summary", "running", "Die Zusammenfassung entsteht …")
+                result = summary.run(folder, cut_agent.OpenAIResponses(key, summary.MODEL, summary.EFFORT),
+                                     progress=lambda text: self._set(folder, "summary", "running", text))
+                data = read_state(folder)
+                data.pop("summary_requested", None)
+                data["steps"]["summary"] = {"state": "done", "message": "", "model": result.get("model", ""),
+                                            "at": result["created"]}
+                self._write_state(folder, data)
+                return True
         except Exception as e:
-            step = next(k for k in STEPS if steps.get(k, {}).get("state") != "done")
+            now = read_state(folder)["steps"]                  # the step that was running, else the first not done
+            step = next((k for k in STEPS if now.get(k, {}).get("state") == "running"), None) or                 next((k for k in STEPS if now.get(k, {}).get("state") != "done"), STEPS[-1])
             name = {"transcribe": "Transkription", "subtitles": "Untertitel", "cut": "Schnitt-Vorschlag",
-                    "render": "Rendern"}[step]
+                    "render": "Rendern", "summary": "Zusammenfassung"}[step]
             self._set(folder, step, "failed", f"{name} fehlgeschlagen: {e}"[:300])
             self.failed.add(str(folder))
             return True

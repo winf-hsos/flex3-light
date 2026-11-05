@@ -16,16 +16,26 @@ _ffmpeg = "ffmpeg"
 _hwaccel: str | None = None
 
 
-def configure(ffmpeg: str | None = None, hwaccel: str | None = None) -> None:
-    """ffmpeg: path to ffmpeg(.exe); hwaccel: a decoder ffmpeg offers on this machine, e.g. cuda."""
-    global _ffmpeg, _hwaccel
+_typst = "typst"
+
+
+def configure(ffmpeg: str | None = None, hwaccel: str | None = None, typst: str | None = None) -> None:
+    """ffmpeg: path to ffmpeg(.exe); hwaccel: a decoder ffmpeg offers on this machine, e.g. cuda;
+    typst: path to typst(.exe), which sets the summary as PDF."""
+    global _ffmpeg, _hwaccel, _typst
     if ffmpeg:
         _ffmpeg = ffmpeg
+    if typst:
+        _typst = typst
     _hwaccel = hwaccel
 
 
 def ffmpeg() -> str:
     return _ffmpeg
+
+
+def typst() -> str:
+    return _typst
 
 
 def hwaccel() -> list[str]:

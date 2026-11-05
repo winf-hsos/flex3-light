@@ -160,6 +160,12 @@ class Api:
     def redo_cut(self, sid):
         return self._core.redo_cut(sid)
 
+    def make_summary(self, sid):
+        return self._core.make_summary(sid)
+
+    def open_summary(self, sid):
+        return self._core.open_summary(sid)
+
     def set_cut_settings(self, values):
         self._core.set_cut_settings(values or {})
 

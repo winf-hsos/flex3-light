@@ -99,22 +99,40 @@ def test_runner_renders_after_the_approval_and_again_after_changes(tmp_path, mon
         report = {"signature": render.signature(edit.load(f)), "files": ["edited.mp4"]}
         (f / "render.json").write_text(json.dumps(report), encoding="utf-8")
         return report
+    summaries = []
+
+    def fake_summary(f, client, progress=None):
+        summaries.append(f)
+        (f / "summary.pdf").write_bytes(b"%PDF")
+        report = {"created": "2026-10-29T11:00:00+01:00", "model": "m",
+                  "signature": json.loads((f / "render.json").read_text(encoding="utf-8"))["signature"]}
+        (f / "summary.json").write_text(json.dumps(report), encoding="utf-8")
+        return report
     monkeypatch.setattr(pipeline_runner.render, "run", fake)
+    monkeypatch.setattr(pipeline_runner.summary, "run", fake_summary)
+    monkeypatch.setattr(pipeline_runner.services, "key", lambda service: "test-key")
     r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda: {"auto": True},
                                        ["-c:v", "h264_nvenc"])
     r.enqueue(folder)
     r._process(folder)
     assert calls == [] and library.stations(folder)["cut"] == "review"      # not approved: nothing rendered
+    assert library.stations(folder)["content"] == "soon"
     e["approved"] = "2026-10-29T10:00:00+01:00"
     edit.save(folder, e)
     assert library.stations(folder)["cut"] == "queued"
     assert r._process(folder) and calls == [["-c:v", "h264_nvenc"]]
     assert library.stations(folder)["cut"] == "done" and r.describe(folder) == "Geschnittenes Video fertig"
+    assert library.stations(folder)["content"] == "queued"                  # the summary follows the render
     r._process(folder)
-    assert len(calls) == 1                                                   # the same list is not rendered twice
+    assert len(calls) == 1 and len(summaries) == 1                          # the same list is not rendered twice
+    assert library.stations(folder)["content"] == "done"
+    r._process(folder)
+    assert len(summaries) == 1 and not r.queued(folder)                    # nor summarised twice
+    assert r.redo_summary(folder) and r._process(folder) and len(summaries) == 2
     e["items"][0]["end"] = 4.0
     edit.save(folder, e)
     assert library.stations(folder)["cut"] == "queued" and r._process(folder) and len(calls) == 2
+    assert library.stations(folder)["content"] == "queued"                  # a new video needs a new summary
 
 
 def test_cards_add_time_and_carry_sound(tmp_path):

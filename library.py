@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from pipeline import cut_rules, edit, files, render, review
+from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
 MEDIA = re.compile(r"^(recording|screen|camera|edited|clip-\d{2})\.mp4$|^(subtitles|edited|clip-\d{2})\.[a-z]{2}\.vtt$"
@@ -52,7 +53,16 @@ def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
         cut = c
     else:
         cut = "open" if transcript == "done" else "soon"
-    return {"recorded": "done", "transcript": transcript, "cut": cut, "content": "soon", "publish": "soon"}
+    sm = steps.get("summary", {}).get("state")
+    if sm in ("running", "waiting", "failed"):
+        content = sm
+    elif summary_step.current(folder):
+        content = "done"
+    elif cut == "done":                    # follows the render by itself; by hand for older recordings
+        content = "open" if queued is False else "queued"
+    else:
+        content = "soon"
+    return {"recorded": "done", "transcript": transcript, "cut": cut, "content": content, "publish": "soon"}
 
 
 def scan(archive: Path) -> dict[str, Path]:
@@ -84,8 +94,17 @@ def detail(folder: Path, queued: bool | None = None) -> dict:
             "model": transcript.get("model", ""), "terms": transcript.get("terms", []),
             "uncertain": review.uncertain(transcript) if transcript else [],
             "rated": any("confidence" in w for w in transcript.get("words", [])),
-            "cut": cut_view(folder),
+            "cut": cut_view(folder), "content": content_view(folder),
             "message": _read(folder / "pipeline.json").get("steps", {}).get("transcribe", {}).get("message", "")}
+
+
+def content_view(folder: Path) -> dict:
+    """What the window shows of the summary: whether there is one for the current video, and the step's message."""
+    made = _read(folder / "summary.json")
+    step = _read(folder / "pipeline.json").get("steps", {}).get("summary", {})
+    return {"file": "summary.pdf" if (folder / "summary.pdf").exists() else "", "current": summary_step.current(folder),
+            "created": made.get("created", ""), "message": step.get("message", ""),
+            "overview": (made.get("de") or {}).get("overview", "")}
 
 
 def cut_view(folder: Path) -> dict:

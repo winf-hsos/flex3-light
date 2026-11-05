@@ -158,7 +158,7 @@ class Core:
             self.profile.seed(seed_entries(self.archive, self.term, self.settings.get("module_file")))
         self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
         # Transcription and the rest of the pipeline run on filed recordings, never during a recording.
-        binaries.configure(hardware.ffmpeg())   # the bundled ffmpeg too; decoding on the GPU measured slower (2026-10-29)
+        binaries.configure(hardware.ffmpeg(), typst=hardware.typst())   # the bundled ffmpeg too; decoding on the GPU measured slower (2026-10-29)
         self.pipeline = PipelineRunner(PIPELINE_QUEUE, lambda: self.session is None, self._terms_for,
                                        lambda: self.cut_settings(), hardware.ffmpeg_video_args(),
                                        APP_DIR / "sounds").start()
@@ -654,6 +654,25 @@ class Core:
             return "Der Schnitt braucht zuerst die Transkription."
         if not self.pipeline.redo_cut(folder):
             return "An dieser Aufnahme wird gerade gearbeitet."
+        return ""
+
+    def make_summary(self, sid: str) -> str:
+        """Write the summary of the rendered video (again); returns an error or ''."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        if not (folder / "render.json").exists():
+            return "Die Zusammenfassung braucht zuerst das geschnittene Video."
+        if not self.pipeline.redo_summary(folder):
+            return "An dieser Aufnahme wird gerade gearbeitet."
+        return ""
+
+    def open_summary(self, sid: str) -> str:
+        folder = getattr(self, "_library", {}).get(sid)
+        pdf = folder / "summary.pdf" if folder else None
+        if pdf is None or not pdf.exists():
+            return "Es gibt noch keine Zusammenfassung."
+        os.startfile(pdf)
         return ""
 
     def redo_transcription(self, sid: str) -> str:

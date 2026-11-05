@@ -29,6 +29,15 @@ def ffmpeg() -> str:
 
 
 @functools.cache
+def typst() -> str | None:
+    """The bundled typst.exe in the packaged app, otherwise the one on the PATH; None without one."""
+    bundled = Path(getattr(sys, "_MEIPASS", "")) / "typst.exe"
+    if getattr(sys, "frozen", False) and bundled.exists():
+        return str(bundled)
+    return shutil.which("typst")
+
+
+@functools.cache
 def nvenc() -> bool:
     """True if a short NVENC test encode succeeds."""
     if os.environ.get("FLEX3_LIGHT_ENCODER", "").lower() == "x264":

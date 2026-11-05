@@ -56,7 +56,7 @@ The exe is not code-signed, so on first start Windows SmartScreen may show "Wind
 
 ## Running from source
 
-Requirements: Windows 10 or 11, OBS Studio 28 or later, [ffmpeg](https://ffmpeg.org/) on the `PATH` (with `h264_nvenc` and `libx264`, for example a gyan.dev full build), and Python 3.10 or later.
+Requirements: Windows 10 or 11, OBS Studio 28 or later, [ffmpeg](https://ffmpeg.org/) on the `PATH` (with `h264_nvenc` and `libx264`, for example a gyan.dev full build), [Typst](https://typst.app/) on the `PATH` for the summary PDF (`winget install Typst.Typst`), and Python 3.10 or later.
 
 ```bash
 pip install -r requirements.txt
@@ -74,7 +74,7 @@ To build the exe yourself, install PyInstaller and run:
 python tools/build_exe.py
 ```
 
-It bundles the ffmpeg from your `PATH` and writes `dist/flex3-light.exe` (about 115 MB).
+It bundles ffmpeg and Typst from your `PATH` and writes `dist/flex3-light.exe` (about 115 MB).
 
 ## Usage
 
@@ -115,7 +115,7 @@ Settings are stored in `%APPDATA%\flex3-light\settings.json`, the profile in `pr
 | `core.py` | Settings, device selection, recording state, hotkey handling |
 | `delivery.py` | Sessions with their manifest; background threads that process each one-minute segment, file the archive and upload to the server |
 | `server_client.py` | Client for the server's API, standard library only, with an optional bandwidth cap |
-| `pipeline/` | The steps after a recording, independent of the window, for the server to reuse: `audio.py` (pieces at pauses), `transcribe.py` (transcription with word timestamps), `subtitles.py` (WebVTT), `review.py` (unsure words and their correction), `edit.py` (the edit list `edit.json`), `cut_rules.py` (first cut proposals from rules), `cut_tools.py` and `cut_agent.py` (the cut agent with its tools, OpenAI `gpt-6.1-sol`), `ocr.py` (text with its position from the OCR built into Windows, for exact blurs and zooms), `timeline.py` and `render.py` (the approved list becomes videos), `cards.py` (title, chapter and closing cards, lower thirds), `sounds.py` (the sounds, made once with ElevenLabs) |
+| `pipeline/` | The steps after a recording, independent of the window, for the server to reuse: `audio.py` (pieces at pauses), `transcribe.py` (transcription with word timestamps), `subtitles.py` (WebVTT), `review.py` (unsure words and their correction), `edit.py` (the edit list `edit.json`), `cut_rules.py` (first cut proposals from rules), `cut_tools.py` and `cut_agent.py` (the cut agent with its tools, OpenAI `gpt-6.1-sol`), `ocr.py` (text with its position from the OCR built into Windows, for exact blurs and zooms), `timeline.py` and `render.py` (the approved list becomes videos), `cards.py` (title, chapter and closing cards, lower thirds), `sounds.py` (the sounds, made once with ElevenLabs), `summary.py` (the one-page summary in German and English as PDF, with `prompts/summary.md` and `templates/summary.typ`) |
 | `pipeline_runner.py` | Queue that runs the pipeline on filed recordings, only while nothing is recorded |
 | `credentials.py`, `services.py` | API keys in the Windows Credential Manager, and the check whether a key works |
 | `activity.py` | Which program is in front during a recording, merged into spans for the cut agent |

@@ -21,7 +21,7 @@ Each recording card shows its steps, the current one highlighted, with one butto
 | **Aufgenommen** | automatically at the stop | – |
 | **Transkribiert** | in the cloud, started by hand unless the settings say otherwise | starts it on the recording |
 | **Schnitt prüfen** | the agent proposes, ffmpeg renders after approval | looks at the proposals on a timeline, changes or accepts them |
-| **Inhalte prüfen** | summary, quiz, simple language, subtitles in more languages | reads, corrects, approves |
+| **Inhalte prüfen** | one-page summary in German and English as PDF (2026-11-05); quiz, simple language, subtitles in more languages later | reads, corrects, approves |
 | **Bereit** | YouTube and Opencast packages written; Opencast upload once automated | copies title and description, uploads the video |
 
 **Nothing starts by itself after a recording** (decision of the project lead, 2026-11-04): by default a recording is only filed, and transcription and cut are started on the recording under "Meine Aufnahmen". The setting "Nach der Aufnahme" can instead start the transcription, or the transcription and then the cut proposal, on its own.
@@ -140,6 +140,8 @@ WebVTT from the corrected transcript, cut at sentence and pause boundaries (`sub
 ### 6. AI content
 
 Summary, a version in simple language, topic overview and quiz from `transcript.json`, with prompts kept as files in the repository so that they can be improved without programming. Everything is marked as AI-generated and approved by the lecturer before anyone else sees it.
+
+**Built first: a one-page summary as PDF, one page in German and one in English** (decision of the project lead, 2026-11-05; nothing more at this station for now). It follows every new render by itself (`pipeline/summary.py`): the language model gets the chapters of the edited video and what is said in each of them, taken from `edited.<language>.vtt`, so nothing that was cut reaches the summary. It returns both languages at once in a fixed structure: overview, five to seven key points, four to eight terms, notes on tasks and dates only if they were said, and the chapter titles. The prompt is `pipeline/prompts/summary.md`, the page layout `pipeline/templates/summary.typ`; Typst sets each page at the largest text size that fits on one A4 page. The footer marks the page as made automatically. Output: `summary.pdf` and `summary.json`, which records the render it belongs to. Approval before publication comes with the publish station.
 
 ### 7. Dubbing
 

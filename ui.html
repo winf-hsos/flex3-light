@@ -107,7 +107,7 @@
   @keyframes fade { from { opacity: 0; } }
   @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
   .hint { min-height: 17px; font-size: 12.5px; color: var(--slate); }
-  .hint.error { color: #c62828; } .hint.ok { color: #1e7e34; }
+  .hint.error, .cut-summary.error { color: #c62828; } .hint.ok { color: #1e7e34; }
   .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
   .panel-head { display: flex; align-items: baseline; gap: 10px; }
   .panel-head h2 { margin: 0; font-family: var(--display); font-size: 15px; font-weight: 600; flex: 1; }
@@ -875,6 +875,7 @@
           <div class="card-overlay" id="cardOverlay"></div><div id="regions"></div></div>
         <div class="panel way" id="way"></div>
         <div class="panel cutpanel" id="cut"></div>
+        <div class="panel cutpanel" id="content"></div>
         <div class="panel transcript"><div class="panel-head"><h2>Transkription</h2><span class="hint" id="dStatus"></span>
           <button class="link" id="redoButton" onclick="redoTranscription()">Erneut transkribieren</button>
           <button class="link" id="startTranscription" onclick="startTranscription()">Transkription starten</button></div>
@@ -955,7 +956,49 @@
     }
     renderSpots(d);
     renderCut(d);
+    renderContent(d);
   }
+
+  // ---------------------------------------------------------------- contents: the one-page summary
+  function renderContent(d) {
+    const box = $("content"), st = d.stations.content, c = d.content || {};
+    const sig = JSON.stringify([st, c]);
+    if (box.dataset.sig === sig) return;
+    box.dataset.sig = sig;
+    box.innerHTML = "";
+    box.classList.toggle("working", st === "running");
+    const head = el("div", "panel-head");
+    const hint = el("span", "hint"); hint.id = "contentHint";
+    head.append(el("h2", "", "Inhalte"), hint);
+    box.appendChild(head);
+    const p = el("p", "cut-summary");
+    p.textContent = {
+      soon: "Nach dem Schnitt entsteht hier eine Zusammenfassung des Videos als PDF, je eine Seite auf Deutsch und Englisch.",
+      queued: "Die Zusammenfassung des geschnittenen Videos folgt gleich.",
+      running: "Das Sprachmodell liest, was im geschnittenen Video gesagt wird, und schreibt je eine Seite auf Deutsch und Englisch.",
+      open: "Für das geschnittene Video gibt es noch keine Zusammenfassung. Sie entsteht aus dem Text des Videos, "
+            + "je eine Seite auf Deutsch und Englisch, und braucht den OpenAI-Schlüssel.",
+      waiting: c.message, failed: c.message, done: c.overview}[st] || "";
+    if (st === "running") { hint.className = "cut-status"; hint.textContent = c.message || "Die Zusammenfassung entsteht …"; }
+    if (st === "failed") p.className = "cut-summary error";
+    box.appendChild(p);
+    const foot = el("div", "cut-foot");
+    if (st === "done") {
+      foot.append(el("span", "hint", `Zusammenfassung vom ${fmtDate(c.created)}, zwei Seiten (Deutsch, Englisch).`),
+                  button("btn primary", "PDF öffnen", openSummary),
+                  button("link", "Neu schreiben lassen", makeSummary));
+    } else if (st === "open" || st === "failed") {
+      foot.append(button("btn primary", st === "failed" ? "Erneut versuchen" : "Zusammenfassung erstellen", makeSummary));
+    }
+    if (foot.children.length) box.appendChild(foot);
+  }
+  async function contentResult(error) {
+    if (error) { $("contentHint").textContent = error; $("contentHint").className = "hint error"; return; }
+    $("content").dataset.sig = "";
+    await refreshDetail();
+  }
+  const makeSummary = async () => contentResult(await api().make_summary(selectedId));
+  const openSummary = async () => contentResult(await api().open_summary(selectedId));
 
   // ---------------------------------------------------------------- unsure spots of a transcript
   let stopAt = null, allSpots = false;
