@@ -86,17 +86,14 @@ It bundles ffmpeg and Typst from your `PATH` and writes `dist/flex3-light.exe` (
 
 While recording, every finished one-minute segment is split into screen and camera (and the program mix, if a server is configured) at low priority, so it never slows OBS down. After stopping, the last segment follows, the parts are joined into the two MP4 files without re-encoding, and the raw segments are deleted only once the result has been checked to be as long as the parts. If anything fails, the raw segments are kept. Closing the window during a recording keeps it as well; if the app ends before the recording is filed, it continues at the next start. **Verwerfen** also deletes whatever was already uploaded.
 
-To deliver recordings to a FLEX3 Light server, add its address and the token of this installation to the settings (the token is never printed or logged):
+To deliver recordings to a FLEX3 Light server, paste the connection code you got from it under **Einstellungen, Server** and click **Verbinden**. The app exchanges the code once for a token of this computer, keeps the token in the Windows Credential Manager (it is never shown, printed or logged) and from then on sends recordings and module changes there; **Trennen** goes back to recording locally only. Two settings can be added by hand to `settings.json`:
 
 ```json
-"server_url": "https://flex3.example.org",
-"server_token": "…",
-"device_id": "flex3-light-pc1234",
 "language": "de",
 "upload_kbit": 20000
 ```
 
-`upload_kbit` caps the upload bandwidth (optional); `device_id` defaults to `flex3-light-<computer name>`, `language` to `de` for modules without a language. The window shows how many parts have been transferred. Recordings go to the server as `unassigned`, with consent restricted to recording and nothing published, unless their module has both ILIAS course and Opencast series; then they arrive as `assigned`.
+`upload_kbit` caps the upload bandwidth (optional), `language` is used for modules without a language. The window shows how many parts have been transferred. Recordings go to the server as `unassigned`, with consent restricted to recording and nothing published, unless their module has both ILIAS course and Opencast series; then they arrive as `assigned`.
 
 Keys for the AI services of the pipeline, AssemblyAI, OpenAI and ElevenLabs, are entered under **Einstellungen**, "KI-Dienste". They go into the Windows Credential Manager as "FLEX3 Light/assemblyai", "FLEX3 Light/openai" and "FLEX3 Light/elevenlabs", never into `settings.json` or the log, and the window only shows whether a key is stored. "Prüfen" asks the service whether the key works and, for OpenAI, which transcription models it may use, for AssemblyAI, in which region the data stays; it sends no audio or text. An ElevenLabs key may be restricted: FLEX3 Light only needs the permission for sound effects, and a key without the permission to read the user counts as valid. Environment variables such as `OPENAI_API_KEY` are not used.
 
@@ -142,7 +139,7 @@ Hiding Alt+Tab needs a small correction: the time OBS reports runs about 0.55 se
 
 - Windows only. Without an NVIDIA GPU, recording and splitting run on the CPU (x264), which a weaker laptop may struggle with at this canvas size.
 - The camera field is 1920×1080; the screen field holds up to 1920×1200.
-- Streaming and the virtual camera are not built in yet, and the server settings have no place in the window yet.
+- Streaming and the virtual camera are not built in yet.
 - The layout of the program mix (webcam small in the bottom right corner) is a proposal; the FLEX3 contract leaves it open.
 
 ## Third-party software

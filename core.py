@@ -33,6 +33,7 @@ from lecturer_profile import Profile, seed_entries
 from pipeline import binaries, cut_rules, edit, publish, review, sounds
 from pipeline_runner import PipelineRunner
 from preview import PreviewServer
+import server_client as server_api
 from server_client import ServerClient
 
 APP_DIR = Path(os.environ["APPDATA"]) / "flex3-light"
@@ -62,11 +63,30 @@ def clean_name(text: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "", text).strip().rstrip(".")
 
 
+SERVER_SECRET = "server"     # name of the device token in the Windows Credential Manager
+
+
 def server_client(settings: dict) -> ServerClient | None:
-    """The FLEX3 Light server from the settings, or None: then recordings are only archived locally."""
-    if settings.get("server_url") and settings.get("server_token"):
-        return ServerClient(settings["server_url"], settings["server_token"], settings.get("upload_kbit"))
+    """The FLEX3 Light server from the settings, or None: then recordings are only archived locally.
+
+    The address is a setting, the device token lives in the Credential Manager (since
+    2026-11-06; a token still in settings.json is moved there on start)."""
+    token = services.credentials.get(SERVER_SECRET) if settings.get("server_url") else None
+    if settings.get("server_url") and token:
+        return ServerClient(settings["server_url"], token, settings.get("upload_kbit"))
     return None
+
+
+def server_api_split(code: str) -> tuple[str, str]:
+    """(key, address) from a connection code "<key>@<address>" or a bare key."""
+    key, _, url = (code or "").strip().partition("@")
+    return key.strip(), url.strip().rstrip("/")
+
+
+def _move_token_out_of_settings(settings: dict) -> None:
+    if settings.get("server_token"):
+        services.credentials.put(SERVER_SECRET, settings.pop("server_token"))
+        save_settings(settings)
 
 
 def load_settings() -> dict:
@@ -156,6 +176,7 @@ class Core:
         self.profile = Profile(PROFILE_FILE)
         if self.profile.is_new:
             self.profile.seed(seed_entries(self.archive, self.term, self.settings.get("module_file")))
+        _move_token_out_of_settings(self.settings)
         self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
         # Transcription and the rest of the pipeline run on filed recordings, never during a recording.
         binaries.configure(hardware.ffmpeg(), typst=hardware.typst())   # the bundled ffmpeg too; decoding on the GPU measured slower (2026-10-29)
@@ -218,7 +239,8 @@ class Core:
                 "devices": {k: [n for n, _ in v] for k, v in self.devices.items()},
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
                 "publish_dir": str(self.publish_dir()),
-                "options": dict(self.options), "cut": self.cut_settings(), "after_recording": self.after_recording()}
+                "options": dict(self.options), "cut": self.cut_settings(), "after_recording": self.after_recording(),
+                "server": self.server_info()}
 
     def _device_id(self, kind: str) -> str | None:
         return next((i for n, i in self.devices[kind] if n == self.choice.get(kind)), None)
@@ -293,6 +315,53 @@ class Core:
     def delete_api_key(self, service: str) -> None:
         if service in services.SERVICES:
             services.credentials.delete(service)
+
+    # ---------------------------------------------------------- server connection
+
+    def server_info(self) -> dict:
+        """What the settings show about the connection; never the token."""
+        url = self.settings.get("server_url", "")
+        return {"url": url if self.delivery.client else "", "device_id": self.settings.get("device_id", ""),
+                "user_name": self.profile.data.get("user_name", ""), "connection": self.delivery.connection()}
+
+    def connect_server(self, code: str) -> str:
+        """Register this computer with a connection code ("<key>@<address>"); returns an error or ''."""
+        if self.session is not None:
+            return "Während einer Aufnahme lässt sich die Verbindung nicht ändern."
+        key, url = server_api_split(code)
+        url = url or self.settings.get("server_url", "")
+        if not key:
+            return "Bitte den Verbindungscode einfügen."
+        if not url:
+            return "Im Code fehlt die Adresse des Servers (Schlüssel@Adresse)."
+        if not url.startswith(("http://", "https://")):
+            return "Die Adresse muss mit http:// oder https:// beginnen."
+        try:
+            answer = server_api.register(url, key, os.environ.get("COMPUTERNAME", "Rechner"))
+        except server_api.ServerError as e:
+            return str(e.detail) if e.status == 403 else f"Der Server lehnt ab: {e}"
+        except OSError as e:
+            return f"Der Server ist nicht erreichbar: {getattr(e, 'reason', e)}"
+        services.credentials.put(SERVER_SECRET, answer["token"])
+        self.settings.update({"server_url": url, "device_id": answer["device_id"]})
+        save_settings(self.settings)
+        self.delivery.client = server_client(self.settings)
+        self.delivery.reachable, self.delivery.server_down_until = None, 0.0
+        self.profile.status = "local"
+        self.delivery.wake.set()                 # first sync of the profile right away
+        return ""
+
+    def disconnect_server(self) -> str:
+        """Back to recording locally only; the server keeps what it has."""
+        if self.session is not None:
+            return "Während einer Aufnahme lässt sich die Verbindung nicht ändern."
+        services.credentials.delete(SERVER_SECRET)
+        for k in ("server_url", "device_id"):
+            self.settings.pop(k, None)
+        save_settings(self.settings)
+        self.delivery.client = None
+        self.profile.status = "local"
+        return ""
 
     def check_api_key(self, service: str) -> dict:
         if service not in services.SERVICES:

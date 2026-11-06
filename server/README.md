@@ -10,7 +10,7 @@ Receives recordings from FLEX3 Light piece by piece while the lecture is still r
 
 ## API
 
-Every request carries `Authorization: Bearer <token>`. The token decides the `device_id` and the lecturer (one token per person and device), and a session belongs to the device that opened it. On completion the server sets `device_id`, `instructor_id` and `instructor_name` in `session.json` from the token, whatever the device sent.
+Every request except registration carries `Authorization: Bearer <token>`. The token decides the `device_id` and the lecturer (one token per person and device), and a session belongs to the device that opened it. On completion the server sets `device_id`, `instructor_id` and `instructor_name` in `session.json` from the token, whatever the device sent.
 
 | Request | Purpose |
 |---|---|
@@ -21,6 +21,18 @@ Every request carries `Authorization: Bearer <token>`. The token decides the `de
 | `DELETE /sessions/{id}` | throws away a session that is not complete, for "Verwerfen" in the app |
 | `GET /profile` | the lecturer's profile: `user_id`, `user_name` and the modules |
 | `POST /profile/sync` | `{"modules": [...]}`: merges the device's entries and returns all of them |
+| `POST /devices/register` | `{"key", "device_name"}`, no token: exchanges an invitation key for the device token |
+| `GET /me` | the device and lecturer of the token |
+
+### Lecturers, keys and devices
+
+Since 2026-11-06 a device connects itself (`accounts.py`). Whoever runs the server creates an invitation for a lecturer; it prints a **connection code**, the key and the server's address in one line (`FLX3-7K3M-Q9PD-2WRT-H4NA@https://…`), valid once and for 14 days. The lecturer pastes it in FLEX3 Light under Einstellungen, Server; the app exchanges it for a device token, which it keeps in the Windows Credential Manager. One token per person and device: registering the same computer again keeps its `device_id` and invalidates the old token, and a lost laptop is revoked on the server. Keys and tokens are stored only as SHA-256 hashes in `accounts.sqlite` in the data folder.
+
+```bash
+python -m flex3_light_server.admin --data /srv/flex3-light --url https://flex3.example.org invite "Jane Doe"
+```
+
+`users` and `devices` list what exists, `revoke <device_id>` blocks a device. The lecturer's id is also the key of their profile, so the profile is the user register of the FLEX3 IT concept (decision of 2026-11-06).
 
 ### Profiles
 
@@ -36,12 +48,12 @@ Requirements: Python 3.10 or later and ffmpeg on the `PATH`.
 pip install -r server/requirements.txt
 ```
 
-The tokens live in a JSON file that maps each token to a device and a lecturer, for example `{"<long random token>": {"device_id": "flex3-light-pc1234", "user_id": "jdoe", "user_name": "Jane Doe"}}`. A plain string as value is a device without a lecturer, which can deliver recordings but has no profile. The file is never logged and does not belong in the repository.
+Tests and setups from before 2026-11-06 can still name a JSON file of fixed tokens in `FLEX3_LIGHT_SERVER_TOKENS` (`{"<token>": {"device_id", "user_id", "user_name"}}`, a plain string being a device without a lecturer); it is never logged and does not belong in the repository.
 
-To try it on your own computer, `python tools/dev_server.py --configure` creates a token for you, writes server address and token into FLEX3 Light's settings (close the app first), and `python tools/dev_server.py` runs the server on `127.0.0.1:8765` with its data in `%LOCALAPPDATA%\flex3-light-devserver`. Stop it to see the app work offline; `--unconfigure` goes back to recording locally only.
+To try it on your own computer, `python tools/dev_server.py` runs the server on `127.0.0.1:8765` with its data in `%LOCALAPPDATA%\flex3-light-devserver`, and `python tools/dev_server.py --invite` prints a connection code for you to paste into the app. Stop the server to see the app work offline; "Trennen" in the app goes back to recording locally only.
 
 ```bash
-FLEX3_LIGHT_SERVER_DATA=/srv/flex3-light FLEX3_LIGHT_SERVER_TOKENS=/etc/flex3-light/tokens.json uvicorn --app-dir server flex3_light_server.app:app_from_env --factory --host 0.0.0.0 --port 8000
+FLEX3_LIGHT_SERVER_DATA=/srv/flex3-light uvicorn --app-dir server flex3_light_server.app:app_from_env --factory --host 0.0.0.0 --port 8000
 ```
 
 In production it runs behind a reverse proxy with TLS. The proxy has to allow request bodies of at least 100 MB: in a test on 2026-10-26 one minute came to about 57 MB for the camera track (webcam noise at the inherited quality setting), 9 MB for the program mix and 5 MB for the screen.
@@ -56,4 +68,4 @@ pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 
-`tests/test_server.py` covers the API, `tests/test_delivery.py` the whole way from synthetic OBS segments through the app's background processing to a running server, and `tests/test_profile.py` the profile: seeding, offline changes, two devices of one lecturer, and the same merge rule in app and server.
+`tests/test_server.py` covers the API, `tests/test_accounts.py` keys, registration and revoked devices, `tests/test_delivery.py` the whole way from synthetic OBS segments through the app's background processing to a running server, and `tests/test_profile.py` the profile: seeding, offline changes, two devices of one lecturer, and the same merge rule in app and server.

@@ -54,7 +54,7 @@ At the stop only the last segment is left: OBS closes it, the worker processes i
 - `PUT /sessions/{id}` opens a session under an id that FLEX3 Light chooses (`<date>_<module>_<HHMM>`). `PUT /sessions/{id}/parts/{track}/{n}` receives part `n` of a track with a checksum and confirms it. `POST /sessions/{id}/complete` sends `session.json` with the number of parts per track. Details in `server/README.md`.
 - On completion the server joins the segments of each track without re-encoding (ffmpeg concat with `-c copy`), checks that every track is as long as the sum of its segments, writes the session folder according to the contract and only then confirms the session.
 - `DELETE /sessions/{id}` throws a session away. This matters because segments reach the server before the lecturer decides whether to keep the recording: "Verwerfen" in the window has to delete them there as well.
-- Every request carries the installation's token; the token is stored in the settings and never printed or logged, like the OBS password.
+- Every request carries the device's token; the app gets it by registering with a connection code from the server and keeps it in the Windows Credential Manager, never printed or logged, like the OBS password.
 
 ### Rules that stay
 
@@ -72,7 +72,7 @@ A test recording of 3:47 on the development machine (OBS 32.2.2, wide canvas, sp
 - **Processing time:** splitting a one-minute segment took 13.6 seconds with NVENC and 9.6 seconds with x264 on this machine, each measured with OBS idle. Both are far below the segment length; a weaker laptop without NVENC still has to be measured while OBS records.
 - **Upload volume:** about 57 MB per minute for the camera track, 9 MB for the program mix and 5 MB for the screen, so roughly 9 Mbit/s in total. The camera track dominates because the inherited quality setting (constant quality 21) spends most bits on webcam noise; a lower quality for the camera would cut the upload by more than half.
 
-**Decision:** how a laptop gets its `device_id` and token: per installation (proposed `device_id`: `flex3-light-<computer name>`) or per person. The IT concept only knows "one token per device".
+**Decided (2026-11-06):** one token per person and device. The lecturer pastes a connection code (invitation key and server address) into the app, which registers itself and gets the token and a `device_id` of the form `flex3-light-<computer name>` (`server/flex3_light_server/accounts.py`).
 
 ## Part 3: live streaming
 

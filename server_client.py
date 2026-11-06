@@ -87,3 +87,12 @@ class ServerClient:
 
     def sync_profile(self, modules: list[dict]) -> dict:
         return self._call("POST", "/profile/sync", body={"modules": modules})[1]
+
+    def me(self) -> dict:
+        return self._call("GET", "/me")[1]
+
+
+def register(url: str, key: str, device_name: str, timeout: float = 20) -> dict:
+    """Exchange an invitation key for a device token: {"token", "device_id", "user_id", "user_name"}."""
+    return ServerClient(url, "", timeout=timeout)._call(
+        "POST", "/devices/register", body={"key": key, "device_name": device_name})[1]

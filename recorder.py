@@ -158,6 +158,12 @@ class Api:
     def approve_cut(self, sid, approved=True):
         return self._core.approve_cut(sid, bool(approved))
 
+    def connect_server(self, code):
+        return self._core.connect_server(code)
+
+    def disconnect_server(self):
+        return self._core.disconnect_server()
+
     def rerender(self, sid):
         return self._core.rerender(sid)
 

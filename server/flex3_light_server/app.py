@@ -7,16 +7,20 @@
     DELETE /sessions/{id}                      throw away a session that is not complete
     GET    /profile                            the lecturer's profile: who, and the modules
     POST   /profile/sync                       {"modules": [...]}: merge the device's entries, return all
+    POST   /devices/register                   {"key", "device_name"}: invitation key -> device token (no token needed)
+    GET    /me                                 the device and lecturer of the token
 
-Every request carries "Authorization: Bearer <token>". The token decides the device_id
-and the lecturer it belongs to (one token per person and device). On completion the
+Every other request carries "Authorization: Bearer <token>". The token decides the
+device_id and the lecturer it belongs to (one token per person and device); devices get
+it by registering with an invitation key (accounts.py, admin.py). On completion the
 parts of each track are joined without re-encoding into a session folder after the
 FLEX3 contract: recording.mp4 (program mix), screen.mp4, camera.mp4 and session.json.
 Nothing is confirmed before the folder is complete.
 
 Configuration from the environment:
-    FLEX3_LIGHT_SERVER_DATA     data folder (incoming/, sessions/ and profiles/ below it)
-    FLEX3_LIGHT_SERVER_TOKENS   JSON file {"<token>": {"device_id": "...", "user_id": "...", "user_name": "..."}}
+    FLEX3_LIGHT_SERVER_DATA     data folder (incoming/, sessions/, profiles/ and accounts.sqlite below it)
+    FLEX3_LIGHT_SERVER_TOKENS   optional, for tests and old setups: JSON file
+                                {"<token>": {"device_id": "...", "user_id": "...", "user_name": "..."}}
                                 (a plain "<device_id>" as value is a device without a profile)
 """
 from __future__ import annotations
@@ -35,6 +39,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from . import profiles
+from .accounts import Accounts, InvalidKey
 from .assemble import join
 
 logger = logging.getLogger(__name__)
@@ -48,12 +53,14 @@ REQUIRED = ("session_id", "status", "recorded_at", "duration_sec", "language", "
 MAX_PARTS = 10000
 
 
-def create_app(data_dir: Path, tokens: dict[str, str | dict]) -> FastAPI:
+def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
+               accounts: Accounts | None = None) -> FastAPI:
     data_dir = Path(data_dir)
+    accounts = accounts or Accounts(data_dir / "accounts.sqlite")
     incoming, sessions, profile_dir = data_dir / "incoming", data_dir / "sessions", data_dir / "profiles"
     for d in (incoming, sessions, profile_dir):
         d.mkdir(parents=True, exist_ok=True)
-    identities = {t: v if isinstance(v, dict) else {"device_id": v} for t, v in tokens.items()}
+    identities = {t: v if isinstance(v, dict) else {"device_id": v} for t, v in (tokens or {}).items()}
     locks: dict[str, threading.Lock] = {}
     locks_guard = threading.Lock()
     app = FastAPI(title="FLEX3 Light server")
@@ -68,7 +75,10 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict]) -> FastAPI:
         for token, who in identities.items():
             if given and hmac.compare_digest(given.encode(), token.encode()):
                 return who
-        raise HTTPException(401, "unknown token")
+        who = accounts.identity(given)
+        if who is None:
+            raise HTTPException(401, "unknown or revoked token")
+        return who
 
     def device(who: dict = Depends(identity)) -> str:
         return who["device_id"]
@@ -107,6 +117,19 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict]) -> FastAPI:
     @app.get("/health")
     def health():
         return {"ok": True}
+
+    @app.post("/devices/register")
+    def register(body: dict):
+        try:
+            token, who = accounts.register(str(body.get("key") or ""), str(body.get("device_name") or ""))
+        except InvalidKey as e:
+            raise HTTPException(403, str(e)) from None
+        logger.info("Registered device %s for %s", who["device_id"], who["user_id"])
+        return {"token": token, **who}
+
+    @app.get("/me")
+    def me(who: dict = Depends(identity)):
+        return {"device_id": who["device_id"], "user_id": who.get("user_id", ""), "user_name": who.get("user_name", "")}
 
     @app.put("/sessions/{sid}")
     def open_session(sid: str, device_id: str = Depends(device)):
@@ -269,5 +292,6 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict]) -> FastAPI:
 
 def app_from_env() -> FastAPI:
     data = Path(os.environ.get("FLEX3_LIGHT_SERVER_DATA", "data"))
-    tokens = json.loads(Path(os.environ["FLEX3_LIGHT_SERVER_TOKENS"]).read_text(encoding="utf-8"))
+    tokens_file = os.environ.get("FLEX3_LIGHT_SERVER_TOKENS")
+    tokens = json.loads(Path(tokens_file).read_text(encoding="utf-8")) if tokens_file else {}
     return create_app(data, tokens)

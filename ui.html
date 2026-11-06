@@ -595,6 +595,12 @@
           </div>
         </div>
         <div class="settings-col">
+          <div class="panel section" id="serverPanel">
+            <div class="panel-head"><h2>Server</h2><span class="key-state" id="serverState"></span></div>
+            <div class="section-note" id="serverNote"></div>
+            <div class="key-edit" id="serverConnect"><div class="field"><input type="text" id="serverCode" autocomplete="off" spellcheck="false" placeholder="FLX3-…@https://…"></div><button class="btn primary" id="serverButton" onclick="connectServer()">Verbinden</button></div>
+            <div class="key-actions"><button class="link danger" id="serverDisconnect" onclick="disconnectServer()">Trennen</button><span class="hint" id="serverMsg"></span></div>
+          </div>
           <div class="panel section">
             <div class="panel-head"><h2>KI-Dienste</h2></div>
             <div class="section-note">Für Transkription, Untertitel und Inhalte nach der Vorlesung. Die Schlüssel liegen in der Windows-Anmeldeinformationsverwaltung und werden hier nie wieder angezeigt.</div>
@@ -757,6 +763,7 @@
     previewUrl = d.preview_url || "";
     mediaBase = d.media_base || "";
     fillKeys(d.api_keys);
+    fillServer(d.server);
     cutSettings = d.cut || {};
     fillCutSettings();
     updatePreview();
@@ -1727,6 +1734,37 @@
 
   // ---------------------------------------------------------------- settings: keys of the AI services
   const SERVICES = ["openai", "elevenlabs", "assemblyai"];
+  // ---------------------------------------------------------------- connection to the server
+  function fillServer(sv) {
+    const on = !!(sv && sv.url);
+    $("serverState").textContent = on ? (CONNECTION[sv.connection] || [""])[0] : "nicht verbunden";
+    $("serverState").className = "key-state" + (on && sv.connection === "online" ? " ok" : "");
+    $("serverNote").textContent = on
+      ? `${sv.url}, als ${sv.user_name || "…"} auf dem Gerät ${sv.device_id}. Aufnahmen und Module gehen an diesen Server.`
+      : "Mit dem Verbindungscode vom Server meldest du diesen Rechner an. Bis dahin bleibt alles auf diesem Rechner.";
+    $("serverConnect").style.display = on ? "none" : "";
+    $("serverDisconnect").style.display = on ? "" : "none";
+  }
+  function serverMessage(text, kind) { const m = $("serverMsg"); m.textContent = text; m.className = "hint " + (kind || ""); }
+  async function connectServer() {
+    const b = $("serverButton"); b.disabled = true; serverMessage("Verbinde …");
+    try {
+      const error = await api().connect_server($("serverCode").value);
+      if (error) { serverMessage(error, "error"); return; }
+      $("serverCode").value = "";
+      serverMessage("Verbunden.", "ok");
+      fillServer((await api().data()).server);
+    } finally { b.disabled = false; }
+  }
+  async function disconnectServer() {
+    if (!await ask({title: "Vom Server trennen?", confirm: "Trennen", danger: true,
+                    text: "Neue Aufnahmen und Änderungen an den Modulen bleiben dann auf diesem Rechner. Der Server behält, "
+                          + "was er schon hat. Zum erneuten Verbinden brauchst du einen neuen Verbindungscode."})) return;
+    const error = await api().disconnect_server();
+    serverMessage(error || "Getrennt.", error ? "error" : "");
+    fillServer((await api().data()).server);
+  }
+
   function fillKeys(keys) {
     for (const s of SERVICES) {
       const stored = !!(keys && keys[s]);
@@ -1761,6 +1799,7 @@
   // ---------------------------------------------------------------- recording bar and status
   let lastConnection = "";
   function showConnection(st) {
+    if (lastConnection && lastConnection !== st.connection) api().data().then(d => fillServer(d.server));
     lastConnection = st.connection;
     const c = $("conn"), [text, title] = CONNECTION[st.connection] || ["", ""];
     c.className = "conn " + st.connection;
