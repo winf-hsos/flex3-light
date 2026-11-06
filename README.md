@@ -66,7 +66,7 @@ pip install -r requirements.txt
 python recorder.py
 ```
 
-`flex3-light.cmd` starts it without a console window, and `python tools/setup_obs.py` checks the OBS connection and lists the devices OBS sees. The app reads the remote-control password from OBS's own configuration; the environment variable `OBS_WEBSOCKET_PASSWORD` works as a fallback. The password is never printed.
+`flex3-light.cmd` starts it without a console window. `python tools/start_menu.py` adds a Start menu entry with the app's icon and window ID, which can then be pinned to the taskbar ("An Taskleiste anheften"; Windows does not let programs pin themselves). `python tools/setup_obs.py` checks the OBS connection and lists the devices OBS sees. The app reads the remote-control password from OBS's own configuration; the environment variable `OBS_WEBSOCKET_PASSWORD` works as a fallback. The password is never printed.
 
 To build the exe yourself, install PyInstaller and run:
 
