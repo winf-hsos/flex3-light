@@ -46,7 +46,10 @@ def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
         cut = "failed"
     elif edit_list and edit_list.get("approved"):   # approved: done once the video of this very list is there
         made = _read(folder / "render.json").get("signature")
-        cut = "done" if made == render.signature(edit_list) else "queued"
+        if made != render.signature(edit_list):
+            cut = "queued"
+        else:                                       # rendered, unless files of it were deleted since
+            cut = "missing" if render.missing(folder) else "done"
     elif edit_list:
         cut = "review"
     elif c in ("waiting", "failed"):
@@ -132,6 +135,7 @@ def cut_view(folder: Path) -> dict:
         made = _read(folder / "render.json")
         if made:
             view["render"] = {**made, "current": made.get("signature") == render.signature(e),
+                              "missing": render.missing(folder),
                               "clips": _read(folder / "clips.json").get("clips", []),
                               "chapters": _read(folder / "chapters.json").get("chapters", [])}
     return view

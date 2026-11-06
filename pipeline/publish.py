@@ -106,9 +106,10 @@ def current(folder: Path) -> bool:
     finished after publishing makes it open again) and all files are where publish.json says."""
     p = published(folder)
     done = p.get("files", {})
+    names = [name for name, _ in plan(Path(folder), Path(p.get("folder") or "."))]
     return bool(p) and p.get("signature") == _render_signature(Path(folder)) and \
-        all(Path(t).exists() for t in done.values()) and \
-        all(name in done for name, _ in plan(Path(folder), Path(p.get("folder") or ".")))
+        all(Path(t).exists() for t in done.values()) and all(name in done for name in names) and \
+        not any((Path(folder) / name).exists() for name in names)    # rendered again into the folder
 
 
 def run(folder: Path, root: Path, discard: Callable[[Path], None] | None = None) -> dict:

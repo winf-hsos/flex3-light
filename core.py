@@ -659,6 +659,18 @@ class Core:
             return "An dieser Aufnahme wird gerade gearbeitet."
         return ""
 
+    def rerender(self, sid: str) -> str:
+        """Render the approved cut again, e.g. after its videos were deleted; returns an error or ''."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        e = edit.load(folder)
+        if not (e and e.get("approved")):
+            return "Neu rendern geht nur mit einem freigegebenen Schnitt."
+        if not self.pipeline.redo_render(folder):
+            return "An dieser Aufnahme wird gerade gearbeitet."
+        return ""
+
     def make_summary(self, sid: str) -> str:
         """Write the summary of the rendered video (again); returns an error or ''."""
         folder = getattr(self, "_library", {}).get(sid)

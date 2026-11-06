@@ -188,7 +188,7 @@
   .mini-way { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
   .mini-way i { height: 4px; border-radius: 2px; background: #e6ebf0; }
   .mini-way i.done { background: var(--green); } .mini-way i.running, .mini-way i.queued { background: var(--blue); }
-  .mini-way i.waiting, .mini-way i.failed { background: var(--amber); }
+  .mini-way i.waiting, .mini-way i.failed, .mini-way i.missing { background: var(--amber); }
   .detail { overflow: auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; padding: 2px 4px 2px 2px; }
   .detail-head { display: flex; align-items: flex-start; gap: 12px; }
   .detail-head h2 { margin: 0; font-family: var(--display); font-size: 19px; font-weight: 600; }
@@ -201,7 +201,7 @@
   /* the connector runs from the previous circle's center to this one's; the circles sit above it */
   .station::before { content: ""; position: absolute; z-index: 0; top: 13px; left: -50%; right: 50%; height: 2px; background: var(--line); }
   .station:first-child::before { display: none; }
-  .station.done::before, .station.running::before, .station.waiting::before, .station.failed::before,
+  .station.done::before, .station.running::before, .station.waiting::before, .station.failed::before, .station.missing::before,
   .station.queued::before, .station.review::before, .station.open::before { background: var(--green); }
   .station .no { position: relative; z-index: 1; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
     font-size: 12.5px; font-weight: 700; background: var(--surface); border: 2px solid var(--line-strong); color: var(--mist); }
@@ -212,9 +212,9 @@
   .station.running .no, .station.queued .no { border-color: var(--blue); color: var(--deep); }
   .station.running .no { animation: ring 1.8s ease-out infinite; }
   @keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(0, 158, 227, .35); } 100% { box-shadow: 0 0 0 9px rgba(0, 158, 227, 0); } }
-  .station.waiting .no, .station.failed .no { border-color: var(--amber); color: #8a6200; background: var(--amber-soft); }
+  .station.waiting .no, .station.failed .no, .station.missing .no { border-color: var(--amber); color: #8a6200; background: var(--amber-soft); }
   .station.queued small, .station.running small { color: var(--deep); }
-  .station.waiting small, .station.failed small { color: #8a6200; }
+  .station.waiting small, .station.failed small, .station.missing small { color: #8a6200; }
   .station.soon b { color: var(--slate); font-weight: 500; }
   .transcript { padding: 14px 16px; display: grid; gap: 8px; }
   /* ---------------------------------------------------------- the cut: approval */
@@ -806,7 +806,7 @@
   let recordings = [], selectedId = null, shownMedia = "";
   const STATIONS = [["recorded", "Aufgenommen"], ["transcript", "Transkription"], ["cut", "Schnitt"], ["content", "Inhalte"], ["publish", "Veröffentlichen"]];
   const STATE_TEXT = {done: "erledigt", running: "läuft", waiting: "wartet", failed: "gestoppt", queued: "folgt", soon: "kommt bald",
-                      review: "zur Freigabe", open: "offen"};
+                      review: "zur Freigabe", open: "offen", missing: "Dateien fehlen"};
   const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "numeric", month: "long", year: "numeric"}) : "";
   const fmtShort = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"}) : "";
   const fmtLength = s => { s = Math.round(s || 0); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
@@ -1225,13 +1225,17 @@
     const note = el("span", "hint");
     if (e.approved) {
       const made = view.render;
-      note.textContent = made && made.current ? `Freigegeben am ${fmtDate(e.approved)}, gerendert.`
+      note.textContent = st === "missing"
+        ? `Seit dem Rendern fehlen ${made.missing.length === 1 ? "eine Datei" : made.missing.length + " Dateien"}: `
+          + made.missing.join(", ") + ". Neu rendern stellt sie aus derselben Freigabe wieder her, ohne neuen Vorschlag und ohne KI."
+        : made && made.current ? `Freigegeben am ${fmtDate(e.approved)}, gerendert.`
         : st === "failed" ? (d.status || "Das Rendern ist gescheitert.") : `Freigegeben am ${fmtDate(e.approved)}. Das Video wird gleich gerendert.`;
-      if (st === "failed") note.className = "hint error";
+      if (st === "failed" || st === "missing") note.className = "hint error";
       foot.append(note);
       if (st === "failed") foot.appendChild(button("btn primary", "Erneut rendern", () => approve(true)));
+      if (st === "missing") foot.appendChild(button("btn primary", "Neu rendern", rerender));
       foot.appendChild(button("btn", "Freigabe zurücknehmen", () => approve(false)));
-      if (made && made.current) box.appendChild(results(made));   // above the foot, which follows
+      if (st === "done") box.appendChild(results(made));   // above the foot, which follows
     } else {
       note.textContent = open ? `Noch ${open} Vorschläge offen.` : "";
       const go = button("btn primary", "Schnitt freigeben", () => approve(true));
@@ -1545,6 +1549,7 @@
   }
   async function approve(on) { cutResult(await api().approve_cut(selectedId, on)); }
   async function startCut() { cutResult(await api().redo_cut(selectedId)); }
+  async function rerender() { cutResult(await api().rerender(selectedId)); }
   async function redoCut() {
     if (!await ask({title: "Schnitt neu vorschlagen lassen?", confirm: "Neu vorschlagen", danger: true,
                     text: "Der Schnitt-Agent sieht sich die Aufnahme noch einmal an und schlägt alles neu vor. Deine "

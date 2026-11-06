@@ -125,6 +125,21 @@ class PipelineRunner:
         self.enqueue(folder)
         return True
 
+    def redo_render(self, folder: Path) -> bool:
+        """Render the approved edit list again, e.g. after its videos were deleted; no new proposal
+        and no AI involved. False while the recording is being worked on."""
+        folder = Path(folder)
+        with self.lock:
+            if self.active == str(folder):
+                return False
+            data = read_state(folder)
+            data["steps"].pop("render", None)
+            data["render_requested"] = True
+            self._write_state(folder, data)
+            self.failed.discard(str(folder))
+        self.enqueue(folder)
+        return True
+
     def describe(self, folder: Path | str | None) -> str:
         """One line for the window about where a recording stands in the pipeline."""
         if not folder:
@@ -140,6 +155,8 @@ class PipelineRunner:
             e = edit.load(Path(folder))
             if e and e.get("approved"):
                 done = files.read_json(Path(folder) / "render.json").get("signature") == render.signature(e)
+                if done and render.missing(Path(folder)):
+                    return "Dateien des geschnittenen Videos fehlen"
                 return "Geschnittenes Video fertig" if done else "Schnitt freigegeben, das Video wird gleich gerendert"
             return "Schnitt vorgeschlagen, wartet auf deine Freigabe"
         if s.get("state") == "done":
@@ -237,15 +254,19 @@ class PipelineRunner:
                 self._set(folder, "cut", "done", model=(result.get("agent") or {}).get("model", ""))
                 return True
             e = edit.load(folder)
-            if e and e.get("approved") and \
-                    files.read_json(folder / "render.json").get("signature") != render.signature(e):
+            if e and e.get("approved") and (read_state(folder).get("render_requested") or
+                                            files.read_json(folder / "render.json").get("signature") != render.signature(e)):
                 self._set(folder, "render", "running", "Das Video wird gerendert …")
                 self._make_sounds(folder)
                 report = render.run(folder, self.video_args, progress=lambda text: self._set(
                     folder, "render", "running", text), sound_dir=self.sound_dir)
                 self._set(folder, "render", "done", signature=report["signature"])
+                data = read_state(folder)
+                if data.pop("render_requested", None):
+                    self._write_state(folder, data)
                 return True
-            if (folder / "render.json").exists() and                     (not summary.current(folder) or read_state(folder).get("summary_requested")):
+            if (folder / "render.json").exists() and \
+                    (not summary.current(folder) or read_state(folder).get("summary_requested")):
                 key = services.key("openai")
                 if not key:
                     self._set(folder, "summary", "waiting", "Zusammenfassung wartet auf den OpenAI-Schlüssel "
@@ -262,7 +283,8 @@ class PipelineRunner:
                 return True
         except Exception as e:
             now = read_state(folder)["steps"]                  # the step that was running, else the first not done
-            step = next((k for k in STEPS if now.get(k, {}).get("state") == "running"), None) or                 next((k for k in STEPS if now.get(k, {}).get("state") != "done"), STEPS[-1])
+            step = next((k for k in STEPS if now.get(k, {}).get("state") == "running"), None) or \
+                next((k for k in STEPS if now.get(k, {}).get("state") != "done"), STEPS[-1])
             name = {"transcribe": "Transkription", "subtitles": "Untertitel", "cut": "Schnitt-Vorschlag",
                     "render": "Rendern", "summary": "Zusammenfassung"}[step]
             self._set(folder, step, "failed", f"{name} fehlgeschlagen: {e}"[:300])

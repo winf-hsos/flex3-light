@@ -97,6 +97,7 @@ def test_runner_renders_after_the_approval_and_again_after_changes(tmp_path, mon
         calls.append(video_args)
         progress("Langfassung wird gerendert, 50 %")
         report = {"signature": render.signature(edit.load(f)), "files": ["edited.mp4"]}
+        (f / "edited.mp4").write_bytes(b"video")
         (f / "render.json").write_text(json.dumps(report), encoding="utf-8")
         return report
     summaries = []
@@ -129,9 +130,19 @@ def test_runner_renders_after_the_approval_and_again_after_changes(tmp_path, mon
     r._process(folder)
     assert len(summaries) == 1 and not r.queued(folder)                    # nor summarised twice
     assert r.redo_summary(folder) and r._process(folder) and len(summaries) == 2
+    (folder / "edited.mp4").unlink()                                        # deleted by hand
+    assert library.stations(folder)["cut"] == "missing" and library.cut_view(folder)["render"]["missing"] == ["edited.mp4"]
+    assert r.describe(folder) == "Dateien des geschnittenen Videos fehlen"
+    r.enqueue(folder)
+    r._process(folder)
+    assert len(calls) == 1                                                  # never rendered again by itself
+    assert r.redo_render(folder) and r._process(folder) and len(calls) == 2
+    assert library.stations(folder)["cut"] == "done" and library.stations(folder)["content"] == "done"
+    r._process(folder)
+    assert len(calls) == 2 and len(summaries) == 2                          # same list: no new summary either
     e["items"][0]["end"] = 4.0
     edit.save(folder, e)
-    assert library.stations(folder)["cut"] == "queued" and r._process(folder) and len(calls) == 2
+    assert library.stations(folder)["cut"] == "queued" and r._process(folder) and len(calls) == 3
     assert library.stations(folder)["content"] == "queued"                  # a new video needs a new summary
 
 

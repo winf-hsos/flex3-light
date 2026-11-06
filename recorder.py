@@ -158,6 +158,9 @@ class Api:
     def approve_cut(self, sid, approved=True):
         return self._core.approve_cut(sid, bool(approved))
 
+    def rerender(self, sid):
+        return self._core.rerender(sid)
+
     def redo_cut(self, sid):
         return self._core.redo_cut(sid)
 

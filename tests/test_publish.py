@@ -28,7 +28,7 @@ def session(tmp_path: Path, signature="r1", clips=("Einführung", "Sortieren"), 
         (folder / f"clip-{k:02d}.de.vtt").write_text("WEBVTT", encoding="utf-8")
         entries.append({"file": name, "title": title})
     files.write_json(folder / "clips.json", {"clips": entries})
-    files.write_json(folder / "render.json", {"signature": signature, "files": made})
+    files.write_json(folder / "render.json", {"signature": signature, "files": made + [c["file"] for c in entries]})
     if with_summary:
         (folder / "summary.pdf").write_text("pdf", encoding="utf-8")
         files.write_json(folder / "summary.json", {"signature": signature})
@@ -116,3 +116,17 @@ def test_a_missing_file_stops_before_anything_moves(tmp_path):
     with pytest.raises(FileNotFoundError):
         publish.run(folder, tmp_path / "out")
     assert (folder / "edited.mp4").exists()
+
+
+def test_rendering_again_into_the_folder_reopens_publishing(tmp_path):
+    from pipeline import render
+    folder = session(tmp_path)
+    publish.run(folder, tmp_path / "out")
+    target = tmp_path / "out" / "2026-27 - WS" / "Digitalisierung und Programmierung"
+    (target / f"{BASE} - Sortieren.mp4").unlink()                    # deleted by hand
+    assert render.missing(folder) == ["clip-02.mp4"] and not publish.current(folder)
+    (folder / "clip-02.mp4").write_text("clip-02.mp4 r1", encoding="utf-8")   # what "Neu rendern" brings back
+    (folder / "edited.mp4").write_text("edited.mp4 r1", encoding="utf-8")
+    assert render.missing(folder) == [] and not publish.current(folder)
+    publish.run(folder, tmp_path / "out")
+    assert publish.current(folder) and not (folder / "edited.mp4").exists()

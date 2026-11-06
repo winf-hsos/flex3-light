@@ -42,7 +42,7 @@ import wave
 from pathlib import Path
 from typing import Callable
 
-from . import binaries, cards, edit, files, sounds, timeline
+from . import binaries, cards, edit, files, publish, sounds, timeline
 
 NO_WINDOW, BELOW_NORMAL_PRIORITY = 0x08000000, 0x00004000
 X264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
@@ -54,6 +54,13 @@ def signature(e: dict) -> str:
     accepted = sorted((x for x in e["items"] if x["state"] == "accepted"), key=lambda x: (x["start"], x["id"]))
     keep = [{k: x.get(k) for k in ("kind", "start", "end", "params")} for x in accepted]
     return hashlib.sha1(json.dumps([e["duration"], keep, e.get("cards")], sort_keys=True).encode()).hexdigest()[:16]
+
+
+def missing(folder: Path) -> list[str]:
+    """Files the last render wrote that are gone: neither in the session folder nor where
+    publishing moved them, for example because the lecturer deleted them by hand."""
+    made = files.read_json(Path(folder) / "render.json")
+    return [name for name in made.get("files", []) if publish.locate(Path(folder), name) is None]
 
 
 def probe(video: Path) -> dict:
