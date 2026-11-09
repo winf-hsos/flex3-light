@@ -11,8 +11,15 @@
     POST   /profile/sync                       {"modules": [...], "preferences": {...}}: merge the device's entries, return all
     POST   /devices/register                   {"key", "device_name"}: invitation key -> device token (no token needed)
     GET    /me                                 the device and lecturer of the token
+    GET    /library/                           the page "Meine Aufnahmen" (ui.html in its server mode, no token needed)
+    POST   /library/ticket                     a one-time ticket that opens the page as this lecturer
+    POST   /library/session                    {"ticket"}: a page session of a few hours (no token needed)
+    POST   /library/api/{call}                 [arguments]: an action of the page (my_recordings.CALLS)
+    GET    /library/media/{id}/{file}          a video, subtitles, thumbnail or the summary, with range requests
+    GET    /library/package/{id}               the zip file of a published recording
 
-Every other request carries "Authorization: Bearer <token>". The token decides the
+Every other request carries "Authorization: Bearer <token>"; the page "Meine Aufnahmen"
+uses a page session instead (my_recordings.py), which media addresses carry as ?s=. The token decides the
 device_id and the lecturer it belongs to (one token per person and device); devices get
 it by registering with an invitation key (accounts.py, admin.py). On completion the
 parts of each track are joined without re-encoding into a session folder after the
@@ -41,13 +48,14 @@ import shutil
 import threading
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from . import profiles
 from .accounts import Accounts, InvalidKey
 from .assemble import join
-from .worker import ACTIONS, Worker
+from .my_recordings import CALLS, MyRecordings, Sessions
+from .worker import ACTIONS, ROOT, Worker
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +363,80 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
             preferences = profiles.merge_preferences(preferences, prefs)
             store.save(who["user_id"], modules, preferences)
         return answer(who, modules, preferences)
+
+    # ---------------------------------------------------------- the page "Meine Aufnahmen"
+
+    pages = Sessions()
+    media_types = {".mp4": "video/mp4", ".vtt": "text/vtt; charset=utf-8", ".jpg": "image/jpeg",
+                   ".pdf": "application/pdf"}
+
+    def viewer(request: Request) -> dict:
+        """The lecturer of a page session (header or ?s=) or of a device token (header only)."""
+        given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        who = pages.identity(given or request.query_params.get("s", ""))
+        if who is None:
+            if not given:
+                raise HTTPException(401, "not signed in")
+            who = identity(request)
+        if not who.get("user_id"):
+            raise HTTPException(403, "this token belongs to no lecturer")
+        return who
+
+    def mine(who: dict) -> MyRecordings:
+        return MyRecordings(data_dir, who["user_id"], worker, store, lock)
+
+    @app.get("/library", include_in_schema=False)
+    def library_root():
+        return RedirectResponse("library/")
+
+    @app.get("/library/", response_class=HTMLResponse)
+    def library_page():
+        """ui.html with the flag that switches it to its server mode; read anew, it is small."""
+        page = (ROOT / "ui.html").read_text(encoding="utf-8")
+        return HTMLResponse(page.replace("<head>", "<head><script>window.FLEX3_SERVER = {};</script>", 1),
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/library/ticket")
+    def library_ticket(who: dict = Depends(viewer)):
+        t = pages.ticket(who)
+        return {"ticket": t, "path": f"/library/#ticket={t}"}
+
+    @app.post("/library/session")
+    def library_session(body: dict):
+        opened = pages.open(str(body.get("ticket") or ""))
+        if opened is None:
+            raise HTTPException(401, "this ticket is unknown, used or expired")
+        token, who = opened
+        return {"session": token, "user_name": who.get("user_name", "")}
+
+    @app.post("/library/api/{call}")
+    def library_call(call: str, args: list = Body(default=[]), who: dict = Depends(viewer)):
+        if call not in CALLS:
+            raise HTTPException(404, "unknown call")
+        try:
+            return getattr(mine(who), call)(*args)
+        except (TypeError, ValueError) as e:
+            raise HTTPException(422, str(e)) from None
+
+    @app.get("/library/media/{sid}/{name}")
+    def library_media(sid: str, name: str, who: dict = Depends(viewer)):
+        r = mine(who)
+        if name == "summary.pdf":
+            path = r._library[sid] / name if sid in r._library else None
+        else:
+            path = r._media(sid, name)
+        if path is None or not path.is_file():
+            raise HTTPException(404, "no such file")
+        return FileResponse(path, media_type=media_types.get(path.suffix, "application/octet-stream"),
+                            headers={"Cache-Control": "no-store"})
+
+    @app.get("/library/package/{sid}")
+    def library_package(sid: str, who: dict = Depends(viewer)):
+        r = mine(who)
+        path = r.package(sid)
+        if path is None:
+            raise HTTPException(404, "no package of what is published now")
+        return FileResponse(path, media_type="application/zip", filename=r.package_name(sid))
 
     return app
 

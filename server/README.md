@@ -26,6 +26,12 @@ Every request except registration carries `Authorization: Bearer <token>`. The t
 | `POST /profile/sync` | `{"modules": [...], "preferences": {...}}`: merges the device's entries and returns all of them |
 | `POST /devices/register` | `{"key", "device_name"}`, no token: exchanges an invitation key for the device token |
 | `GET /me` | the device and lecturer of the token |
+| `GET /library/` | the page "Meine Aufnahmen": the app's `ui.html` in its server mode, no token needed |
+| `POST /library/ticket` | a one-time ticket (two minutes) that opens the page as the lecturer of the token |
+| `POST /library/session` | `{"ticket"}`: a page session of twelve hours, no token needed |
+| `POST /library/api/{call}` | `[arguments]`: an action of the page, by the names the app uses (`my_recordings.CALLS`), for the page session's lecturer and their recordings only |
+| `GET /library/media/{id}/{file}` | a video, its subtitles, the thumbnail or the summary of one's own recording, with range requests; the page session as `?s=` |
+| `GET /library/package/{id}` | the zip file of a published recording, with the names Opencast uploads get |
 
 ### Lecturers, keys and devices
 
@@ -52,6 +58,14 @@ The keys for the AI services are the project's, in a JSON file named by `FLEX3_L
 The activity log arrives without window titles (decision of 2026-11-06): the app matches each title against the lecturer's title list (`cut.cut_titles`, by default Posteingang, Inbox, Gmail, WhatsApp Web, Outlook) and sends only the word it found, so the rule "propose to cut such windows" and the agent work as before, and the titles stay on the lecturer's computer. The server refuses entries that look like titles.
 
 Recordings filed before the server existed are taken over with `python -m flex3_light_server.admin import <folder> --user <id>`: the files of the recording and the activity log without titles, not the results of a local pipeline.
+
+### Meine Aufnahmen
+
+Since phase 4 (2026-11-09) the review runs on the server: the server serves the app's own `ui.html` at `/library/`, which recognises that it runs there (`window.FLEX3_SERVER`) and shows only "Meine Aufnahmen", with every action sent to `/library/api/<call>` instead of the app. One file, so the page in the app and the page on the server never drift apart. The actions themselves are shared too: `recordings.py` at the repository root holds them for the app's archive and, in `my_recordings.py`, for the server's session folders of whoever is signed in, with the server's pipeline and the settings of their profile; a program rule or a term added on the page lands in the profile and reaches the app with its next sync.
+
+Nobody types a password: the app asks for a one-time ticket with its device token and opens the page with it, in a frame of its window or in the default browser ("Im Browser öffnen"). The page trades the ticket for a page session of twelve hours, kept in memory (a restarted server only means a new ticket); a `<video>` sends no header, so media addresses carry the page session, never the device token. Deleting moves the session folder into `trash/` below the data folder, which an administrator empties.
+
+Publishing moves nothing on the server. It packs the long version, the clips, their subtitles and the summary into a zip file (`packages/`) with the names Opencast uploads get; in the app's frame FLEX3 Light fetches it and unpacks it into its folder for uploads under `<term>\<module>`, as publishing on the computer did, while a browser downloads the zip file. Until FLEX3 talks to Opencast, the upload stays by hand.
 
 Joining copies the streams without re-encoding (ffmpeg concat demuxer, `-c copy`) and checks that every track is as long as its parts. The session folder appears under `sessions/` only when it is complete; until then everything stays under `incoming/`. If joining fails, the session goes back to `open` with an `error`, and the client can complete it again.
 
@@ -83,4 +97,4 @@ pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 
-`tests/test_server.py` covers the API, `tests/test_accounts.py` keys, registration and revoked devices, `tests/test_server_pipeline.py` the activity without titles, the pipeline on the server for its lecturer and the import, `tests/test_delivery.py` the whole way from synthetic OBS segments through the app's background processing to a running server, and `tests/test_profile.py` the profile: seeding, offline changes, two devices of one lecturer, preferences key by key, the move of old settings into the profile, and the same merge rule in app and server.
+`tests/test_server.py` covers the API, `tests/test_accounts.py` keys, registration and revoked devices, `tests/test_server_pipeline.py` the activity without titles, the pipeline on the server for its lecturer and the import, `tests/test_server_library.py` the page: ticket and session, one's own recordings only, ranges, approval, the package and how the app unpacks it, `tests/test_delivery.py` the whole way from synthetic OBS segments through the app's background processing to a running server, and `tests/test_profile.py` the profile: seeding, offline changes, two devices of one lecturer, preferences key by key, the move of old settings into the profile, and the same merge rule in app and server.

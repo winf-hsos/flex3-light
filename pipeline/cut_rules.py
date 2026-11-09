@@ -48,6 +48,32 @@ def settings_from(preferences: dict) -> dict:
     return {**CARD_DEFAULTS, **policy(cut), "auto": after_recording(preferences) == "cut"}
 
 
+CUT_FIELDS = ("pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off",
+              "title_card", "closing_card", "chapter_display", "chapter_sound", "music")
+
+
+def cut_preferences(current: dict, values: dict) -> dict:
+    """The preferences "cut.<field>" after a change of the cut settings: current are the lecturer's
+    cut preferences without the prefix, values what changes. Every field is checked and completed,
+    so the result is whole; the same in the app and on the server."""
+    current = {k: v for k, v in current.items() if k in CUT_FIELDS}
+    current.update({k: v for k, v in values.items() if k in CUT_FIELDS})
+    if current.get("pause_mode") not in ("card", "shorten", "cut"):
+        current["pause_mode"] = "card"
+    current["pause_min"] = min(600.0, max(10.0, float(current.get("pause_min", 30))))
+    for k in ("cut_programs", "keep_programs", "cut_titles"):
+        # a list never set keeps its default: until 2026-11-09 it became empty here, which switched
+        # the title rule (Posteingang, Inbox, ...) off for everyone who changed any cut setting
+        given = current.get(k, DEFAULT_POLICY[k])
+        current[k] = sorted({str(x).strip().lower() for x in given if str(x).strip()})
+    current["kinds_off"] = sorted({k for k in current.get("kinds_off", []) if k in edit.KINDS})
+    if current.get("chapter_display") not in edit.CHAPTER_DISPLAYS:
+        current["chapter_display"] = "card"
+    for k in ("title_card", "closing_card", "chapter_sound", "music"):
+        current[k] = bool(current.get(k, True))
+    return {f"cut.{k}": v for k, v in current.items()}
+
+
 def after_recording(preferences: dict) -> str:
     value = preferences.get("after_recording")
     return value if value in AFTER_RECORDING else "nothing"

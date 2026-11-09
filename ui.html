@@ -174,8 +174,8 @@
   .track div { height: 100%; width: 0; background: var(--blue); transition: width .3s; }
 
   /* ------------------------------------------------------------- my recordings */
-  #page-library.active { display: block; overflow: hidden; padding-bottom: 20px; }
-  .library { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 20px; height: 100%; min-height: 0; }
+  #page-library.active { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 20px; }
+  .library { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 20px; flex: 1; min-height: 0; }
   .rec-list { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
   .rec-items { overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; padding: 2px; flex: 1; }
   .rec-item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; text-align: left; padding: 11px 12px; border-radius: 12px; background: var(--surface);
@@ -427,6 +427,24 @@
   .pill-btn.save { background: var(--blue); color: #fff; font-weight: 600; }
   .pill-btn.save:hover { background: var(--deep); }
   .pill-btn.discard:hover, .pill-btn.discard.confirm { background: var(--red); color: #fff; }
+
+  /* ------------------------------------------------------------- my recordings on the server (phase 4) */
+  .lib-source { display: none; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .lib-source.on { display: flex; }
+  .lib-source .switch { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--hover); }
+  .lib-source .switch button { border: 0; background: none; padding: 6px 12px; border-radius: 8px; font: inherit;
+    font-size: 13px; color: var(--slate); cursor: pointer; }
+  .lib-source .switch button.active { background: var(--surface); color: var(--ink); font-weight: 600;
+    box-shadow: 0 1px 2px rgba(27, 39, 51, .12); }
+  .lib-source .link { margin-left: auto; }
+  .server-frame { display: none; flex: 1; min-height: 0; width: 100%; border: 0; background: var(--paper); }
+  /* the same file as a page of the server: only "Meine Aufnahmen", no window frame */
+  body.server-page { border: 0; }
+  body.server-page .app { grid-template-columns: minmax(0, 1fr); }
+  body.server-page .sidebar, body.server-page .win-btn, body.server-page .grip, body.server-page .bar,
+  body.server-page .app-only { display: none !important; }
+  body.embedded .topbar { display: none; }
+  body.embedded #page-library { padding: 0 2px 8px; }
 </style>
 </head>
 <body>
@@ -517,6 +535,12 @@
 
     <!-- my recordings: list on the left, the chosen one on the right -->
     <section class="page" id="page-library">
+      <div class="lib-source" id="libSource">
+        <div class="switch"><button id="srcServer" onclick="showSource('server')">Auf dem Server</button><button id="srcDevice" onclick="showSource('device')">Auf diesem Rechner</button></div>
+        <span class="hint" id="libSourceNote"></span>
+        <button class="link" id="openInBrowser" onclick="openServerLibrary()">Im Browser öffnen</button>
+      </div>
+      <iframe class="server-frame" id="serverFrame" title="Meine Aufnahmen auf dem Server"></iframe>
       <div class="library" id="library">
         <div class="rec-list">
           <div class="field"><input id="search" placeholder="Aufnahmen durchsuchen" oninput="renderRecordings()"></div>
@@ -528,6 +552,10 @@
         <h2>Hier erscheinen deine Aufnahmen</h2>
         <p>Nach jeder Aufnahme siehst du hier das Video, die Transkription und wie weit die Aufnahme auf dem Weg zur Veröffentlichung ist.</p>
         <button class="btn primary" onclick="showPage('record')">Erste Aufnahme vorbereiten</button>
+      </div>
+      <div class="empty" id="signedOut" style="display:none">
+        <h2>Die Anmeldung ist abgelaufen</h2>
+        <p>Öffne „Meine Aufnahmen“ in FLEX3 Light, dann meldet dich die App wieder an. Im Browser öffnest du die Seite von dort mit „Im Browser öffnen“.</p>
       </div>
     </section>
 
@@ -652,7 +680,19 @@
 </div>
 
 <script>
-  const api = () => window.pywebview.api;
+  // The same page runs on the FLEX3 server (window.FLEX3_SERVER, set by the server, phase 4 of the
+  // separation of app and server): there it shows only "Meine Aufnahmen", and api().<call>(...)
+  // becomes a request to the server, signed in with a page session the app's ticket opened.
+  const SERVER = window.FLEX3_SERVER || null;
+  let pageSession = "";
+  const serverApi = new Proxy({}, {get: (_, call) => async (...args) => {
+    const r = await fetch("api/" + call, {method: "POST", body: JSON.stringify(args),
+                          headers: {"Content-Type": "application/json", "Authorization": "Bearer " + pageSession}});
+    if (r.status === 401) { signedOut(); throw new Error("signed out"); }
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    return r.json();
+  }});
+  const api = () => SERVER ? serverApi : window.pywebview.api;
   const $ = id => document.getElementById(id);
   let view = "full", page = "record", pauseIcon = "pause", confirmUntil = 0;
   let profile = [], editingId = null, profileStamp = "";
@@ -700,12 +740,14 @@
 
   // ---------------------------------------------------------------- pages
   function showPage(name) {
+    if (SERVER && name !== "library") return;               // the server's page has nothing else
     page = name;
     for (const b of document.querySelectorAll(".nav")) b.classList.toggle("active", b.dataset.page === name);
     for (const s of document.querySelectorAll(".page")) s.classList.toggle("active", s.id === "page-" + name);
     $("pageTitle").textContent = PAGES[name][0];
     $("pageText").textContent = PAGES[name][1];
     if (name === "library") loadRecordings();
+    if (name === "library" && !SERVER && librarySource === "server" && !frameSignedIn) signInFrame();
     if (name === "modules") renderModules();
     if (name !== "library" && $("player")) $("player").pause();
     updatePreview();
@@ -762,6 +804,7 @@
     $("after_recording").value = d.after_recording || "nothing";
     fillServer(d.server);
     fillPlace(d.pipeline_place);
+    fillLibrarySource(d);
     for (const k of ["archive_dir", "raw_dir", "publish_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
     previewUrl = d.preview_url || "";
     mediaBase = d.media_base || "";
@@ -839,8 +882,9 @@
   async function loadRecordings() {
     recordings = await api().recordings();
     showBadge();
-    $("library").style.display = recordings.length ? "" : "none";
-    $("libraryEmpty").style.display = recordings.length ? "none" : "";
+    const local = librarySource !== "server";               // the app shows the server's page instead
+    $("library").style.display = local && recordings.length ? "" : "none";
+    $("libraryEmpty").style.display = local && !recordings.length ? "" : "none";
     renderRecordings();
     if (recordings.length && !recordings.some(r => r.id === selectedId)) selectRecording(recordings[0].id);
     else if (selectedId) refreshDetail();
@@ -862,6 +906,12 @@
       b.append(title, meta, way);
       box.appendChild(b);
     }
+  }
+  // a video or subtitle file of a recording: from the app's media server, or from the FLEX3 server,
+  // whose addresses carry the page session because a <video> sends no header
+  function mediaUrl(id, file, version) {
+    const q = [SERVER ? "s=" + encodeURIComponent(pageSession) : "", version ? "v=" + encodeURIComponent(version) : ""];
+    return mediaBase + encodeURIComponent(id) + "/" + file + (q.some(Boolean) ? "?" + q.filter(Boolean).join("&") : "");
   }
   async function selectRecording(id) {
     selectedId = id; shownMedia = ""; allSpots = false; stopAt = null; markIn = markOut = null; selectedItem = null;
@@ -885,7 +935,7 @@
       shownMedia = key;
       box.innerHTML = `
         <div class="detail-head"><div style="flex:1"><h2 id="dTitle"></h2><p id="dMeta"></p></div>
-          <button class="btn" onclick="api().open_recording(selectedId)"><svg class="i"><use href="#i-folder"/></svg>Ordner öffnen</button>
+          <button class="btn app-only" onclick="api().open_recording(selectedId)"><svg class="i"><use href="#i-folder"/></svg>Ordner öffnen</button>
           <button class="btn danger" onclick="deleteRecording()"><svg class="i"><use href="#i-trash"/></svg>Löschen</button></div>
         <div class="player-wrap" id="playerWrap"><video class="player" id="player" controls preload="metadata" crossorigin="anonymous"></video>
           <div class="card-overlay" id="cardOverlay"></div><div id="regions"></div></div>
@@ -909,7 +959,7 @@
     if ($("player").dataset.media !== media) {              // the original, the long version or a clip
       const v = $("player");
       v.dataset.media = media; v.dataset.track = "";
-      v.src = mediaBase + encodeURIComponent(d.id) + "/" + media;
+      v.src = mediaUrl(d.id, media);
     }
     // new or corrected subtitles: swap the track; the address changes, so the player loads it again
     const trackSig = subs ? subs + "|" + d.model + "|" + textSig + "|" + ((d.cut || {}).render || {}).rendered : "";
@@ -920,7 +970,7 @@
       if (subs) {
         const t = document.createElement("track");
         Object.assign(t, {kind: "subtitles", srclang: d.language, label: d.language === "en" ? "English" : "Deutsch", default: true,
-                          src: mediaBase + encodeURIComponent(d.id) + "/" + subs + "?v=" + encodeURIComponent(trackSig)});
+                          src: mediaUrl(d.id, subs, trackSig)});
         v.appendChild(t);
       }
     }
@@ -949,12 +999,13 @@
       } else if (!d.segments.length) {
         const h = document.createElement("div"); h.className = "hint";
         h.textContent = d.stations.transcript === "waiting"
-          ? "Die Transkription entsteht, sobald ein Schlüssel für AssemblyAI oder OpenAI hinterlegt ist. "
+          ? (SERVER ? "Die Transkription entsteht, sobald auf dem Server ein Schlüssel für AssemblyAI oder OpenAI hinterlegt ist."
+                    : "Die Transkription entsteht, sobald ein Schlüssel für AssemblyAI oder OpenAI hinterlegt ist. ")
           : d.stations.transcript === "failed" ? (d.status || "Die Transkription ist gestoppt.")
           : d.stations.transcript === "open" ? "Diese Aufnahme ist noch nicht transkribiert. Ob die Transkription "
             + "nach einer Aufnahme von selbst startet, legst du in den Einstellungen fest."
           : (d.status || "Die Transkription folgt.");
-        if (d.stations.transcript === "waiting") {
+        if (d.stations.transcript === "waiting" && !SERVER) {
           const a = document.createElement("button"); a.className = "link"; a.textContent = "Schlüssel hinterlegen";
           a.onclick = () => showPage("settings");
           h.appendChild(a);
@@ -998,12 +1049,28 @@
     box.appendChild(note);
     const list = names => { const ul = el("ul", "publish-files"); for (const n of names) ul.appendChild(el("li", "", n)); return ul; };
     if (st === "soon") {
-      note.textContent = "Wenn das geschnittene Video fertig ist, wandern hier Videos, Untertitel und Zusammenfassung "
-                         + "in den Ordner, aus dem du sie hochlädst, benannt nach Datum, Modul und Titel.";
+      note.textContent = SERVER
+        ? "Wenn das geschnittene Video fertig ist, lädst du hier Videos, Untertitel und Zusammenfassung herunter, "
+          + "benannt nach Datum, Modul und Titel, so wie du sie in Opencast hochlädst."
+        : "Wenn das geschnittene Video fertig ist, wandern hier Videos, Untertitel und Zusammenfassung "
+          + "in den Ordner, aus dem du sie hochlädst, benannt nach Datum, Modul und Titel.";
       return;
     }
     const foot = el("div", "cut-foot");
-    if (st === "done") {
+    const embedded = window.top !== window;
+    if (SERVER && st === "done") {
+      note.textContent = `Am ${fmtDate(p.published)} heruntergeladen` + (embedded ? ", in deinen Ordner zum Hochladen." : " als Paket.");
+      box.appendChild(list(Object.values(p.files || {}).sort()));
+      foot.append(button("btn primary", "Erneut herunterladen", () => publishOnServer(false)));
+    } else if (SERVER) {
+      note.textContent = (p.signature ? "Das Video wurde seit dem letzten Herunterladen neu gerendert. " : "")
+        + (!plan ? "…" : embedded ? `Diese Dateien legt FLEX3 Light in deinen Ordner zum Hochladen, unter ${plan.term}\\${plan.module}:`
+                                  : `Diese Dateien kommen in die Datei ${plan.name}:`);
+      if (plan) box.appendChild(list(plan.files));
+      if (d.content && !d.content.current)
+        box.appendChild(el("p", "hint", "Die Zusammenfassung ist noch nicht fertig. Sie kommt dazu, wenn du danach erneut herunterlädst."));
+      foot.append(button("btn primary", "Herunterladen", () => publishOnServer(true)));
+    } else if (st === "done") {
       const names = Object.values(p.files || {}).map(f => f.split(/[\\/]/).pop()).sort();
       note.textContent = `Am ${fmtDate(p.published)} verschoben nach ${p.folder}.`;
       box.appendChild(list(names));
@@ -1019,6 +1086,46 @@
     }
     box.appendChild(foot);
   }
+  // on the server nothing moves: it packs the files, and the app takes them into its folder for
+  // uploads (asked through the frame's parent), while a browser downloads the zip file
+  async function publishOnServer(pack) {
+    const id = selectedId, hint = $("publishHint");
+    hint.className = "cut-status"; hint.textContent = pack ? "Das Paket entsteht …" : "Wird heruntergeladen …";
+    let error = "";
+    try {
+      error = pack ? await api().publish(id) : "";
+      if (!error) error = await fetchPackage(id);
+    } catch (e) { error = e.message; }
+    $("publish").dataset.sig = ""; publishPlan.sig = "";
+    await refreshDetail();
+    if (error) { $("publishHint").textContent = error; $("publishHint").className = "hint error"; }
+  }
+  function fetchPackage(id) {
+    if (window.top === window) {
+      const a = document.createElement("a");
+      a.href = "package/" + encodeURIComponent(id) + "?s=" + encodeURIComponent(pageSession);
+      a.download = ""; document.body.appendChild(a); a.click(); a.remove();
+      return Promise.resolve("");
+    }
+    return askApp({flex3: "package", id});
+  }
+  function openOnServer(url) {
+    url = new URL(url, location.href).href;
+    if (window.top === window) { window.open(url, "_blank"); return Promise.resolve(""); }
+    return askApp({flex3: "open", url});
+  }
+  // a request to the app around the frame; it answers {request, error}
+  let appRequests = 0;
+  const appWaiting = {};
+  function askApp(message) {
+    const n = ++appRequests;
+    window.parent.postMessage({...message, request: n}, "*");
+    return new Promise(resolve => { appWaiting[n] = resolve; });
+  }
+  if (SERVER) window.addEventListener("message", e => {
+    const answer = e.source === window.parent && e.data && appWaiting[e.data.request];
+    if (answer) { delete appWaiting[e.data.request]; answer(e.data.error || ""); }
+  });
   async function doPublish() {
     if (!await ask({title: "Dateien verschieben?", confirm: "Veröffentlichen",
                     text: "Videos, Untertitel und Zusammenfassung wandern aus dem Ordner der Aufnahme in den Ordner zum Hochladen. "
@@ -1068,7 +1175,8 @@
     await refreshDetail();
   }
   const makeSummary = async () => contentResult(await api().make_summary(selectedId));
-  const openSummary = async () => contentResult(await api().open_summary(selectedId));
+  const openSummary = async () => contentResult(SERVER ? await openOnServer(mediaUrl(selectedId, "summary.pdf"))
+                                                       : await api().open_summary(selectedId));
 
   // ---------------------------------------------------------------- unsure spots of a transcript
   let stopAt = null, allSpots = false;
@@ -1147,12 +1255,13 @@
   async function deleteRecording() {
     const r = recordings.find(x => x.id === selectedId);
     if (!r) return;
-    const server = lastConnection && lastConnection !== "local"
+    const server = !SERVER && lastConnection && lastConnection !== "local"
       ? " Auf dem FLEX3-Server bleibt sie, falls sie dorthin übertragen wurde." : "";
+    const bin = SERVER ? "Der Ordner kommt in den Papierkorb des Servers; zurückholen kann ihn nur, wer den Server betreut."
+      : "Der Ordner kommt in den Papierkorb und lässt sich von dort zurückholen, bis du ihn leerst.";
     if (!await ask({title: "Aufnahme löschen?", confirm: "Löschen", danger: true,
                     text: `„${r.title}“ vom ${fmtDate(r.recorded_at)} wird mit allen Dateien gelöscht: Videos, `
-                          + "Transkription, Untertitel und Protokolle. Der Ordner kommt in den Papierkorb und lässt sich "
-                          + "von dort zurückholen, bis du ihn leerst." + server})) return;
+                          + "Transkription, Untertitel und Protokolle. " + bin + server})) return;
     const error = await api().delete_recording(selectedId);
     if (error) { $("dStatus").textContent = error; $("dStatus").className = "hint error"; return; }
     selectedId = null;
@@ -1808,7 +1917,7 @@
   // ---------------------------------------------------------------- recording bar and status
   let lastConnection = "";
   function showConnection(st) {
-    if (lastConnection && lastConnection !== st.connection) api().data().then(d => fillServer(d.server));
+    if (lastConnection && lastConnection !== st.connection) api().data().then(d => { fillServer(d.server); fillLibrarySource(d); });
     lastConnection = st.connection;
     const c = $("conn"), [text, title] = CONNECTION[st.connection] || ["", ""];
     c.className = "conn " + st.connection;
@@ -1925,7 +2034,89 @@
     } catch (e) { }
     setTimeout(tick, 250);
   }
-  window.addEventListener("pywebviewready", async () => { await load(); showPage("record"); tick(); loadRecordings(); });
+  // ---------------------------------------------------------------- my recordings on the server (phase 4)
+  // With a server connected, "Meine Aufnahmen" shows the server's page in a frame (this file in its
+  // server mode), signed in with a one-time ticket the app gets with its device token. The recordings
+  // on this computer stay one click away until they are taken over (phase 5).
+  let librarySource = "", serverOrigin = "", frameSignedIn = false, lastSignIn = 0;
+  function fillLibrarySource(d) {
+    const on = !!(d.server && d.server.url);
+    $("libSource").classList.toggle("on", on);
+    const origin = on ? new URL(d.server.url).origin : "";
+    if (origin !== serverOrigin) { serverOrigin = origin; frameSignedIn = false; }
+    if (!on) librarySource = "device";
+    else if (!librarySource || librarySource === "device" && !$("libSource").dataset.chosen)
+      librarySource = d.pipeline_place === "server" ? "server" : "device";
+    showSource(librarySource, true);
+  }
+  function showSource(which, auto) {
+    if (!auto) $("libSource").dataset.chosen = "1";
+    librarySource = which === "server" && serverOrigin ? "server" : "device";
+    const server = librarySource === "server";
+    $("srcServer").classList.toggle("active", server);
+    $("srcDevice").classList.toggle("active", !server);
+    $("serverFrame").style.display = server ? "block" : "none";
+    $("openInBrowser").style.display = server ? "" : "none";
+    $("library").style.display = !server && recordings.length ? "" : "none";
+    $("libraryEmpty").style.display = !server && !recordings.length ? "" : "none";
+    if (!server && $("player")) $("player").pause();
+    if (server && !frameSignedIn && page === "library") signInFrame();
+  }
+  async function signInFrame() {
+    if (Date.now() - lastSignIn < 20000) return;               // never a loop of tickets
+    lastSignIn = Date.now();
+    const r = await api().server_library(false);
+    $("libSourceNote").textContent = r.error || "";
+    $("libSourceNote").className = "hint" + (r.error ? " error" : "");
+    if (r.error) return;
+    frameSignedIn = true;
+    $("serverFrame").src = r.url;
+  }
+  async function openServerLibrary() {
+    const r = await api().server_library(true);
+    if (r.error) { $("libSourceNote").textContent = r.error; $("libSourceNote").className = "hint error"; }
+  }
+  if (!SERVER) window.addEventListener("message", async e => {
+    const m = e.data, frame = $("serverFrame").contentWindow;
+    if (!serverOrigin || e.origin !== serverOrigin || e.source !== frame || !m || !m.flex3) return;
+    if (m.flex3 === "signin") { frameSignedIn = false; if (librarySource === "server" && page === "library") signInFrame(); return; }
+    let error = "Das kann FLEX3 Light nicht.";
+    if (m.flex3 === "package") error = await api().fetch_package(String(m.id));
+    if (m.flex3 === "open") error = await api().open_server_url(String(m.url));
+    frame.postMessage({request: m.request, error}, serverOrigin);
+  });
+
+  // ---------------------------------------------------------------- the page on the server
+  async function startServerPage() {
+    document.body.classList.add("server-page");
+    if (window.top !== window) document.body.classList.add("embedded");
+    const ticket = new URLSearchParams(location.hash.slice(1)).get("ticket");
+    if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // the ticket leaves the address
+    if (ticket) {
+      const r = await fetch("session", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ticket})});
+      if (r.ok) {
+        pageSession = (await r.json()).session;
+        try { sessionStorage.setItem("flex3-page", pageSession); } catch (e) { }
+      }
+    }
+    if (!pageSession) try { pageSession = sessionStorage.getItem("flex3-page") || ""; } catch (e) { }
+    if (!pageSession) return signedOut();
+    mediaBase = "media/";
+    PAGES.library[1] = "Deine Aufnahmen auf dem FLEX3-Server, und wie weit sie auf dem Weg zur Veröffentlichung sind.";
+    try { cutSettings = (await api().data()).cut || {}; } catch (e) { return; }
+    showPage("library");
+    setInterval(() => { if (!document.hidden && pageSession) loadRecordings().catch(() => {}); }, 5000);
+  }
+  function signedOut() {
+    pageSession = "";
+    try { sessionStorage.removeItem("flex3-page"); } catch (e) { }
+    for (const id of ["library", "libraryEmpty"]) $(id).style.display = "none";
+    $("signedOut").style.display = "";
+    if (window.top !== window) window.parent.postMessage({flex3: "signin"}, "*");
+  }
+
+  if (SERVER) window.addEventListener("DOMContentLoaded", startServerPage);
+  else window.addEventListener("pywebviewready", async () => { await load(); showPage("record"); tick(); loadRecordings(); });
 </script>
 </body>
 </html>

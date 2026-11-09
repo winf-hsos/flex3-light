@@ -97,6 +97,8 @@ def locate(folder: Path, name: str) -> Path | None:
     here = Path(folder) / name
     if here.exists():
         return here
+    if published(folder).get("package"):               # a package leaves the files where they are
+        return None
     gone = published(folder).get("files", {}).get(name)
     return Path(gone) if gone and Path(gone).exists() else None
 
@@ -107,6 +109,8 @@ def current(folder: Path) -> bool:
     p = published(folder)
     done = p.get("files", {})
     names = [name for name, _ in plan(Path(folder), Path(p.get("folder") or "."))]
+    if p.get("package"):                               # downloaded from the server: the same files, nothing moved
+        return p.get("signature") == _render_signature(Path(folder)) and all(name in done for name in names)
     return bool(p) and p.get("signature") == _render_signature(Path(folder)) and \
         all(Path(t).exists() for t in done.values()) and all(name in done for name in names) and \
         not any((Path(folder) / name).exists() for name in names)    # rendered again into the folder
@@ -164,3 +168,43 @@ def run(folder: Path, root: Path, discard: Callable[[Path], None] | None = None)
             discard(Path(old))
     before = {}
     return record()
+
+
+# ---------------------------------------------------------------- the server: a package to download
+# On the server the files stay in the session folder; the lecturer downloads them as one zip
+# file with the names above and uploads them to Opencast by hand, until FLEX3 talks to
+# Opencast itself (plan of 2026-11-06, phase 4). publish.json then says "package": true and
+# lists the names in the package instead of where files went.
+
+def package_names(folder: Path) -> list[tuple[str, str]]:
+    """(file in the session folder, its name in the package) for everything plan() would move."""
+    return [(name, target.name) for name, target in plan(Path(folder), Path("."))]
+
+
+def flat_name(name: str) -> bool:
+    """True for a plain file name as a package holds it: no folder, no drive, nothing Windows forbids."""
+    return (bool(name) and name == Path(name).name and "\\" not in name and ":" not in name
+            and not _FORBIDDEN.search(name) and name.strip(". ") != "")
+
+
+def make_package(folder: Path, target: Path) -> dict:
+    """Write the zip file of a recording's finished files to target and record it in publish.json."""
+    import zipfile
+    folder, target = Path(folder), Path(target)
+    names = package_names(folder)
+    if not any(name == "edited.mp4" for name, _ in names):
+        raise ValueError("Es gibt noch kein geschnittenes Video zum Veröffentlichen.")
+    for name, _ in names:
+        if not (folder / name).exists():
+            raise FileNotFoundError(f"{name} fehlt im Ordner der Aufnahme.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:   # videos do not shrink
+        for name, packed in names:
+            z.write(folder / name, packed)
+    tmp.replace(target)
+    report = {"published": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+              "signature": _render_signature(folder), "package": True, "folder": "",
+              "files": {name: packed for name, packed in names}}
+    files.write_json(folder / "publish.json", report)
+    return report

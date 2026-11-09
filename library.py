@@ -1,13 +1,15 @@
 """The recordings in the archive, for the page "Meine Aufnahmen".
 
 A recording is a session folder <archive>\\<term>\\<module>\\<date> - <topic>\\ with a
-session.json; older recordings filed as two loose videos are not listed. For each
-recording the page shows its way through the pipeline as five stations, in order:
-recorded, transcript, cut, content, publish. The last two are not built yet; the cut
-station shows the edit list of the cut agent until the lecturer approved it.
+session.json; older recordings filed as two loose videos are not listed. On the server a
+session folder is named by its session id, so topic and term come from session.json. For
+each recording the page shows its way through the pipeline as five stations, in order:
+recorded, transcript, cut, content, publish. The cut station shows the edit list of the
+cut agent until the lecturer approved it.
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 from pathlib import Path
 
@@ -17,6 +19,18 @@ from pipeline import summary as summary_step     # library.summary() is the list
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
 MEDIA = re.compile(r"^(recording|screen|camera|edited|clip-\d{2})\.mp4$|^(subtitles|edited|clip-\d{2})\.[a-z]{2}\.vtt$"
                    r"|^thumbnail\.jpg$")
+
+
+TERM = re.compile(r"^\d{4}(-\d{2})? - (SS|WS)$")
+
+
+def semester(d: dt.date) -> str:
+    """Semester folder name: winter term 1 September to end of February, summer term from 1 March."""
+    if d.month >= 9:
+        return f"{d.year}-{(d.year + 1) % 100:02d} - WS"
+    if d.month <= 2:
+        return f"{d.year - 1}-{d.year % 100:02d} - WS"
+    return f"{d.year} - SS"
 
 
 def _read(path: Path) -> dict:
@@ -86,9 +100,15 @@ def scan(archive: Path) -> dict[str, Path]:
 
 def summary(folder: Path, queued: bool | None = None) -> dict:
     meta = _read(folder / "session.json")
-    topic = folder.name.split(" - ", 1)[1] if " - " in folder.name else folder.name
+    topic = folder.name.split(" - ", 1)[1] if " - " in folder.name else meta.get("topic") or folder.name
+    term = folder.parent.parent.name
+    if not TERM.match(term):                       # a server folder: the term of the recording's date
+        try:
+            term = semester(dt.date.fromisoformat((meta.get("recorded_at") or "")[:10]))
+        except ValueError:
+            term = ""
     return {"id": meta.get("session_id", ""), "title": topic, "module": meta.get("course_name", folder.parent.name),
-            "term": folder.parent.parent.name, "recorded_at": meta.get("recorded_at", ""),
+            "term": term, "recorded_at": meta.get("recorded_at", ""),
             "duration": meta.get("duration_sec", 0), "language": meta.get("language", "de"),
             "camera": any(t.get("kind") == "camera" for t in meta.get("tracks", [])),
             "stations": stations(folder, queued)}

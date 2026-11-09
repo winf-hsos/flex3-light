@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 LANGUAGE = re.compile(r"^[a-z]{2}$")
@@ -109,6 +110,19 @@ def merge_preferences(ours: dict[str, dict], theirs: dict[str, dict]) -> dict[st
     for key, item in theirs.items():
         result[key] = item if key not in result else newer(result[key], item)
     return result
+
+
+def stamp(preferences: dict[str, dict], values: dict) -> tuple[dict[str, dict], bool]:
+    """Preferences after a change made on the server (the page "Meine Aufnahmen"): only keys whose
+    value really changes get a new time, as in the app. Returns (preferences, changed)."""
+    result, changed = dict(preferences), False
+    for key, value in values.items():
+        old = result.get(key)
+        if old is not None and json.dumps(old["value"], sort_keys=True) == json.dumps(value, sort_keys=True):
+            continue
+        result[key] = {"value": value, "updated_at": max(time.time(), (old or {}).get("updated_at", 0) + 0.001)}
+        changed = True
+    return result, changed
 
 
 class Store:

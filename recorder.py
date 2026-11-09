@@ -182,6 +182,15 @@ class Api:
     def open_published(self, sid):
         self._core.open_published(sid)
 
+    def server_library(self, browser=False):
+        return self._core.server_library(bool(browser))
+
+    def fetch_package(self, sid):
+        return self._core.fetch_package(str(sid))
+
+    def open_server_url(self, url):
+        return self._core.open_server_url(str(url))
+
     def make_summary(self, sid):
         return self._core.make_summary(sid)
 

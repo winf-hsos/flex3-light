@@ -15,8 +15,11 @@ import os
 import queue
 import re
 import subprocess
+import shutil
 import threading
 import time
+import webbrowser
+import zipfile
 from pathlib import Path
 
 import activity
@@ -24,13 +27,14 @@ import hardware
 import identify
 import library
 import services
+from recordings import Recordings
 import monitors                  # sets DPI awareness on import: physical pixels
 import obs_remote as remote
 import obs_scene as scene
 from delivery import Delivery, recycle
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
-from pipeline import binaries, cut_rules, edit, publish, review, sounds
+from pipeline import binaries, cut_rules, publish, sounds
 from pipeline_runner import PipelineRunner
 from preview import PreviewServer
 import server_client as server_api
@@ -50,13 +54,7 @@ VIDEO_DELAY = 0.55
 
 # ------------------------------------------------------------------ helpers
 
-def semester(d: dt.date) -> str:
-    """Semester folder name: winter term 1 September to end of February, summer term from 1 March."""
-    if d.month >= 9:
-        return f"{d.year}-{(d.year + 1) % 100:02d} - WS"
-    if d.month <= 2:
-        return f"{d.year - 1}-{d.year % 100:02d} - WS"
-    return f"{d.year} - SS"
+semester = library.semester
 
 
 def clean_name(text: str) -> str:
@@ -166,7 +164,7 @@ class LevelMeter(threading.Thread):
 
 # ------------------------------------------------------------------ core
 
-class Core:
+class Core(Recordings):
     def __init__(self):
         self.lock = threading.RLock()
         self.events: queue.Queue = queue.Queue()
@@ -538,19 +536,21 @@ class Core:
         screen = s and s is not self.session and s.data["archive"]["screen"]
         return Path(screen) if screen else None
 
-    # ---------------------------------------------------------- recordings ("Meine Aufnahmen")
+    # ---------------------------------------------------------- recordings ("Meine Aufnahmen", recordings.py)
 
-    def recordings(self) -> list[dict]:
-        """All session folders in the archive, newest first, with their way through the pipeline."""
-        self._library = library.scan(self.archive)
-        items = [library.summary(f, self.pipeline.queued(f)) for f in self._library.values()]
-        return sorted(items, key=lambda r: r["recorded_at"], reverse=True)
+    def _scan(self) -> dict[str, Path]:
+        return library.scan(self.archive)
 
-    def recording(self, sid: str) -> dict | None:
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None:
-            return None
-        return {**library.detail(folder, self.pipeline.queued(folder)), "status": self.pipeline.describe(folder)}
+    def _find_module(self, name: str) -> dict | None:
+        return self.profile.find(name)
+
+    def _add_term(self, module: dict, term: str) -> None:
+        self.profile.update(module["id"], terms=(module.get("terms", []) + [term])[:300])
+        self.delivery.wake.set()
+
+    @staticmethod
+    def _discard(folder: Path) -> None:
+        recycle(folder)
 
     # ---------------------------------------------------------- after a recording
 
@@ -580,14 +580,6 @@ class Core:
         if self.after_recording() != "nothing" and self.pipeline_place() == "device":
             self.pipeline.enqueue(folder)
 
-    def start_transcription(self, sid: str) -> str:
-        """Transcribe a recording by hand that was only filed; returns an error or ''."""
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return "Die Aufnahme ist nicht mehr in der Ablage."
-        self.pipeline.enqueue(folder)
-        return ""
-
     # ---------------------------------------------------------- the cut: settings and approval
 
     def cut_settings(self) -> dict:
@@ -597,188 +589,9 @@ class Core:
                 "sounds": sorted(sounds.available(APP_DIR / "sounds"))}
 
     def set_cut_settings(self, values: dict) -> None:
-        current = self.profile.preferences("cut.")
-        for k in ("pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off",
-                  "title_card", "closing_card", "chapter_display", "chapter_sound", "music"):
-            if k in values:
-                current[k] = values[k]
-        if current.get("pause_mode") not in ("card", "shorten", "cut"):
-            current["pause_mode"] = "card"
-        current["pause_min"] = min(600.0, max(10.0, float(current.get("pause_min", 30))))
-        for k in ("cut_programs", "keep_programs", "cut_titles"):
-            # a list never set keeps its default: until 2026-11-09 it became empty here, which switched
-            # the title rule (Posteingang, Inbox, ...) off for everyone who changed any cut setting
-            given = current.get(k, cut_rules.DEFAULT_POLICY[k])
-            current[k] = sorted({str(x).strip().lower() for x in given if str(x).strip()})
-        current["kinds_off"] = sorted({k for k in current.get("kinds_off", []) if k in edit.KINDS})
-        if current.get("chapter_display") not in edit.CHAPTER_DISPLAYS:
-            current["chapter_display"] = "card"
-        for k in ("title_card", "closing_card", "chapter_sound", "music"):
-            current[k] = bool(current.get(k, True))
         # one preference per field, so a change here does not undo another device's change of a different one
-        if self.profile.set_preferences({f"cut.{k}": v for k, v in current.items()}):
+        if self.profile.set_preferences(cut_rules.cut_preferences(self.profile.preferences("cut."), values)):
             self.delivery.wake.set()
-
-    def _edit_of(self, sid: str):
-        """(folder, edit list) of a recording the lecturer may change now, or an error message."""
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return None, "Die Aufnahme ist nicht mehr in der Ablage."
-        if self.pipeline.active == str(folder):
-            return None, "Der Schnitt-Agent oder die Transkription arbeitet gerade an dieser Aufnahme."
-        e = edit.load(folder)
-        if e is None:
-            return None, "Für diese Aufnahme gibt es noch keinen Schnitt-Vorschlag."
-        return (folder, e), ""
-
-    def _save_edit(self, folder: Path, e: dict) -> None:
-        e.pop("approved", None)                    # every change asks for a new approval
-        edit.save(folder, e)
-
-    def _words(self, folder: Path) -> list[dict]:
-        return json.loads((folder / "transcript.json").read_text(encoding="utf-8")).get("words", []) \
-            if (folder / "transcript.json").exists() else []
-
-    def change_cut_item(self, sid: str, item_id: str, changes: dict) -> str:
-        """Accept, reject, move the bounds or change the text of one item; returns an error or ''."""
-        found, error = self._edit_of(sid)
-        if error:
-            return error
-        folder, e = found
-        x = edit.find(e, item_id)
-        if x is None:
-            return "Diesen Vorschlag gibt es nicht mehr."
-        words = self._words(folder)
-        for k in ("start", "end"):
-            if changes.get(k) is not None and not (k == "end" and x["end"] is None):
-                t = min(e["duration"], max(0.0, float(changes[k])))
-                x[k] = edit.snap(t, words) if x["kind"] not in edit.SPANLESS else round(t, 3)
-        if x["end"] is not None and x["end"] <= x["start"]:
-            return "Das Ende muss nach dem Anfang liegen."
-        if changes.get("state") in edit.STATES:
-            x["state"] = changes["state"]
-        for k, v in (changes.get("params") or {}).items():
-            x["params"][k] = v
-        x["by_lecturer"] = True
-        e["items"].sort(key=lambda i: (i["start"], i["kind"]))
-        self._save_edit(folder, e)
-        return ""
-
-    def add_cut_item(self, sid: str, kind: str, start: float, end: float | None, params: dict | None = None) -> str:
-        found, error = self._edit_of(sid)
-        if error:
-            return error
-        folder, e = found
-        words = self._words(folder)
-        try:
-            if kind not in edit.SPANLESS:
-                start, end = edit.snap(float(start), words), edit.snap(float(end), words)
-            x = edit.item(kind, float(start), end, "Von dir gesetzt", "lecturer", 1.0, "accepted", **(params or {}))
-        except (TypeError, ValueError) as ex:
-            return str(ex)
-        edit.add(e, x)
-        self._save_edit(folder, e)
-        return ""
-
-    def remove_cut_item(self, sid: str, item_id: str) -> str:
-        found, error = self._edit_of(sid)
-        if error:
-            return error
-        folder, e = found
-        x = edit.find(e, item_id)
-        if x is None or x["source"] != "lecturer":
-            return "Nur selbst gesetzte Einträge lassen sich entfernen; Vorschläge lehnst du ab."
-        e["items"].remove(x)
-        self._save_edit(folder, e)
-        return ""
-
-    def set_cut_metadata(self, sid: str, title: str, description: str) -> str:
-        found, error = self._edit_of(sid)
-        if error:
-            return error
-        folder, e = found
-        e["title"], e["description"] = title.strip(), description.strip()
-        self._save_edit(folder, e)
-        return ""
-
-    def set_program_rule(self, sid: str, program: str, choice: str) -> str:
-        """choice "cut" or "keep" remembers the program for all recordings, "" forgets it; the program's
-        spans in this recording are proposed again accordingly."""
-        program = program.strip().lower()
-        policy = self.cut_settings()
-        cut = set(policy["cut_programs"]) - {program}
-        keep = set(policy["keep_programs"]) - {program}
-        (cut if choice == "cut" else keep if choice == "keep" else set()).add(program)
-        self.set_cut_settings({"cut_programs": sorted(cut), "keep_programs": sorted(keep)})
-        found, error = self._edit_of(sid)
-        if error:
-            return "" if "noch keinen" in error else error
-        folder, e = found
-        e["items"] = [x for x in e["items"] if not (x["params"].get("rule") == "program" and not x.get("by_lecturer"))]
-        log = json.loads((folder / "activity.json").read_text(encoding="utf-8")) if (folder / "activity.json").exists() else {}
-        for x in cut_rules.programs(log.get("activity", []), self.cut_settings()):
-            edit.add(e, x)
-        self._save_edit(folder, e)
-        return ""
-
-    def set_cut_cards(self, sid: str, cards: dict) -> str:
-        """The lecturer's texts and switches of the title, chapter and closing cards."""
-        found, error = self._edit_of(sid)
-        if error:
-            return error
-        folder, e = found
-        meta = json.loads((folder / "session.json").read_text(encoding="utf-8"))
-        e["cards"] = edit.clean_cards(cards or {}, e.get("cards") or edit.default_cards(e, meta, self.cut_settings()))
-        self._save_edit(folder, e)
-        return ""
-
-    def approve_cut(self, sid: str, approved: bool = True) -> str:
-        found, error = self._edit_of(sid)
-        if error:
-            return error
-        folder, e = found
-        if approved:
-            error = edit.approve(folder, self.cut_settings())
-            if error:
-                return error
-            self.pipeline.failed.discard(str(folder))  # a failed render is tried again
-            self.pipeline.enqueue(folder)            # render it
-        else:
-            self._save_edit(folder, e)
-        return ""
-
-    def redo_cut(self, sid: str) -> str:
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return "Die Aufnahme ist nicht mehr in der Ablage."
-        if library.stations(folder)["transcript"] != "done":
-            return "Der Schnitt braucht zuerst die Transkription."
-        if not self.pipeline.redo_cut(folder):
-            return "An dieser Aufnahme wird gerade gearbeitet."
-        return ""
-
-    def rerender(self, sid: str) -> str:
-        """Render the approved cut again, e.g. after its videos were deleted; returns an error or ''."""
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return "Die Aufnahme ist nicht mehr in der Ablage."
-        e = edit.load(folder)
-        if not (e and e.get("approved")):
-            return "Neu rendern geht nur mit einem freigegebenen Schnitt."
-        if not self.pipeline.redo_render(folder):
-            return "An dieser Aufnahme wird gerade gearbeitet."
-        return ""
-
-    def make_summary(self, sid: str) -> str:
-        """Write the summary of the rendered video (again); returns an error or ''."""
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return "Die Aufnahme ist nicht mehr in der Ablage."
-        if not (folder / "render.json").exists():
-            return "Die Zusammenfassung braucht zuerst das geschnittene Video."
-        if not self.pipeline.redo_summary(folder):
-            return "An dieser Aufnahme wird gerade gearbeitet."
-        return ""
 
     def open_summary(self, sid: str) -> str:
         folder = getattr(self, "_library", {}).get(sid)
@@ -819,71 +632,76 @@ class Core:
                     else f"Verschieben fehlgeschlagen: {e}"
         return ""
 
+    # ---------------------------------------------------------- "Meine Aufnahmen" on the server (phase 4)
+
+    def server_library(self, browser: bool = False) -> dict:
+        """{"url"} of the page "Meine Aufnahmen" on the server with a one-time ticket, for the frame in
+        the window, or opened in the default browser (browser=True); {"error"} when that fails."""
+        client = self.delivery.client
+        if client is None:
+            return {"error": "Kein Server verbunden."}
+        try:
+            url = client.url + client.library_ticket()["path"]
+        except (server_api.ServerError, OSError, KeyError):
+            return {"error": "Der Server ist gerade nicht erreichbar. Deine Aufnahmen dort erscheinen, sobald er wieder da ist."}
+        if browser:
+            webbrowser.open(url)
+            return {"url": ""}
+        return {"url": url}
+
+    def open_server_url(self, url: str) -> str:
+        """Open a page of "Meine Aufnahmen" on the server in the browser, e.g. the summary; nothing else."""
+        client = self.delivery.client
+        if client is None or not url.startswith(client.url + "/library/"):
+            return "Diese Adresse öffnet FLEX3 Light nicht."
+        webbrowser.open(url)
+        return ""
+
+    def fetch_package(self, sid: str) -> str:
+        """Take the package of a recording published on the server into the folder for uploads, under
+        <term>\\<module> with the names Opencast expects, as publishing on this computer does; then show
+        the folder. Files of an earlier package with the same names are replaced. Returns an error or ''."""
+        client = self.delivery.client
+        if client is None:
+            return "Kein Server verbunden."
+        try:
+            plan = client.library_call("publish_plan", sid)
+        except (server_api.ServerError, OSError) as e:
+            return f"Der Server ist gerade nicht erreichbar: {e}"
+        term, module = str(plan.get("term", "")), publish.clean(str(plan.get("module", "")))
+        if not plan.get("files") or not library.TERM.match(term) or not module:
+            return "Für diese Aufnahme gibt es kein Paket."
+        target = self.publish_dir() / term / module
+        target.mkdir(parents=True, exist_ok=True)
+        package = target / f".download-{sid}.zip"
+        try:
+            client.download(f"/library/package/{sid}", package)
+            with zipfile.ZipFile(package) as z:
+                for info in z.infolist():
+                    name = info.filename
+                    if not publish.flat_name(name):                # only plain names, never a path
+                        continue
+                    part = target / (name + ".part")
+                    with z.open(info) as src, open(part, "wb") as dst:
+                        shutil.copyfileobj(src, dst, 1 << 20)
+                    os.replace(part, target / name)
+        except (server_api.ServerError, OSError, zipfile.BadZipFile) as e:
+            return f"Das Paket ließ sich nicht holen: {e}"
+        finally:
+            package.unlink(missing_ok=True)
+        os.startfile(target)
+        return ""
+
     def open_published(self, sid: str) -> None:
         folder = getattr(self, "_library", {}).get(sid)
         target = publish.published(folder).get("folder") if folder else None
         if target and Path(target).exists():
             os.startfile(target)
 
-    def redo_transcription(self, sid: str) -> str:
-        """Queue a recording's transcription again, with the module's current terms; returns an error or ''."""
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return "Die Aufnahme ist nicht mehr in der Ablage."
-        if not self.pipeline.redo(folder):
-            return "Die Aufnahme wird gerade transkribiert."
-        return ""
-
-    def review_word(self, sid: str, index: int, text: str, as_term: bool = False) -> dict:
-        """Correct or confirm an unsure word of a transcript, optionally adding it to the module's terms.
-
-        Returns {"ok", "message"} for the window.
-        """
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return {"ok": False, "message": "Die Aufnahme ist nicht mehr in der Ablage."}
-        if library.stations(folder)["transcript"] != "done":
-            return {"ok": False, "message": "Die Transkription läuft gerade, danach geht es wieder."}
-        try:
-            old = json.loads((folder / "transcript.json").read_text(encoding="utf-8"))["words"][int(index)]["word"]
-            word = (review.confirm(folder, int(index)) if text.strip() == old.strip()
-                    else review.correct(folder, int(index), text))
-        except (ValueError, IndexError, OSError) as e:
-            return {"ok": False, "message": str(e) or "Das Wort ließ sich nicht ändern."}
-        if not as_term:
-            return {"ok": True, "message": ""}
-        name = json.loads((folder / "session.json").read_text(encoding="utf-8")).get("course_name", "")
-        module, new = self.profile.find(name), review.term(word["word"])
-        if module is None:
-            return {"ok": True, "message": f"Korrigiert, aber das Modul „{name}“ fehlt in deinen Modulen."}
-        if new and new not in module.get("terms", []):
-            self.profile.update(module["id"], terms=(module.get("terms", []) + [new])[:300])
-            self.delivery.wake.set()
-        return {"ok": True, "message": f"„{new}“ steht jetzt in den Fachbegriffen von {module['name']}."}
-
-    def delete_recording(self, sid: str) -> str:
-        """Move a recording's session folder with all its files to the recycle bin; returns an error or ''."""
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return "Die Aufnahme ist nicht mehr in der Ablage."
-        if not self.pipeline.forget(folder):
-            return "Die Aufnahme wird gerade transkribiert. Lösch sie, wenn das fertig ist."
-        try:
-            recycle(folder)
-        except OSError as e:
-            return f"Löschen fehlgeschlagen: {e}"
-        self._library.pop(sid, None)
-        return ""
-
     def open_recording(self, sid: str) -> None:
         folder = getattr(self, "_library", {}).get(sid)
         if folder and folder.exists():
             os.startfile(folder)
-
-    def _media(self, sid: str, name: str) -> Path | None:
-        """For the preview server: a video or subtitle file of a listed recording, nothing else."""
-        folder = getattr(self, "_library", {}).get(sid)
-        return publish.locate(folder, name) if folder and library.MEDIA.match(name) else None
 
     def open_result(self) -> None:
         f = self._result()

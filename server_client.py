@@ -7,6 +7,7 @@ parallel Teams call or stream keeps priority.
 from __future__ import annotations
 
 import json
+import shutil
 import time
 import urllib.error
 import urllib.request
@@ -98,6 +99,23 @@ class ServerClient:
 
     def me(self) -> dict:
         return self._call("GET", "/me")[1]
+
+    def library_ticket(self) -> dict:
+        """A one-time ticket for the page "Meine Aufnahmen" on the server: {"ticket", "path"}."""
+        return self._call("POST", "/library/ticket")[1]
+
+    def library_call(self, call: str, *args):
+        """An action of the page "Meine Aufnahmen" on the server, as the page itself makes it."""
+        return self._call("POST", f"/library/api/{call}", body=list(args))[1]
+
+    def download(self, path: str, target: Path) -> None:
+        """Save a file of the server to target, e.g. the package of a published recording."""
+        req = urllib.request.Request(self.url + path, headers={"Authorization": f"Bearer {self._token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r, open(target, "wb") as f:
+                shutil.copyfileobj(r, f, 1 << 20)
+        except urllib.error.HTTPError as e:
+            raise ServerError(e.code, e.reason) from None
 
 
 def register(url: str, key: str, device_name: str, timeout: float = 20) -> dict:
