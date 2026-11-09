@@ -26,7 +26,6 @@ from PIL import Image, ImageDraw, ImageFont
 from . import audio, binaries, cut_rules, edit, files, ocr
 
 TRACKS = {"program": "recording.mp4", "screen": "screen.mp4", "camera": "camera.mp4"}
-NO_WINDOW, BELOW_NORMAL_PRIORITY = 0x08000000, 0x00004000
 
 
 def _clock(t: float) -> str:
@@ -37,7 +36,7 @@ def _clock(t: float) -> str:
 
 def _ffmpeg_bytes(*args: str) -> bytes:
     r = subprocess.run([binaries.ffmpeg(), "-hide_banner", "-nostats", "-v", "error", *args], stdin=subprocess.DEVNULL,
-                       capture_output=True, creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
+                       capture_output=True, creationflags=binaries.flags(low=True))
     if r.returncode != 0:
         raise RuntimeError("ffmpeg: " + r.stderr.decode("utf-8", "replace")[-400:])
     return r.stdout
@@ -190,7 +189,7 @@ class Workbench:
         r = subprocess.run([binaries.ffmpeg(), "-hide_banner", "-nostats", "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}",
                             "-i", str(path), "-vf", f"fps=4,scale=320:-2,select='gt(scene,{threshold})',showinfo",
                             "-an", "-f", "null", "-"], stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
+                           encoding="utf-8", errors="replace", creationflags=binaries.flags(low=True))
         return [round(start + float(x), 2) for x in re.findall(r"pts_time:([\d.]+)", r.stderr)][:300]
 
     # ---------------------------------------------------------- sound

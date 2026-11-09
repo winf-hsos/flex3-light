@@ -44,7 +44,6 @@ from typing import Callable
 
 from . import binaries, cards, edit, files, publish, sounds, timeline
 
-NO_WINDOW, BELOW_NORMAL_PRIORITY = 0x08000000, 0x00004000
 X264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
 EPS = 0.0005                     # half a millisecond, so that a frame exactly on a bound is decided as intended
 
@@ -183,7 +182,7 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
         still = work / f"still-{i}.png"
         r = subprocess.run([binaries.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, x['start'] - 0.05):.3f}", "-i", str(source),
                             "-frames:v", "1", str(still)], stdin=subprocess.DEVNULL, capture_output=True,
-                           creationflags=NO_WINDOW)
+                           creationflags=binaries.flags())
         if r.returncode == 0 and still.exists():
             still_input(still, x["start"], x["end"], f"f{i}", f"scale={W}:{H},format=yuv420p")
             overlay(f"f{i}", 0, 0, x["start"], x["end"])
@@ -264,7 +263,7 @@ def channel_levels(source: str | Path) -> list[float]:
     r = subprocess.run([binaries.ffmpeg(), "-hide_banner", "-i", str(source), "-map", "0:a:0",
                         "-af", "astats=measure_overall=none:measure_perchannel=RMS_level", "-f", "null", "-"],
                        stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                       creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
+                       creationflags=binaries.flags(low=True))
     return [float(v) if v not in ("-inf", "inf", "nan") else -200.0
             for v in re.findall(r"RMS level dB: (\S+)", r.stderr)]
 
@@ -287,7 +286,7 @@ def sound(p: dict, work: Path) -> Path:
     r = subprocess.run([binaries.ffmpeg(), "-y", "-v", "error", "-i", p["source"], "-vn",
                         "-af", f"{pan}aformat=sample_rates={RATE}:channel_layouts=stereo{silence}",
                         "-c:a", "pcm_s16le", str(full)], stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                       creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
+                       creationflags=binaries.flags(low=True))
     if r.returncode != 0:
         raise RuntimeError("ffmpeg: " + r.stderr[-400:])
     with wave.open(str(full)) as src, wave.open(str(cut), "wb") as dst:
@@ -314,7 +313,7 @@ def _run(args: list[str], total: float, progress: Callable[[float], None] | None
     proc = subprocess.Popen([binaries.ffmpeg(), "-hide_banner", "-v", "error", "-nostats", "-progress", "pipe:1",
                              "-y", *args],
                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                            encoding="utf-8", errors="replace", creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
+                            encoding="utf-8", errors="replace", creationflags=binaries.flags(low=True))
     errors: list[str] = []
 
     import threading
@@ -452,7 +451,7 @@ def run(folder: Path, video_args: list[str] | None = None,
             subprocess.run([binaries.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(folder / "edited.mp4"),
                             "-frames:v", "1", "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,"
                             "pad=1280:720:(ow-iw)/2:(oh-ih)/2", "-q:v", "3", str(folder / "thumbnail.jpg")],
-                           stdin=subprocess.DEVNULL, capture_output=True, creationflags=NO_WINDOW)
+                           stdin=subprocess.DEVNULL, capture_output=True, creationflags=binaries.flags())
             if (folder / "thumbnail.jpg").exists():
                 written.append("thumbnail.jpg")
         report = {"rendered": dt.datetime.now().astimezone().isoformat(timespec="seconds"),

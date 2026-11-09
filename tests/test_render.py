@@ -112,7 +112,7 @@ def test_runner_renders_after_the_approval_and_again_after_changes(tmp_path, mon
     monkeypatch.setattr(pipeline_runner.render, "run", fake)
     monkeypatch.setattr(pipeline_runner.summary, "run", fake_summary)
     monkeypatch.setattr(pipeline_runner.services, "key", lambda service: "test-key")
-    r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda: {"auto": True},
+    r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda f: {"auto": True},
                                        ["-c:v", "h264_nvenc"])
     r.enqueue(folder)
     r._process(folder)

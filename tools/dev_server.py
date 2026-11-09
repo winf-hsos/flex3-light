@@ -2,6 +2,7 @@
 
     python tools/dev_server.py                 run it (Ctrl+C stops it)
     python tools/dev_server.py --invite        print a connection code for you as lecturer
+    python tools/dev_server.py --no-keys       run it without keys: the pipeline waits
 
 Paste the connection code in FLEX3 Light under Einstellungen, Server, and click
 "Verbinden"; the app exchanges it for its own device token, which lives in the Windows
@@ -11,6 +12,12 @@ Credential Manager and is never shown. For other lecturers or devices use the ad
 Data lives in %LOCALAPPDATA%\\flex3-light-devserver, outside any cloud-synced folder:
 sessions/ holds the finished session folders, profiles/ the module lists, accounts.sqlite
 lecturers and devices. A tokens.json from before 2026-11-06 keeps working.
+
+The pipeline on this server uses the keys for the AI services that FLEX3 Light keeps in the
+Windows Credential Manager of this computer ("FLEX3 Light/openai" and so on), standing in for
+the project's keys a real server gets from FLEX3_LIGHT_SERVER_SECRETS. They are read when a
+step needs them and never printed. What starts by itself follows the lecturer's profile:
+only with "pipeline" set to "server", so a lecture is never worked on twice.
 
 To try the offline mode, stop the server: the app keeps recordings and module changes
 locally and delivers them when the server runs again.
@@ -49,6 +56,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--invite", action="store_true")
+    ap.add_argument("--no-keys", action="store_true")
     a = ap.parse_args()
     url = f"http://127.0.0.1:{a.port}"
     DATA.mkdir(parents=True, exist_ok=True)
@@ -60,5 +68,10 @@ if __name__ == "__main__":
     from flex3_light_server.app import create_app
 
     tokens = json.loads(TOKENS.read_text(encoding="utf-8")) if TOKENS.exists() else {}
+    keys = None
+    if not a.no_keys:
+        sys.path.insert(0, str(ROOT))
+        import credentials                       # the app's Credential Manager store
+        keys = credentials.get
     print(f"FLEX3 Light server on {url}, data in {DATA}")
-    uvicorn.run(create_app(DATA, tokens), host="127.0.0.1", port=a.port, log_level="info")
+    uvicorn.run(create_app(DATA, tokens, keys=keys), host="127.0.0.1", port=a.port, log_level="info")

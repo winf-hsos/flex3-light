@@ -11,10 +11,10 @@ import urllib.error
 import urllib.request
 
 import credentials
+from pipeline import transcribe
 
 SERVICES = {"openai": "OpenAI", "elevenlabs": "ElevenLabs", "assemblyai": "AssemblyAI"}
-# AssemblyAI keeps data in the US or, for accounts created there, in the EU; a key works in one region only.
-ASSEMBLYAI_REGIONS = {"EU": "https://api.eu.assemblyai.com", "USA": "https://api.assemblyai.com"}
+ASSEMBLYAI_REGIONS = transcribe.ASSEMBLYAI_REGIONS
 # Transcription models worth knowing about; whisper-1 is the only one with word timestamps
 # and is shut down on 2027-02-26 (see docs/pipeline.md).
 TRANSCRIBE_MODELS = ("gpt-transcribe", "whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe")
@@ -41,14 +41,7 @@ def _get(url: str, headers: dict) -> tuple[int, dict]:
             return e.code, {}
 
 
-_assemblyai_base: dict[str, str] = {}
-
-
-def assemblyai_base(secret: str) -> str | None:
-    """The address of the region that accepts this key (EU first), or None if none does."""
-    if secret not in _assemblyai_base:
-        check("assemblyai", secret)
-    return _assemblyai_base.get(secret)
+assemblyai_base = transcribe.assemblyai_base      # the pipeline finds the region itself, also on the server
 
 
 def check(service: str, secret: str | None = None) -> tuple[bool, str]:
@@ -75,7 +68,7 @@ def check(service: str, secret: str | None = None) -> tuple[bool, str]:
             for region, base in ASSEMBLYAI_REGIONS.items():
                 code, _ = _get(f"{base}/v2/transcript?limit=1", {"Authorization": secret})
                 if code == 200:
-                    _assemblyai_base[secret] = base
+                    transcribe._regions[secret] = base
                     return True, f"Schlüssel gültig, Daten bleiben in der Region {region}."
         else:
             raise ValueError(service)

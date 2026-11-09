@@ -3,7 +3,9 @@
     PUT    /sessions/{id}                      open a session (idempotent)
     GET    /sessions/{id}                      state and the parts received so far
     PUT    /sessions/{id}/parts/{track}/{n}    one part of a track, body is the MP4, X-Content-SHA256 its hash
-    POST   /sessions/{id}/complete             session.json and the number of parts per track
+    POST   /sessions/{id}/complete             session.json, the number of parts per track, the activity log
+    GET    /sessions/{id}/pipeline             where the pipeline stands for a recording of this lecturer
+    POST   /sessions/{id}/pipeline             {"action": transcribe|retranscribe|cut|approve|render|summary}
     DELETE /sessions/{id}                      throw away a session that is not complete
     GET    /profile                            the lecturer's profile: who, the modules and the preferences
     POST   /profile/sync                       {"modules": [...], "preferences": {...}}: merge the device's entries, return all
@@ -14,14 +16,18 @@ Every other request carries "Authorization: Bearer <token>". The token decides t
 device_id and the lecturer it belongs to (one token per person and device); devices get
 it by registering with an invitation key (accounts.py, admin.py). On completion the
 parts of each track are joined without re-encoding into a session folder after the
-FLEX3 contract: recording.mp4 (program mix), screen.mp4, camera.mp4 and session.json.
-Nothing is confirmed before the folder is complete.
+FLEX3 contract: recording.mp4 (program mix), screen.mp4, camera.mp4, session.json and
+activity.json (programs in front and privacy-key spans, no window titles). Nothing is
+confirmed before the folder is complete. The pipeline then runs on it (worker.py), by
+itself if the lecturer's profile says so, otherwise on request.
 
 Configuration from the environment:
     FLEX3_LIGHT_SERVER_DATA     data folder (incoming/, sessions/, profiles/ and accounts.sqlite below it)
     FLEX3_LIGHT_SERVER_TOKENS   optional, for tests and old setups: JSON file
                                 {"<token>": {"device_id": "...", "user_id": "...", "user_name": "..."}}
                                 (a plain "<device_id>" as value is a device without a profile)
+    FLEX3_LIGHT_SERVER_SECRETS  optional: JSON file {"openai": "...", "assemblyai": "...", "elevenlabs": "..."}
+                                with the project's keys for the pipeline; never logged, not in the repository
 """
 from __future__ import annotations
 
@@ -41,6 +47,7 @@ from fastapi.responses import JSONResponse
 from . import profiles
 from .accounts import Accounts, InvalidKey
 from .assemble import join
+from .worker import ACTIONS, Worker
 
 logger = logging.getLogger(__name__)
 
@@ -51,19 +58,51 @@ TRACK_KINDS = {"screen": "screen", "camera": "camera"}
 REQUIRED = ("session_id", "status", "recorded_at", "duration_sec", "language", "consent", "consent_source",
             "software_version")
 MAX_PARTS = 10000
+MAX_ACTIVITY, MAX_PRIVATE = 50000, 5000
+
+
+def clean_activity(body) -> dict | None:
+    """The activity log of an upload, checked: [start, end, program, matched word] spans and
+    [start, end] privacy-key spans. The fourth field is a short lower-case word of the title list,
+    never a window title: the server cannot tell for sure, but refuses what looks like one."""
+    if body is None:
+        return None
+    if not isinstance(body, dict):
+        raise ValueError("activity is not an object")
+    spans, private = body.get("activity") or [], body.get("private") or []
+    if not isinstance(spans, list) or not isinstance(private, list) or len(spans) > MAX_ACTIVITY \
+            or len(private) > MAX_PRIVATE:
+        raise ValueError("invalid activity")
+    num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)  # noqa: E731
+    out = []
+    for s in spans:
+        if not (isinstance(s, list) and len(s) == 4 and num(s[0]) and num(s[1]) and isinstance(s[2], str)
+                and isinstance(s[3], str) and len(s[2]) <= 100 and len(s[3]) <= 40 and s[3] == s[3].lower()):
+            raise ValueError("invalid activity span")
+        out.append([float(s[0]), float(s[1]), s[2], s[3]])
+    if any(not (isinstance(p, list) and len(p) == 2 and num(p[0]) and num(p[1])) for p in private):
+        raise ValueError("invalid privacy span")
+    return {"activity": out, "private": [[float(a), float(b)] for a, b in private]}
 
 
 def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
-               accounts: Accounts | None = None) -> FastAPI:
+               accounts: Accounts | None = None, keys=None, start_worker: bool = True) -> FastAPI:
+    """keys: the project's key of a service ("openai", "assemblyai", "elevenlabs") or None;
+    without keys the pipeline waits for them, like the app does."""
     data_dir = Path(data_dir)
     accounts = accounts or Accounts(data_dir / "accounts.sqlite")
-    incoming, sessions, profile_dir = data_dir / "incoming", data_dir / "sessions", data_dir / "profiles"
-    for d in (incoming, sessions, profile_dir):
+    incoming, sessions = data_dir / "incoming", data_dir / "sessions"
+    for d in (incoming, sessions):
         d.mkdir(parents=True, exist_ok=True)
+    store = profiles.Store(data_dir / "profiles")
+    worker = Worker(data_dir, store, keys)
+    if start_worker:
+        worker.start()
     identities = {t: v if isinstance(v, dict) else {"device_id": v} for t, v in (tokens or {}).items()}
     locks: dict[str, threading.Lock] = {}
     locks_guard = threading.Lock()
     app = FastAPI(title="FLEX3 Light server")
+    app.state.worker = worker                 # for the tests and tools in the same process
 
     def lock(key: str) -> threading.Lock:
         with locks_guard:
@@ -200,12 +239,16 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
             gaps = {t: g for t, g in gaps.items() if g}
             if gaps:
                 raise HTTPException(409, {"missing": gaps})
+            try:
+                activity = clean_activity(body.get("activity"))
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from None
             state.update(state="assembling", error=None)
             write_state(sid, state)
-        threading.Thread(target=assemble, args=(sid, session, counts, who), daemon=True).start()
+        threading.Thread(target=assemble, args=(sid, session, counts, who, activity), daemon=True).start()
         return JSONResponse({"state": "assembling"}, status_code=202)
 
-    def assemble(sid: str, session: dict, counts: dict, who: dict) -> None:
+    def assemble(sid: str, session: dict, counts: dict, who: dict, activity: dict | None = None) -> None:
         device_id = who["device_id"]
         d = incoming / sid
         out = d / "out"
@@ -225,9 +268,18 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
             if tracks:
                 session["tracks"] = tracks
             (out / "session.json").write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+            if activity:
+                (out / "activity.json").write_text(json.dumps(
+                    {"note": "Program in front during the recording: [start, end, process, word of the lecturer's "
+                             "title list the window title contained, or empty]; the titles stay on the device.",
+                     **activity}, ensure_ascii=False, indent=1), encoding="utf-8")
             os.replace(out, sessions / sid)       # the session folder appears complete or not at all
             shutil.rmtree(d)
             logger.info("Session %s complete", sid)
+            try:
+                worker.arrived(sessions / sid)
+            except Exception:
+                logger.exception("Pipeline for %s", sid)
         except Exception as e:
             logger.error("Assembling session %s failed: %s", sid, e)
             with lock(sid):
@@ -248,23 +300,38 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
             logger.info("Deleted session %s", sid)
         return {"state": "deleted"}
 
+    # ---------------------------------------------------------- pipeline
+
+    def recording(sid: str, who: dict) -> Path:
+        """The finished session folder of a recording of this lecturer."""
+        folder(sid)
+        f = sessions / sid
+        if not (f / "session.json").exists() or not who.get("user_id") or Worker.owner(f) != who["user_id"]:
+            raise HTTPException(404, "no such recording of yours")
+        return f
+
+    @app.get("/sessions/{sid}/pipeline")
+    def pipeline_state(sid: str, who: dict = Depends(identity)):
+        return worker.state(recording(sid, who))
+
+    @app.post("/sessions/{sid}/pipeline")
+    def pipeline_action(sid: str, body: dict, who: dict = Depends(identity)):
+        f = recording(sid, who)
+        action = body.get("action")
+        if action not in ACTIONS:
+            raise HTTPException(422, f"action must be one of {', '.join(ACTIONS)}")
+        error = worker.act(f, action)
+        if error:
+            raise HTTPException(409, error)
+        logger.info("Pipeline %s for %s", action, sid)
+        return worker.state(f)
+
     # ---------------------------------------------------------- profiles
 
     def lecturer(who: dict = Depends(identity)) -> dict:
         if not who.get("user_id"):
             raise HTTPException(403, "this token belongs to no lecturer")
         return who
-
-    def profile_file(user_id: str) -> Path:
-        return profile_dir / f"{hashlib.sha256(user_id.encode()).hexdigest()[:32]}.json"
-
-    def load_profile(user_id: str) -> tuple[dict[str, dict], dict[str, dict]]:
-        """(modules by id, preferences by key) of a lecturer; empty for a new one."""
-        try:
-            data = json.loads(profile_file(user_id).read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {}, {}
-        return {e["id"]: e for e in data["modules"]}, data.get("preferences", {})
 
     def answer(who: dict, modules: dict[str, dict], preferences: dict[str, dict]) -> dict:
         return {"user_id": who["user_id"], "user_name": who.get("user_name", ""),
@@ -273,7 +340,7 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
 
     @app.get("/profile")
     def get_profile(who: dict = Depends(lecturer)):
-        return answer(who, *load_profile(who["user_id"]))
+        return answer(who, *store.load(who["user_id"]))
 
     @app.post("/profile/sync")
     def sync_profile(body: dict, who: dict = Depends(lecturer)):
@@ -283,14 +350,10 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
         with lock("profile:" + who["user_id"]):
-            modules, preferences = load_profile(who["user_id"])
+            modules, preferences = store.load(who["user_id"])
             modules = profiles.merge(modules, entries)
             preferences = profiles.merge_preferences(preferences, prefs)
-            f = profile_file(who["user_id"])
-            tmp = f.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"user_id": who["user_id"], "modules": list(modules.values()),
-                                       "preferences": preferences}, ensure_ascii=False, indent=1), encoding="utf-8")
-            os.replace(tmp, f)
+            store.save(who["user_id"], modules, preferences)
         return answer(who, modules, preferences)
 
     return app
@@ -300,4 +363,6 @@ def app_from_env() -> FastAPI:
     data = Path(os.environ.get("FLEX3_LIGHT_SERVER_DATA", "data"))
     tokens_file = os.environ.get("FLEX3_LIGHT_SERVER_TOKENS")
     tokens = json.loads(Path(tokens_file).read_text(encoding="utf-8")) if tokens_file else {}
-    return create_app(data, tokens)
+    secrets_file = os.environ.get("FLEX3_LIGHT_SERVER_SECRETS")
+    secrets = json.loads(Path(secrets_file).read_text(encoding="utf-8")) if secrets_file else {}
+    return create_app(data, tokens, keys=lambda service: secrets.get(service) or None)

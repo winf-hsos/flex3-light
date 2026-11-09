@@ -569,7 +569,8 @@
             <label class="toggle"><input type="checkbox" id="hide_taskbar" onchange="setOption(this)"><span class="knob"></span><span><b>Taskleiste nicht aufnehmen</b><small>Der Bildschirm wird ohne die Windows-Taskleiste aufgezeichnet.</small></span></label>
             <label class="toggle"><input type="checkbox" id="hide_alttab" onchange="setOption(this)"><span class="knob"></span><span><b>Fensterwechsel ausblenden</b><small>Bei Alt+Tab und den Vorschaubildern der Taskleiste bleibt das Bild der Aufnahme kurz stehen.</small></span></label>
             <div class="setting-row"><span>Nach der Aufnahme</span><select id="after_recording" onchange="setAfterRecording(this.value)"><option value="nothing">nur speichern</option><option value="transcribe">transkribieren</option><option value="cut">transkribieren und Schnitt vorschlagen</option></select></div>
-            <div class="section-note">Was nicht von selbst startet, startest du unter „Meine Aufnahmen“ bei der Aufnahme.</div>
+            <div class="setting-row" id="placeRow" style="display:none"><span>Verarbeiten</span><select id="pipeline_place" onchange="setPipelinePlace(this.value)"><option value="device">auf diesem Rechner</option><option value="server">auf dem Server</option></select></div>
+            <div class="section-note">Was nicht von selbst startet, startest du unter „Meine Aufnahmen“ bei der Aufnahme.<span id="placeNote" style="display:none"> Auf dem Server verarbeitete Aufnahmen siehst du hier erst, wenn die Prüfoberfläche dort steht.</span></div>
           </div>
           <div class="panel section">
             <div class="panel-head"><h2>Schnitt</h2></div>
@@ -759,11 +760,12 @@
     for (const kind of ["screen", "camera", "microphone"]) fillSelect(kind, d.devices[kind], d.choice[kind]);
     for (const k in d.options) $(k).checked = d.options[k];
     $("after_recording").value = d.after_recording || "nothing";
+    fillServer(d.server);
+    fillPlace(d.pipeline_place);
     for (const k of ["archive_dir", "raw_dir", "publish_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
     previewUrl = d.preview_url || "";
     mediaBase = d.media_base || "";
     fillKeys(d.api_keys);
-    fillServer(d.server);
     cutSettings = d.cut || {};
     fillCutSettings();
     updatePreview();
@@ -799,6 +801,11 @@
   const selectDevice = el => { api().select(el.id, el.value); updatePreview(); updateReady(); };
   const setOption = el => api().option(el.id, el.checked);
   const setAfterRecording = value => api().set_after_recording(value);
+  function setPipelinePlace(value) { api().set_pipeline_place(value); $("placeNote").style.display = value === "server" ? "" : "none"; }
+  function fillPlace(value) {
+    $("pipeline_place").value = value || "device";
+    $("placeNote").style.display = value === "server" && $("placeRow").style.display === "" ? "" : "none";
+  }
   const sendTexts = () => api().texts(moduleValue(), $("topic").value);
   async function pickFolder(kind) { await api().folder(kind); load(); }
   async function startRecording() {
@@ -1744,6 +1751,7 @@
         + "Module, Schnitt und „Nach der Aufnahme“ liegen in deinem Profil dort und gelten auf allen deinen Rechnern."
       : "Mit dem Verbindungscode vom Server meldest du diesen Rechner an. Bis dahin bleibt alles auf diesem Rechner.";
     $("serverConnect").style.display = on ? "none" : "";
+    $("placeRow").style.display = on ? "" : "none";             // where the pipeline runs: only with a server
     $("serverDisconnect").style.display = on ? "" : "none";
   }
   function serverMessage(text, kind) { const m = $("serverMsg"); m.textContent = text; m.className = "hint " + (kind || ""); }
@@ -1879,6 +1887,7 @@
           const d = await api().data();
           fillModules(d);
           $("after_recording").value = d.after_recording || "nothing";
+          fillPlace(d.pipeline_place);
           if (document.activeElement !== $("cut_pause_min")) { cutSettings = d.cut || {}; fillCutSettings(); }
         }
       }

@@ -227,6 +227,24 @@ def default_cards(e: dict, meta: dict, settings: dict | None = None) -> dict:
             "music": settings.get("music", True)}
 
 
+def approve(folder: Path, settings: dict | None = None) -> str:
+    """Approve the edit list of a recording for rendering; returns what stands in the way or ''.
+    Open proposals block it; a list from before there were cards gets the default cards."""
+    folder = Path(folder)
+    e = load(folder)
+    if e is None:
+        return "Für diese Aufnahme gibt es noch keinen Schnitt-Vorschlag."
+    open_items = [x for x in e["items"] if x["state"] == "proposed"]
+    if open_items:
+        return f"Noch {len(open_items)} Vorschläge offen: annehmen oder ablehnen, dann freigeben."
+    if "cards" not in e:
+        meta = files.read_json(folder / "session.json")
+        e["cards"] = default_cards(e, meta, settings)
+    e["approved"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    save(folder, e)
+    return ""
+
+
 def clean_cards(cards: dict, current: dict) -> dict:
     """The lecturer's changes to the cards, checked and merged into what there is."""
     out = {**current}

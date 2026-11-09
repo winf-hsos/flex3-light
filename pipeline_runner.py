@@ -22,7 +22,10 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-import services
+try:
+    import services          # the app's keys in the Windows Credential Manager
+except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
+    services = None
 from pipeline import cut_agent, edit, files, render, sounds, subtitles, summary, transcribe
 
 STEPS = ("transcribe", "subtitles", "cut", "render", "summary")
@@ -37,12 +40,16 @@ def read_state(folder: Path) -> dict:
 
 class PipelineRunner:
     def __init__(self, queue_file: Path, can_run: Callable[[], bool], terms_for: Callable[[dict], list[str]],
-                 cut_settings: Callable[[], dict] = lambda: {"auto": False}, video_args: list[str] | None = None,
-                 sound_dir: Path | None = None):
-        """cut_settings: the lecturer's settings for the cut, with "auto" (propose by itself) and the
-        rule policy of pipeline/cut_rules.py."""
+                 cut_settings: Callable[[Path], dict] = lambda folder: {"auto": False},
+                 video_args: list[str] | None = None, sound_dir: Path | None = None,
+                 keys: Callable[[str], str | None] | None = None):
+        """cut_settings: the settings for the cut of the recording in a folder, with "auto" (propose
+        by itself) and the rule policy of pipeline/cut_rules.py; in the app those of its one lecturer,
+        on the server those of whoever recorded it. keys: the key of a service ("openai",
+        "assemblyai", "elevenlabs") or None; the app's Credential Manager unless given."""
         self.queue_file = Path(queue_file)
         self.can_run, self.terms_for, self.cut_settings = can_run, terms_for, cut_settings
+        self.key = keys or (lambda service: services.key(service))
         self.video_args, self.sound_dir = video_args, sound_dir
         self.lock = threading.RLock()
         self.wake = threading.Event()
@@ -235,17 +242,17 @@ class PipelineRunner:
                 subtitles.run(folder)
                 self._set(folder, "subtitles", "done")
                 return True
-            settings = self.cut_settings()
+            settings = self.cut_settings(folder)
             wanted = settings.get("auto", True) or read_state(folder).get("cut_requested")
             if wanted and steps.get("cut", {}).get("state") != "done" and not (folder / "edit.json").exists():
-                key = services.key("openai")
+                key = self.key("openai")
                 if not key:
                     self._set(folder, "cut", "waiting", "Schnitt-Vorschlag wartet auf den OpenAI-Schlüssel "
                               "(Einstellungen, KI-Dienste)")
                     return False
                 listener = None
-                aai = services.key("assemblyai")
-                base = aai and services.assemblyai_base(aai)
+                aai = self.key("assemblyai")
+                base = aai and transcribe.assemblyai_base(aai)
                 if base:
                     listener = transcribe.AssemblyAI(aai, base)
                 self._set(folder, "cut", "running", "Der Schnitt-Agent sieht sich die Aufnahme an …")
@@ -267,7 +274,7 @@ class PipelineRunner:
                 return True
             if (folder / "render.json").exists() and \
                     (not summary.current(folder) or read_state(folder).get("summary_requested")):
-                key = services.key("openai")
+                key = self.key("openai")
                 if not key:
                     self._set(folder, "summary", "waiting", "Zusammenfassung wartet auf den OpenAI-Schlüssel "
                               "(Einstellungen, KI-Dienste)")
@@ -297,7 +304,7 @@ class PipelineRunner:
         """The sounds of the cards are made once with ElevenLabs; without its key the cards stay silent."""
         if not self.sound_dir or len(sounds.available(self.sound_dir)) == len(sounds.LIBRARY):
             return
-        key = services.key("elevenlabs")
+        key = self.key("elevenlabs")
         if not key:
             return
         self._set(folder, "render", "running", "Die Klänge für Tafeln entstehen (einmalig) …")
@@ -309,11 +316,11 @@ class PipelineRunner:
     def _transcribers(self) -> list:
         """AssemblyAI first, whisper-1 as the fallback while it still runs; those with a key."""
         found = []
-        key = services.key("assemblyai")
-        base = key and services.assemblyai_base(key)
+        key = self.key("assemblyai")
+        base = key and transcribe.assemblyai_base(key)
         if base:
             found.append(transcribe.AssemblyAI(key, base))
-        key = services.key("openai")
+        key = self.key("openai")
         if key and dt.date.today() < WHISPER_END:
             found.append(transcribe.OpenAIWhisper(key))
         return found

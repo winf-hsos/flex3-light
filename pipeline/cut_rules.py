@@ -30,8 +30,27 @@ SHORTEST_SPAN = 1.0                  # program spans shorter than this are Alt+T
 MERGE_GAP = 2.0                      # spans of the same rule closer than this become one
 
 
+CARD_DEFAULTS = {"title_card": True, "closing_card": True, "chapter_display": "card", "chapter_sound": True,
+                 "music": True}
+AFTER_RECORDING = ("nothing", "transcribe", "cut")   # what starts by itself once a recording is filed
+
+
 def policy(settings: dict | None) -> dict:
     return {**DEFAULT_POLICY, **(settings or {})}
+
+
+def settings_from(preferences: dict) -> dict:
+    """The lecturer's settings for the cut from the preferences of their profile ({key: value},
+    the cut ones as "cut.<field>"): cards, the rule policy, and "auto" when the cut proposal
+    follows the transcription by itself. The same in the app and on the server."""
+    cut = {k[4:]: v for k, v in preferences.items() if k.startswith("cut.")}
+    cut.pop("auto", None)                       # an old switch, replaced by after_recording on 2026-11-04
+    return {**CARD_DEFAULTS, **policy(cut), "auto": after_recording(preferences) == "cut"}
+
+
+def after_recording(preferences: dict) -> str:
+    value = preferences.get("after_recording")
+    return value if value in AFTER_RECORDING else "nothing"
 
 
 def edges(words: list[dict], duration: float) -> list[dict]:
@@ -91,6 +110,19 @@ def programs(activity: list, pol: dict) -> list[dict]:
     return [edit.item("cut", a, b, why, "rule", 0.8 if "accepted" in states else 0.5,
                       "accepted" if "accepted" in states else "proposed", "privacy", rule="program")
             for a, b, why, states in _merge(spans)]
+
+
+def without_titles(activity: list, titles: list[str]) -> list[list]:
+    """The activity as it may leave the device (decision of 2026-11-06): per span start, end and
+    program, and instead of the window title only the word of the title list it contains, or ""
+    if none. programs() above gives the same result on this as on the full log, and the
+    agent sees which word matched instead of the title."""
+    words = [t.lower() for t in titles]
+    out = []
+    for start, end, process, title in activity:
+        hit = next((w for w in words if w in (title or "").lower()), "")
+        out.append([start, end, process, hit])
+    return out
 
 
 def program_summary(activity: list) -> list[dict]:

@@ -35,8 +35,30 @@ INVENTED = ("untertitel im auftrag des zdf", "untertitelung des zdf", "untertite
             "amara.org", "copyright", "zdf", "swr")
 
 
+# AssemblyAI keeps data in the US or, for accounts created there, in the EU; a key works in one region only.
+ASSEMBLYAI_REGIONS = {"EU": "https://api.eu.assemblyai.com", "USA": "https://api.assemblyai.com"}
+_regions: dict[str, str] = {}       # key -> address of its region, once found
+
+
 class TranscriptionError(RuntimeError):
     pass
+
+
+def assemblyai_base(key: str) -> str | None:
+    """The address of the region that accepts this key (EU first), or None if none does or the
+    service cannot be reached; asks only once per key and run. Sends no audio and no text."""
+    if key not in _regions:
+        for base in ASSEMBLYAI_REGIONS.values():
+            req = urllib.request.Request(f"{base}/v2/transcript?limit=1", headers={"Authorization": key})
+            try:
+                with urllib.request.urlopen(req, timeout=15):
+                    _regions[key] = base
+                    break
+            except urllib.error.HTTPError:
+                continue
+            except OSError:
+                return None
+    return _regions.get(key)
 
 
 class OpenAIWhisper:

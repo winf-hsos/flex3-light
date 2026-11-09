@@ -202,7 +202,7 @@ class Core:
         # Transcription and the rest of the pipeline run on filed recordings, never during a recording.
         binaries.configure(hardware.ffmpeg(), typst=hardware.typst())   # the bundled ffmpeg too; decoding on the GPU measured slower (2026-10-29)
         self.pipeline = PipelineRunner(PIPELINE_QUEUE, lambda: self.session is None, self._terms_for,
-                                       lambda: self.cut_settings(), hardware.ffmpeg_video_args(),
+                                       lambda folder: self.cut_settings(), hardware.ffmpeg_video_args(),
                                        APP_DIR / "sounds").start()
         self.delivery.on_archived = self._archived
 
@@ -261,6 +261,7 @@ class Core:
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
                 "publish_dir": str(self.publish_dir()),
                 "options": dict(self.options), "cut": self.cut_settings(), "after_recording": self.after_recording(),
+                "pipeline_place": self.profile.preference("pipeline") or "device",
                 "server": self.server_info()}
 
     def _device_id(self, kind: str) -> str | None:
@@ -553,20 +554,30 @@ class Core:
 
     # ---------------------------------------------------------- after a recording
 
-    AFTER_RECORDING = ("nothing", "transcribe", "cut")
+    AFTER_RECORDING = cut_rules.AFTER_RECORDING
 
     def after_recording(self) -> str:
         """What starts by itself once a recording is filed: nothing (the default, decided 2026-11-04),
         the transcription, or the transcription and then the cut proposal."""
-        value = self.profile.preference("after_recording")
-        return value if value in self.AFTER_RECORDING else "nothing"
+        return cut_rules.after_recording(self.profile.preferences())
+
+    def pipeline_place(self) -> str:
+        """Where filed recordings are worked on: "device" (this computer, the default until the review
+        runs on the server) or "server". A preference of the profile, so a lecture is never worked
+        on twice and paid twice."""
+        connected = getattr(self.delivery, "client", None) is not None
+        return "server" if self.profile.preference("pipeline") == "server" and connected else "device"
+
+    def set_pipeline_place(self, value: str) -> None:
+        if value in ("device", "server") and self.profile.set_preferences({"pipeline": value}):
+            self.delivery.wake.set()
 
     def set_after_recording(self, value: str) -> None:
         if value in self.AFTER_RECORDING and self.profile.set_preferences({"after_recording": value}):
             self.delivery.wake.set()              # the profile goes to the server at once
 
     def _archived(self, folder: Path) -> None:
-        if self.after_recording() != "nothing":
+        if self.after_recording() != "nothing" and self.pipeline_place() == "device":
             self.pipeline.enqueue(folder)
 
     def start_transcription(self, sid: str) -> str:
@@ -582,9 +593,7 @@ class Core:
     def cut_settings(self) -> dict:
         """The lecturer's settings for the cut, from the profile: propose by itself, pauses, programs to
         cut or keep, cards and sounds; "sounds" lists the sounds already made."""
-        return {"title_card": True, "closing_card": True, "chapter_display": "card",
-                "chapter_sound": True, "music": True, **cut_rules.policy(self.profile.preferences("cut.")),
-                "auto": self.after_recording() == "cut",       # the cut follows the transcription by itself
+        return {**cut_rules.settings_from(self.profile.preferences()),
                 "sounds": sorted(sounds.available(APP_DIR / "sounds"))}
 
     def set_cut_settings(self, values: dict) -> None:
@@ -729,14 +738,9 @@ class Core:
             return error
         folder, e = found
         if approved:
-            open_items = [x for x in e["items"] if x["state"] == "proposed"]
-            if open_items:
-                return f"Noch {len(open_items)} Vorschläge offen: annehmen oder ablehnen, dann freigeben."
-            if "cards" not in e:                      # proposed before there were cards: the defaults
-                meta = json.loads((folder / "session.json").read_text(encoding="utf-8"))
-                e["cards"] = edit.default_cards(e, meta, self.cut_settings())
-            e["approved"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
-            edit.save(folder, e)
+            error = edit.approve(folder, self.cut_settings())
+            if error:
+                return error
             self.pipeline.failed.discard(str(folder))  # a failed render is tried again
             self.pipeline.enqueue(folder)            # render it
         else:

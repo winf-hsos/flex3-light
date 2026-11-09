@@ -161,7 +161,7 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline_runner.cut_agent, "run", fake_run)
     monkeypatch.setattr(pipeline_runner.services, "key", lambda s: "sk" if s == "openai" else None)
     settings = {"auto": False, **cut_rules.policy(None)}
-    r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda: settings)
+    r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda f: settings)
     r.enqueue(folder)
     assert r._process(folder) and calls == []                    # switched off: nothing proposed
     settings["auto"] = True
@@ -340,3 +340,39 @@ def test_changing_one_cut_setting_keeps_the_default_title_rule(tmp_path, monkeyp
     _profile_of(fresh, tmp_path / "other")
     core._move_preferences_to_profile(settings, fresh.profile)
     assert fresh.cut_settings()["cut_titles"] == rules.DEFAULT_POLICY["cut_titles"]
+
+
+def test_a_lecture_is_worked_on_in_one_place_only(tmp_path):
+    import core
+    import pipeline_runner
+    c = core.Core.__new__(core.Core)
+    c.settings, c.save = {}, lambda: None
+    _profile_of(c, tmp_path)
+    c.pipeline = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: False, lambda m: [])
+    c.set_after_recording("transcribe")
+    c.set_pipeline_place("server")
+    folder = tmp_path / "rec"
+    folder.mkdir()
+    assert c.pipeline_place() == "device"                 # without a server it stays here
+    c._archived(folder)
+    assert c.pipeline.queued(folder)
+    c.pipeline.forget(folder)
+    c.delivery.client = object()                          # connected: the server does it
+    assert c.pipeline_place() == "server"
+    c._archived(folder)
+    assert not c.pipeline.queued(folder)
+
+
+def test_the_activity_goes_to_the_server_without_titles(tmp_path):
+    from types import SimpleNamespace
+
+    import delivery
+    import lecturer_profile
+    p = lecturer_profile.Profile(tmp_path / "profile.json")
+    p.set_preferences({"cut.cut_titles": ["moodle"]})
+    d = delivery.Delivery(tmp_path / "raw", None, profile=p)
+    s = SimpleNamespace(data={"activity": [[0, 5, "chrome.exe", "Kurs - Moodle - Google Chrome"],
+                                           [5, 9, "chrome.exe", "Gmail - Posteingang"]], "private": [[1, 2]]})
+    assert d._activity_for_server(s) == {"activity": [[0, 5, "chrome.exe", "moodle"], [5, 9, "chrome.exe", ""]],
+                                         "private": [[1, 2]]}
+    assert d._activity_for_server(SimpleNamespace(data={})) is None

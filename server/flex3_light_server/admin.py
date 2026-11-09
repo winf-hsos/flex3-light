@@ -4,19 +4,69 @@
     python -m flex3_light_server.admin --data DIR users                     lecturers
     python -m flex3_light_server.admin --data DIR devices                   devices with last contact
     python -m flex3_light_server.admin --data DIR revoke DEVICE_ID          a device stops working (lost laptop)
+    python -m flex3_light_server.admin --data DIR import FOLDER --user ID   a recording made before the server, for a lecturer
 
 --data defaults to FLEX3_LIGHT_SERVER_DATA, --url to FLEX3_LIGHT_SERVER_URL: the address the
 lecturer's FLEX3 Light reaches the server at. The connection code is printed once and is
 valid for 14 days; it contains the key and the address, so the lecturer only pastes one line.
+
+import takes over a session folder that FLEX3 Light filed locally, with the files of the
+recording only (session.json, recording.mp4, screen.mp4, camera.mp4) and the activity log
+without window titles, matched against the lecturer's title list as the app does on upload.
+Results of a local pipeline stay behind; the server's pipeline is started on request
+(POST /sessions/{id}/pipeline). The folder appears in sessions/ complete or not at all.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
+import shutil
 import sys
 from pathlib import Path
 
 from .accounts import Accounts, connection_code
+
+RECORDING_FILES = ("recording.mp4", "screen.mp4", "camera.mp4")
+
+
+def import_session(data: Path, source: Path, user: dict) -> str:
+    """Copy a locally filed session folder into the server's sessions for a lecturer; its id."""
+    from . import app, profiles
+    from .worker import cut_rules                    # pipeline/ at the repository root
+    meta = json.loads((source / "session.json").read_text(encoding="utf-8"))
+    sid = meta.get("session_id", "")
+    if not app.SESSION_ID.match(sid):
+        raise SystemExit(f"keine gültige session_id in {source / 'session.json'}")
+    target = data / "sessions" / sid
+    if target.exists():
+        raise SystemExit(f"Die Aufnahme {sid} ist schon auf dem Server.")
+    if not (source / "recording.mp4").exists():
+        raise SystemExit("recording.mp4 fehlt")
+    tmp = data / "sessions" / f".import-{sid}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    try:
+        for name in RECORDING_FILES:
+            if (source / name).exists():
+                shutil.copy2(source / name, tmp / name)
+        meta.update(instructor_id=user["id"], instructor_name=user["name"])
+        (tmp / "session.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        if (source / "activity.json").exists():
+            log = json.loads((source / "activity.json").read_text(encoding="utf-8"))
+            prefs = profiles.Store(data / "profiles").values(user["id"])
+            titles = cut_rules.settings_from(prefs)["cut_titles"]
+            clean = app.clean_activity({"activity": cut_rules.without_titles(log.get("activity", []), titles),
+                                        "private": log.get("private", [])})
+            (tmp / "activity.json").write_text(json.dumps(
+                {"note": "Imported; window titles replaced by the word of the title list they contained.", **clean},
+                ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, target)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return sid
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("devices")
     rev = sub.add_parser("revoke")
     rev.add_argument("device_id")
+    imp = sub.add_parser("import", help="a recording filed by FLEX3 Light before it had a server")
+    imp.add_argument("folder")
+    imp.add_argument("--user", required=True, help="name or id of the lecturer who recorded it")
     a = ap.parse_args(argv)
     accounts = Accounts(Path(a.data) / "accounts.sqlite")
     try:
@@ -50,6 +103,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{d['id']}  {d['user_name']}  {d['name']}  {state}")
         elif a.command == "revoke":
             print("gesperrt" if accounts.revoke(a.device_id) else "kein aktives Gerät mit dieser Kennung")
+        elif a.command == "import":
+            user = accounts.find_user(a.user)
+            if user is None:
+                raise SystemExit(f"keine Lehrperson {a.user!r}")
+            print(f"übernommen: {import_session(Path(a.data), Path(a.folder), user)}")
     finally:
         accounts.close()
     return 0

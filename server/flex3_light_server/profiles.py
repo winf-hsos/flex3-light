@@ -8,8 +8,11 @@ and in the app (lecturer_profile.py), so both always end up with the same list.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+from pathlib import Path
 
 LANGUAGE = re.compile(r"^[a-z]{2}$")
 CODE = re.compile(r"^[a-z0-9-]{0,40}$")
@@ -106,3 +109,39 @@ def merge_preferences(ours: dict[str, dict], theirs: dict[str, dict]) -> dict[st
     for key, item in theirs.items():
         result[key] = item if key not in result else newer(result[key], item)
     return result
+
+
+class Store:
+    """The profiles on disk, one JSON file per lecturer, named by a hash of their id."""
+
+    def __init__(self, folder: Path):
+        self.folder = Path(folder)
+        self.folder.mkdir(parents=True, exist_ok=True)
+
+    def file(self, user_id: str) -> Path:
+        return self.folder / f"{hashlib.sha256(user_id.encode()).hexdigest()[:32]}.json"
+
+    def load(self, user_id: str) -> tuple[dict[str, dict], dict[str, dict]]:
+        """(modules by id, preferences by key) of a lecturer; empty for a new one."""
+        try:
+            data = json.loads(self.file(user_id).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}, {}
+        return {e["id"]: e for e in data["modules"]}, data.get("preferences", {})
+
+    def save(self, user_id: str, modules: dict[str, dict], preferences: dict[str, dict]) -> None:
+        f = self.file(user_id)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"user_id": user_id, "modules": list(modules.values()), "preferences": preferences},
+                                  ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, f)
+
+    def values(self, user_id: str) -> dict:
+        """The lecturer's preferences as {key: value}."""
+        return {k: v["value"] for k, v in self.load(user_id)[1].items()}
+
+    def module(self, user_id: str, name: str) -> dict | None:
+        """The lecturer's module of this name (a recording's course_name), if not deleted."""
+        norm = " ".join(name.casefold().split())
+        return next((m for m in self.load(user_id)[0].values()
+                     if not m.get("deleted") and " ".join(m.get("name", "").casefold().split()) == norm), None)

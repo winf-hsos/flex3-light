@@ -137,6 +137,9 @@ class Api:
     def set_after_recording(self, value):
         self._core.set_after_recording(value)
 
+    def set_pipeline_place(self, value):
+        self._core.set_pipeline_place(value)
+
     def change_cut_item(self, sid, item_id, changes):
         return self._core.change_cut_item(sid, item_id, changes or {})
 

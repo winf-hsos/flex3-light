@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable
 
 import split
+from pipeline import cut_rules
 from server_client import ServerClient, ServerError
 
 VERSION = "0.1.0"
@@ -425,6 +426,17 @@ class Delivery:
         self.wake.set()
         return True
 
+    def _activity_for_server(self, s: Session) -> dict | None:
+        """What the server's cut needs from the activity log: programs, the word of the lecturer's
+        title list a window title contained (matched here, the titles stay on this computer) and
+        the privacy-key spans."""
+        if not s.data.get("activity") and not s.data.get("private"):
+            return None
+        prefs = self.profile.preferences("cut.") if self.profile is not None else {}
+        titles = cut_rules.policy(prefs)["cut_titles"]
+        return {"activity": cut_rules.without_titles(s.data.get("activity", []), titles),
+                "private": s.data.get("private", [])}
+
     # ---------------------------------------------------------- uploader
 
     def connection(self) -> str:
@@ -508,7 +520,7 @@ class Delivery:
             return False
         n = len(segs)
         meta = session_document(s)
-        state = self.client.complete(s.id, meta, {t: n for t in s.tracks()})
+        state = self.client.complete(s.id, meta, {t: n for t in s.tracks()}, self._activity_for_server(s))
         while state == "assembling":
             time.sleep(2)
             st = self.client.status(s.id)

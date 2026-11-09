@@ -1,2 +1,4 @@
 fastapi>=0.110
 uvicorn>=0.29
+numpy>=2.0     # the pipeline: loudness profile for the cut agent
+Pillow>=10.1   # the pipeline: contact sheets and cards

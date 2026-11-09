@@ -76,8 +76,13 @@ class ServerClient:
                        headers={"X-Content-SHA256": sha256, "Content-Type": "video/mp4"},
                        length=path.stat().st_size)
 
-    def complete(self, sid: str, session: dict, parts: dict[str, int]) -> str:
-        return self._call("POST", f"/sessions/{sid}/complete", body={"session": session, "parts": parts})[1]["state"]
+    def complete(self, sid: str, session: dict, parts: dict[str, int], activity: dict | None = None) -> str:
+        """activity: {"activity": [[start, end, program, matched word]], "private": [[start, end]]}, never
+        window titles (cut_rules.without_titles)."""
+        body = {"session": session, "parts": parts}
+        if activity is not None:
+            body["activity"] = activity
+        return self._call("POST", f"/sessions/{sid}/complete", body=body)[1]["state"]
 
     def delete(self, sid: str) -> None:
         self._call("DELETE", f"/sessions/{sid}")

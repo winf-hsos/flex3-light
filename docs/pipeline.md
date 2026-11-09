@@ -175,10 +175,10 @@ Streaming speech recognition during the lecture, shown in a transparent subtitle
 
 ## How it is built
 
-- A package `pipeline/` in this repository, independent of the window: each step is a function `run(session_dir, settings)` that reads its inputs from the folder and writes its outputs there. The app calls it after the stop; the server will call the same functions.
+- A package `pipeline/` in this repository, independent of the window: each step is a function `run(session_dir, settings)` that reads its inputs from the folder and writes its outputs there. The app calls it after the stop; since 2026-11-09 the server calls the same functions through the same `pipeline_runner.py` (`server/flex3_light_server/worker.py`), with the project's keys and the settings from the profile of whoever recorded. The steps set Windows' process flags only on Windows, choose NVENC or x264 by what ffmpeg can open (`binaries.video_args()`), and find the AssemblyAI region themselves; only the text recognition is Windows' own and missing elsewhere. Where a lecture is worked on is the lecturer's choice ("Verarbeiten", preference `pipeline`): on their computer or on the server, never both.
 - Providers behind small adapters, as the FLEX3 transcription design asks: transcription (OpenAI now, local Whisper or another provider later), language model, ElevenLabs.
 - Prompts and the edit list format as files, versioned in the repository.
-- Keys in the Windows Credential Manager, never in `settings.json`, never in logs.
+- Keys in the Windows Credential Manager in the app and in a secrets file on the server, never in `settings.json`, never in logs.
 
 ## Order of work
 

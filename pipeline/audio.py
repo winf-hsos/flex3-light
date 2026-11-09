@@ -12,8 +12,6 @@ from pathlib import Path
 
 from . import binaries
 
-NO_WINDOW = 0x08000000
-BELOW_NORMAL_PRIORITY = 0x00004000
 NOISE, MIN_SILENCE = "-35dB", 0.4
 TARGET, LONGEST = 600.0, 900.0          # seconds per piece: aim, and hard limit without a pause
 
@@ -21,7 +19,7 @@ TARGET, LONGEST = 600.0, 900.0          # seconds per piece: aim, and hard limit
 def _ffmpeg(*args: str) -> subprocess.CompletedProcess:
     r = subprocess.run([binaries.ffmpeg(), "-hide_banner", "-nostats", *args], stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, encoding="utf-8", errors="replace",
-                       creationflags=NO_WINDOW | BELOW_NORMAL_PRIORITY)
+                       creationflags=binaries.flags(low=True))
     return r
 
 

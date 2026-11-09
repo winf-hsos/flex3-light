@@ -11,12 +11,14 @@ into regions as fractions of the picture, the form the edit list uses.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import tempfile
 from pathlib import Path
 
-NO_WINDOW = 0x08000000
+from . import binaries
+
 MAX_SIDE = 2560                      # Windows' OCR refuses larger pictures (OcrEngine.MaxImageDimension)
 
 SCRIPT = r'''
@@ -64,10 +66,12 @@ def _script() -> Path:
 
 def recognize(image: Path, language: str = "de") -> dict:
     """{"width", "height", "lines": [{"text", "words": [{"text", "x", "y", "w", "h"}]}]} in pixels."""
+    if os.name != "nt":           # a server on Linux: the agent gets this as the tool's answer and goes on
+        raise RuntimeError("Texterkennung gibt es nur unter Windows; auf diesem Server nicht verfügbar")
     tag = {"de": "de-DE", "en": "en-US"}.get(language, language)
     r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                         "-File", str(_script()), "-Path", str(Path(image).resolve()), "-Lang", tag],
-                       stdin=subprocess.DEVNULL, capture_output=True, timeout=60, creationflags=NO_WINDOW)
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=60, creationflags=binaries.flags())
     out = r.stdout.decode("utf-8", "replace").strip()
     if r.returncode != 0 or not out.startswith("{"):
         raise RuntimeError("Texterkennung fehlgeschlagen: " + (r.stderr.decode("utf-8", "replace") or out)[-300:])

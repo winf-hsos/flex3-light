@@ -26,7 +26,6 @@ from . import binaries, cut_agent, files, publish
 HERE = Path(__file__).resolve().parent
 PROMPT, TEMPLATE = HERE / "prompts" / "summary.md", HERE / "templates" / "summary.typ"
 MODEL, EFFORT = cut_agent.MODEL, "medium"
-NO_WINDOW = 0x08000000
 LANGUAGES = ("de", "en")
 
 _text = {"type": "string"}
@@ -160,7 +159,7 @@ def typeset(data: dict, out: Path, work: Path) -> list[dict]:
     files.write_json(work / "summary-data.json", data)
     base = [binaries.typst(), "--root", str(work), "--input", "data=summary-data.json", str(work / "summary.typ")]
     run = lambda args: subprocess.run([base[0], *args], stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                      encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
+                                      encoding="utf-8", errors="replace", creationflags=binaries.flags())
     r = run(["compile", *base[1:], str(out)])
     if r.returncode != 0:
         raise RuntimeError("Typst: " + r.stderr[:600])
