@@ -431,11 +431,6 @@
   /* ------------------------------------------------------------- my recordings on the server (phase 4) */
   .lib-source { display: none; align-items: center; gap: 12px; margin-bottom: 12px; }
   .lib-source.on { display: flex; }
-  .lib-source .switch { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--hover); }
-  .lib-source .switch button { border: 0; background: none; padding: 6px 12px; border-radius: 8px; font: inherit;
-    font-size: 13px; color: var(--slate); cursor: pointer; }
-  .lib-source .switch button.active { background: var(--surface); color: var(--ink); font-weight: 600;
-    box-shadow: 0 1px 2px rgba(27, 39, 51, .12); }
   .lib-source .link { margin-left: auto; }
   .server-frame { display: none; flex: 1; min-height: 0; width: 100%; border: 0; background: var(--paper); }
   /* the same file as a page of the server: only "Meine Aufnahmen", no window frame */
@@ -536,7 +531,6 @@
     <!-- my recordings: list on the left, the chosen one on the right -->
     <section class="page" id="page-library">
       <div class="lib-source" id="libSource">
-        <div class="switch"><button id="srcServer" onclick="showSource('server')">Auf dem Server</button><button id="srcDevice" onclick="showSource('device')">Auf diesem Rechner</button></div>
         <span class="hint" id="libSourceNote"></span>
         <button class="link" id="openInBrowser" onclick="openServerLibrary()">Im Browser öffnen</button>
       </div>
@@ -552,6 +546,11 @@
         <h2>Hier erscheinen deine Aufnahmen</h2>
         <p>Nach jeder Aufnahme siehst du hier das Video, die Transkription und wie weit die Aufnahme auf dem Weg zur Veröffentlichung ist.</p>
         <button class="btn primary" onclick="showPage('record')">Erste Aufnahme vorbereiten</button>
+      </div>
+      <div class="empty" id="noServer" style="display:none">
+        <h2>Deine Aufnahmen liegen auf dem FLEX3-Server</h2>
+        <p>Dort werden sie transkribiert, geschnitten und veröffentlicht, und hier siehst du sie, sobald FLEX3 Light mit dem Server verbunden ist. Bis dahin legt die App jede Aufnahme auf diesem Rechner ab.</p>
+        <button class="btn primary" onclick="showPage('settings')">Mit dem Server verbinden</button>
       </div>
       <div class="empty" id="signedOut" style="display:none">
         <h2>Die Anmeldung ist abgelaufen</h2>
@@ -597,8 +596,7 @@
             <label class="toggle"><input type="checkbox" id="hide_taskbar" onchange="setOption(this)"><span class="knob"></span><span><b>Taskleiste nicht aufnehmen</b><small>Der Bildschirm wird ohne die Windows-Taskleiste aufgezeichnet.</small></span></label>
             <label class="toggle"><input type="checkbox" id="hide_alttab" onchange="setOption(this)"><span class="knob"></span><span><b>Fensterwechsel ausblenden</b><small>Bei Alt+Tab und den Vorschaubildern der Taskleiste bleibt das Bild der Aufnahme kurz stehen.</small></span></label>
             <div class="setting-row"><span>Nach der Aufnahme</span><select id="after_recording" onchange="setAfterRecording(this.value)"><option value="nothing">nur speichern</option><option value="transcribe">transkribieren</option><option value="cut">transkribieren und Schnitt vorschlagen</option></select></div>
-            <div class="setting-row" id="placeRow" style="display:none"><span>Verarbeiten</span><select id="pipeline_place" onchange="setPipelinePlace(this.value)"><option value="device">auf diesem Rechner</option><option value="server">auf dem Server</option></select></div>
-            <div class="section-note">Was nicht von selbst startet, startest du unter „Meine Aufnahmen“ bei der Aufnahme.<span id="placeNote" style="display:none"> Auf dem Server verarbeitete Aufnahmen siehst du hier erst, wenn die Prüfoberfläche dort steht.</span></div>
+            <div class="section-note">Das macht der FLEX3-Server, sobald die Aufnahme bei ihm angekommen ist. Was nicht von selbst startet, startest du unter „Meine Aufnahmen“ bei der Aufnahme.</div>
           </div>
           <div class="panel section">
             <div class="panel-head"><h2>Schnitt</h2></div>
@@ -746,8 +744,8 @@
     for (const s of document.querySelectorAll(".page")) s.classList.toggle("active", s.id === "page-" + name);
     $("pageTitle").textContent = PAGES[name][0];
     $("pageText").textContent = PAGES[name][1];
-    if (name === "library") loadRecordings();
-    if (name === "library" && !SERVER && librarySource === "server" && !frameSignedIn) signInFrame();
+    if (name === "library" && SERVER) loadRecordings();
+    if (name === "library" && !SERVER && serverOrigin && !frameSignedIn) signInFrame();
     if (name === "modules") renderModules();
     if (name !== "library" && $("player")) $("player").pause();
     updatePreview();
@@ -803,7 +801,6 @@
     for (const k in d.options) $(k).checked = d.options[k];
     $("after_recording").value = d.after_recording || "nothing";
     fillServer(d.server);
-    fillPlace(d.pipeline_place);
     fillLibrarySource(d);
     for (const k of ["archive_dir", "raw_dir", "publish_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
     previewUrl = d.preview_url || "";
@@ -844,11 +841,6 @@
   const selectDevice = el => { api().select(el.id, el.value); updatePreview(); updateReady(); };
   const setOption = el => api().option(el.id, el.checked);
   const setAfterRecording = value => api().set_after_recording(value);
-  function setPipelinePlace(value) { api().set_pipeline_place(value); $("placeNote").style.display = value === "server" ? "" : "none"; }
-  function fillPlace(value) {
-    $("pipeline_place").value = value || "device";
-    $("placeNote").style.display = value === "server" && $("placeRow").style.display === "" ? "" : "none";
-  }
   const sendTexts = () => api().texts(moduleValue(), $("topic").value);
   async function pickFolder(kind) { await api().folder(kind); load(); }
   async function startRecording() {
@@ -857,7 +849,7 @@
     if (error) showHint(error, "error");
   }
   function showHint(text, kind) { const h = $("hint"); h.textContent = text; h.className = "hint " + (kind || ""); }
-  async function showLatest() { showPage("library"); await loadRecordings(); if (recordings.length) selectRecording(recordings[0].id); }
+  const showLatest = () => showPage("library");
 
   // ---------------------------------------------------------------- my recordings
   let recordings = [], selectedId = null, shownMedia = "";
@@ -882,9 +874,8 @@
   async function loadRecordings() {
     recordings = await api().recordings();
     showBadge();
-    const local = librarySource !== "server";               // the app shows the server's page instead
-    $("library").style.display = local && recordings.length ? "" : "none";
-    $("libraryEmpty").style.display = local && !recordings.length ? "" : "none";
+    $("library").style.display = recordings.length ? "" : "none";
+    $("libraryEmpty").style.display = recordings.length ? "none" : "";
     renderRecordings();
     if (recordings.length && !recordings.some(r => r.id === selectedId)) selectRecording(recordings[0].id);
     else if (selectedId) refreshDetail();
@@ -1860,7 +1851,6 @@
         + "Module, Schnitt und „Nach der Aufnahme“ liegen in deinem Profil dort und gelten auf allen deinen Rechnern."
       : "Mit dem Verbindungscode vom Server meldest du diesen Rechner an. Bis dahin bleibt alles auf diesem Rechner.";
     $("serverConnect").style.display = on ? "none" : "";
-    $("placeRow").style.display = on ? "" : "none";             // where the pipeline runs: only with a server
     $("serverDisconnect").style.display = on ? "" : "none";
   }
   function serverMessage(text, kind) { const m = $("serverMsg"); m.textContent = text; m.className = "hint " + (kind || ""); }
@@ -1976,7 +1966,6 @@
   }
   document.querySelector(".topbar").addEventListener("dblclick", ev => { if (!ev.target.closest("button")) toggleMaximize(); });
 
-  let libraryTick = 0;
   async function tick() {
     try {
       const st = await api().status();
@@ -1996,7 +1985,6 @@
           const d = await api().data();
           fillModules(d);
           $("after_recording").value = d.after_recording || "nothing";
-          fillPlace(d.pipeline_place);
           if (document.activeElement !== $("cut_pause_min")) { cutSettings = d.cut || {}; fillCutSettings(); }
         }
       }
@@ -2027,40 +2015,23 @@
       else showHint(st.hotkey_errors.length ? "Tasten belegt: " + st.hotkey_errors.join(", ") : "", "error");
       updatePreview();
       updateReady();
-      if (!st.recording && ++libraryTick % 20 === 0) {                                     // every 5 s
-        if (page === "library") loadRecordings();
-        else { recordings = await api().recordings(); showBadge(); }
-      }
     } catch (e) { }
     setTimeout(tick, 250);
   }
-  // ---------------------------------------------------------------- my recordings on the server (phase 4)
-  // With a server connected, "Meine Aufnahmen" shows the server's page in a frame (this file in its
-  // server mode), signed in with a one-time ticket the app gets with its device token. The recordings
-  // on this computer stay one click away until they are taken over (phase 5).
-  let librarySource = "", serverOrigin = "", frameSignedIn = false, lastSignIn = 0;
+  // ---------------------------------------------------------------- my recordings on the server
+  // Since phase 5 the app only records. "Meine Aufnahmen" shows the server's page in a frame (this
+  // file in its server mode), signed in with a one-time ticket the app gets with its device token;
+  // without a server it says where the recordings will be.
+  let serverOrigin = "", frameSignedIn = false, lastSignIn = 0;
   function fillLibrarySource(d) {
     const on = !!(d.server && d.server.url);
-    $("libSource").classList.toggle("on", on);
     const origin = on ? new URL(d.server.url).origin : "";
     if (origin !== serverOrigin) { serverOrigin = origin; frameSignedIn = false; }
-    if (!on) librarySource = "device";
-    else if (!librarySource || librarySource === "device" && !$("libSource").dataset.chosen)
-      librarySource = d.pipeline_place === "server" ? "server" : "device";
-    showSource(librarySource, true);
-  }
-  function showSource(which, auto) {
-    if (!auto) $("libSource").dataset.chosen = "1";
-    librarySource = which === "server" && serverOrigin ? "server" : "device";
-    const server = librarySource === "server";
-    $("srcServer").classList.toggle("active", server);
-    $("srcDevice").classList.toggle("active", !server);
-    $("serverFrame").style.display = server ? "block" : "none";
-    $("openInBrowser").style.display = server ? "" : "none";
-    $("library").style.display = !server && recordings.length ? "" : "none";
-    $("libraryEmpty").style.display = !server && !recordings.length ? "" : "none";
-    if (!server && $("player")) $("player").pause();
-    if (server && !frameSignedIn && page === "library") signInFrame();
+    $("libSource").classList.toggle("on", on);
+    $("serverFrame").style.display = on ? "block" : "none";
+    $("noServer").style.display = on ? "none" : "";
+    for (const id of ["library", "libraryEmpty"]) $(id).style.display = "none";
+    if (on && !frameSignedIn && page === "library") signInFrame();
   }
   async function signInFrame() {
     if (Date.now() - lastSignIn < 20000) return;               // never a loop of tickets
@@ -2079,7 +2050,7 @@
   if (!SERVER) window.addEventListener("message", async e => {
     const m = e.data, frame = $("serverFrame").contentWindow;
     if (!serverOrigin || e.origin !== serverOrigin || e.source !== frame || !m || !m.flex3) return;
-    if (m.flex3 === "signin") { frameSignedIn = false; if (librarySource === "server" && page === "library") signInFrame(); return; }
+    if (m.flex3 === "signin") { frameSignedIn = false; if (page === "library") signInFrame(); return; }
     let error = "Das kann FLEX3 Light nicht.";
     if (m.flex3 === "package") error = await api().fetch_package(String(m.id));
     if (m.flex3 === "open") error = await api().open_server_url(String(m.url));
@@ -2116,7 +2087,7 @@
   }
 
   if (SERVER) window.addEventListener("DOMContentLoaded", startServerPage);
-  else window.addEventListener("pywebviewready", async () => { await load(); showPage("record"); tick(); loadRecordings(); });
+  else window.addEventListener("pywebviewready", async () => { await load(); showPage("record"); tick(); });
 </script>
 </body>
 </html>

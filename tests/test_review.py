@@ -43,27 +43,21 @@ def test_correction_changes_text_and_subtitles_but_not_the_raw_transcript(tmp_pa
     assert review.term("Quarto.") == "Quarto" and review.term("„OpenCode“,") == "OpenCode"
 
 
-def test_app_corrects_and_adds_the_term_to_the_module(tmp_path):
-    import threading
-    from types import SimpleNamespace
-    import core
-    from lecturer_profile import Profile
+def test_the_lecturer_corrects_and_adds_the_term_to_the_module(tmp_path):
+    from shelf import add_module, shelf
     folder = _session(tmp_path)
     (folder / "session.json").write_text(json.dumps({"session_id": "s1", "course_name": "Planung"}), encoding="utf-8")
     (folder / "pipeline.json").write_text(json.dumps({"steps": {"transcribe": {"state": "done"},
                                                                 "subtitles": {"state": "done"}}}), encoding="utf-8")
-    c = core.Core.__new__(core.Core)                     # no OBS: only what review_word needs
-    c._library = {"s1": folder}
-    c.profile = Profile(tmp_path / "profile.json")
-    module = c.profile.add("Planung", terms=["Forschungsfrage"])
-    c.delivery = SimpleNamespace(wake=threading.Event())
+    c = shelf(tmp_path, {"s1": folder})                  # on the server since phase 5
+    module = add_module(c, "Planung", ["Forschungsfrage"])
     r = c.review_word("s1", 7, "Quarto", as_term=True)
     assert r["ok"] and "Quarto" in r["message"]
-    assert c.profile.find("Planung")["terms"] == ["Forschungsfrage", "Quarto"] and c.delivery.wake.is_set()
+    assert c.store.module(c.user_id, "Planung")["terms"] == ["Forschungsfrage", "Quarto"]   # reaches the app by sync
     assert c.review_word("s1", 6, "das")["ok"]             # unchanged: confirmed
     t = json.loads((folder / "transcript.json").read_text(encoding="utf-8"))
     assert t["words"][7]["word"] == "Quarto." and t["words"][6]["checked"] and t["words"][6]["word"] == "das"
-    assert module["id"] == c.profile.find("Planung")["id"]
+    assert module["id"] == c.store.module(c.user_id, "Planung")["id"]
 
 
 def test_files_wait_while_windows_holds_the_file(tmp_path, monkeypatch):

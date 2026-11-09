@@ -4,9 +4,9 @@ One pipeline, two places to run it (docs/pipeline.md): the worker drives the app
 PipelineRunner and the steps in pipeline/ at the repository root, one recording after the
 other. What a recording gets comes from the profile of whoever recorded it: the module's
 technical terms for the transcription, the cut settings, and whether anything starts by
-itself. A finished upload joins the queue only when the lecturer chose the server as the
-place for the pipeline (preference "pipeline") and "after_recording" is not "nothing";
-everything else is started on request (actions()). Keys are the project's, given to the
+itself. A finished upload joins the queue when the lecturer's "after_recording" is not
+"nothing" (since phase 5 the server is the only place the pipeline runs, so the earlier
+preference "pipeline" no longer counts); everything else is started on request (act()). Keys are the project's, given to the
 server (FLEX3_LIGHT_SERVER_SECRETS), never the lecturer's.
 
 Since the decision of 2026-11-06 the activity log arrives without window titles: the app
@@ -72,7 +72,7 @@ class Worker:
     def arrived(self, folder: Path) -> None:
         """A session folder is complete: start what the lecturer chose to start by itself."""
         prefs = self._preferences(folder)
-        if prefs.get("pipeline") == "server" and cut_rules.after_recording(prefs) != "nothing":
+        if cut_rules.after_recording(prefs) != "nothing":
             self.runner.enqueue(folder)
             logger.info("Pipeline queued for %s", folder.name)
 

@@ -47,20 +47,15 @@ def test_detail_lists_only_media(tmp_path):
     assert d["stations"]["transcript"] == "running"
 
 
-def test_delete_moves_the_folder_away_and_leaves_the_queue(tmp_path, monkeypatch):
-    import shutil
-    import core
-    import pipeline_runner
+def test_delete_moves_the_folder_away_and_leaves_the_queue(tmp_path):
+    from shelf import shelf
     folder = _session(tmp_path, "s1", "2026-10-26 - Thema", {"transcribe": {"state": "done"}})
-    recycled = []
-    monkeypatch.setattr(core, "recycle", lambda p: (recycled.append(p), shutil.rmtree(p)))
-    c = core.Core.__new__(core.Core)                      # no OBS: only what delete_recording needs
-    c._library = library.scan(tmp_path)
-    c.pipeline = pipeline_runner.PipelineRunner(tmp_path / "queue.json", lambda: False, lambda meta: [])
+    c = shelf(tmp_path, library.scan(tmp_path))           # deleting happens on the server since phase 5
     c.pipeline.enqueue(folder)
     c.pipeline.active = str(folder)
     assert "transkribiert" in c.delete_recording("s1") and folder.exists()   # not while it is worked on
     c.pipeline.active = None
-    assert c.delete_recording("s1") == "" and recycled == [folder] and not folder.exists()
+    assert c.delete_recording("s1") == "" and not folder.exists()
+    assert [f.name.startswith(folder.name) for f in (c.data_dir / "trash").iterdir()] == [True]   # into the trash
     assert c.pipeline.queue == [] and "s1" not in c._library
     assert c.delete_recording("s1") == "Die Aufnahme ist nicht mehr in der Ablage."

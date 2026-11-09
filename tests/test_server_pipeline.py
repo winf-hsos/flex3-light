@@ -74,8 +74,8 @@ def test_the_activity_arrives_and_the_profile_decides_what_starts(tmp_path):
     log = json.loads((folder / "activity.json").read_text(encoding="utf-8"))
     assert log["activity"][1] == [30.0, 40.0, "msedge.exe", "posteingang"] and log["private"] == [[12.0, 15.5]]
     assert json.loads((folder / "session.json").read_text(encoding="utf-8"))["instructor_id"] == "lecturer1"
-    assert not worker.runner.queued(folder)                  # the profile says nothing: the app does it
-    prefer(data, "lecturer1", pipeline="server", after_recording="transcribe")
+    assert not worker.runner.queued(folder)                  # the profile says nothing: nothing starts
+    prefer(data, "lecturer1", after_recording="transcribe")  # since phase 5 without "pipeline": only the server works on it
     worker.arrived(folder)
     assert worker.runner.queued(folder)
 

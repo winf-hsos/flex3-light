@@ -27,15 +27,15 @@ import hardware
 import identify
 import library
 import services
-from recordings import Recordings
 import monitors                  # sets DPI awareness on import: physical pixels
 import obs_remote as remote
 import obs_scene as scene
+import delivery as delivery_mod
+import local_server
 from delivery import Delivery, recycle
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
-from pipeline import binaries, cut_rules, publish, sounds
-from pipeline_runner import PipelineRunner
+from pipeline import cut_rules, publish
 from preview import PreviewServer
 import server_client as server_api
 from server_client import ServerClient
@@ -43,7 +43,6 @@ from server_client import ServerClient
 APP_DIR = Path(os.environ["APPDATA"]) / "flex3-light"
 SETTINGS_FILE = APP_DIR / "settings.json"
 PROFILE_FILE = APP_DIR / "profile.json"
-PIPELINE_QUEUE = APP_DIR / "pipeline-queue.json"
 DEFAULT_ARCHIVE = Path.home() / "Videos" / "Lectures"
 DEFAULT_RAW = Path.home() / "Videos" / "flex3-light-raw"   # best outside any cloud-synced folder
 
@@ -164,7 +163,7 @@ class LevelMeter(threading.Thread):
 
 # ------------------------------------------------------------------ core
 
-class Core(Recordings):
+class Core:
     def __init__(self):
         self.lock = threading.RLock()
         self.events: queue.Queue = queue.Queue()
@@ -197,12 +196,10 @@ class Core(Recordings):
         _move_preferences_to_profile(self.settings, self.profile)
         _move_token_out_of_settings(self.settings)
         self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
-        # Transcription and the rest of the pipeline run on filed recordings, never during a recording.
-        binaries.configure(hardware.ffmpeg(), typst=hardware.typst())   # the bundled ffmpeg too; decoding on the GPU measured slower (2026-10-29)
-        self.pipeline = PipelineRunner(PIPELINE_QUEUE, lambda: self.session is None, self._terms_for,
-                                       lambda folder: self.cut_settings(), hardware.ffmpeg_video_args(),
-                                       APP_DIR / "sounds").start()
-        self.delivery.on_archived = self._archived
+        # Since phase 5 (2026-11-09) the app only records: transcription, cut, rendering and the rest
+        # run on the server, and a local server is started here if the connection points to one.
+        local_server.ensure(self.settings.get("server_url", ""))
+        threading.Thread(target=self._tidy, daemon=True, name="tidy").start()
 
         remote.start(profile=scene.NAME, collection=scene.NAME)
         self.o = remote.Obs().__enter__()
@@ -239,7 +236,7 @@ class Core(Recordings):
 
         # Camera preview for the window; it rests while recording or without a camera.
         self.preview = PreviewServer(scene.CAMERA, lambda: self.session is None
-                                     and self.choice.get("camera") != scene.NO_CAMERA, self._media)
+                                     and self.choice.get("camera") != scene.NO_CAMERA)
         self.keys = GlobalKeys(self.events)
         self.keys.start()
         self.meter = LevelMeter()
@@ -252,14 +249,12 @@ class Core(Recordings):
         return {"term": self.term,
                 "modules": [m["name"] for m in self.profile.modules()],
                 "profile": self.profile.modules(), "user": self.profile.user(), "preview_url": self.preview.url,
-                "media_base": self.preview.media_base,
                 "api_keys": services.status(),
                 "module": self.module,
                 "devices": {k: [n for n, _ in v] for k, v in self.devices.items()},
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
                 "publish_dir": str(self.publish_dir()),
                 "options": dict(self.options), "cut": self.cut_settings(), "after_recording": self.after_recording(),
-                "pipeline_place": self.profile.preference("pipeline") or "device",
                 "server": self.server_info()}
 
     def _device_id(self, kind: str) -> str | None:
@@ -503,11 +498,6 @@ class Core(Recordings):
         self.delivery.stop(s, save)
         self.message = ""
 
-    def _terms_for(self, meta: dict) -> list[str]:
-        """The technical terms of the recording's module, for the transcription prompt."""
-        m = self.profile.find(meta.get("course_name", ""))
-        return (m or {}).get("terms", [])
-
     def _now(self) -> float:
         """Current recording time in seconds."""
         return time.time() - self.offset if self.offset is not None else self.rec_time
@@ -536,21 +526,28 @@ class Core(Recordings):
         screen = s and s is not self.session and s.data["archive"]["screen"]
         return Path(screen) if screen else None
 
-    # ---------------------------------------------------------- recordings ("Meine Aufnahmen", recordings.py)
+    # ---------------------------------------------------------- the local copy (phase 5)
 
-    def _scan(self) -> dict[str, Path]:
-        return library.scan(self.archive)
-
-    def _find_module(self, name: str) -> dict | None:
-        return self.profile.find(name)
-
-    def _add_term(self, module: dict, term: str) -> None:
-        self.profile.update(module["id"], terms=(module.get("terms", []) + [term])[:300])
-        self.delivery.wake.set()
-
-    @staticmethod
-    def _discard(folder: Path) -> None:
-        recycle(folder)
+    def _tidy(self) -> None:
+        """Once an hour: note which filed recordings the server has confirmed, and move the local
+        copy of those confirmed more than KEEP_DAYS days ago to the recycle bin (decision of
+        2026-11-09). A recording the server never confirmed stays."""
+        while True:
+            try:
+                client = self.delivery.client
+                if client is not None:
+                    for folder in delivery_mod.unconfirmed(self.archive):
+                        sid = json.loads((folder / "session.json").read_text(encoding="utf-8")).get("session_id", "")
+                        try:
+                            if sid and client.status(sid).get("state") == "complete":
+                                delivery_mod.mark_confirmed(folder, client.url)
+                        except (server_api.ServerError, OSError):
+                            break                          # offline: next hour
+                for folder in delivery_mod.expired(self.archive):
+                    recycle(folder)
+            except Exception:                              # never stop the app over tidying up
+                pass
+            time.sleep(3600)
 
     # ---------------------------------------------------------- after a recording
 
@@ -561,76 +558,27 @@ class Core(Recordings):
         the transcription, or the transcription and then the cut proposal."""
         return cut_rules.after_recording(self.profile.preferences())
 
-    def pipeline_place(self) -> str:
-        """Where filed recordings are worked on: "device" (this computer, the default until the review
-        runs on the server) or "server". A preference of the profile, so a lecture is never worked
-        on twice and paid twice."""
-        connected = getattr(self.delivery, "client", None) is not None
-        return "server" if self.profile.preference("pipeline") == "server" and connected else "device"
-
-    def set_pipeline_place(self, value: str) -> None:
-        if value in ("device", "server") and self.profile.set_preferences({"pipeline": value}):
-            self.delivery.wake.set()
-
     def set_after_recording(self, value: str) -> None:
         if value in self.AFTER_RECORDING and self.profile.set_preferences({"after_recording": value}):
             self.delivery.wake.set()              # the profile goes to the server at once
-
-    def _archived(self, folder: Path) -> None:
-        if self.after_recording() != "nothing" and self.pipeline_place() == "device":
-            self.pipeline.enqueue(folder)
 
     # ---------------------------------------------------------- the cut: settings and approval
 
     def cut_settings(self) -> dict:
         """The lecturer's settings for the cut, from the profile: propose by itself, pauses, programs to
-        cut or keep, cards and sounds; "sounds" lists the sounds already made."""
-        return {**cut_rules.settings_from(self.profile.preferences()),
-                "sounds": sorted(sounds.available(APP_DIR / "sounds"))}
+        cut or keep, cards and sounds; the server uses them for the lecturer's recordings."""
+        return cut_rules.settings_from(self.profile.preferences())
 
     def set_cut_settings(self, values: dict) -> None:
         # one preference per field, so a change here does not undo another device's change of a different one
         if self.profile.set_preferences(cut_rules.cut_preferences(self.profile.preferences("cut."), values)):
             self.delivery.wake.set()
 
-    def open_summary(self, sid: str) -> str:
-        folder = getattr(self, "_library", {}).get(sid)
-        pdf = publish.locate(folder, "summary.pdf") if folder else None
-        if pdf is None:
-            return "Es gibt noch keine Zusammenfassung."
-        os.startfile(pdf)
-        return ""
-
     # ---------------------------------------------------------- publishing
 
     def publish_dir(self) -> Path:
         """Root of the folders the lecturer uploads from; next to the recordings unless chosen."""
         return Path(self.settings.get("publish_dir") or self.archive / "Veröffentlichen")
-
-    def publish_plan(self, sid: str) -> dict:
-        """Where the files of a recording would go, for the window to show before moving them."""
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return {"folder": "", "files": []}
-        moves = publish.plan(folder, self.publish_dir())
-        return {"folder": str(publish.target_dir(folder, self.publish_dir())), "files": [t.name for _, t in moves]}
-
-    def publish(self, sid: str) -> str:
-        """Move the finished files of a recording into the publish folder; returns an error or ''."""
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder is None or not folder.exists():
-            return "Die Aufnahme ist nicht mehr in der Ablage."
-        if library.stations(folder)["cut"] != "done":
-            return "Veröffentlichen geht erst, wenn das geschnittene Video fertig ist."
-        with self.pipeline.lock:
-            if self.pipeline.active == str(folder):
-                return "An dieser Aufnahme wird gerade gearbeitet. Versuch es gleich noch einmal."
-            try:
-                publish.run(folder, self.publish_dir(), discard=recycle)
-            except (OSError, ValueError) as e:
-                return str(e) if isinstance(e, (FileExistsError, FileNotFoundError, ValueError)) \
-                    else f"Verschieben fehlgeschlagen: {e}"
-        return ""
 
     # ---------------------------------------------------------- "Meine Aufnahmen" on the server (phase 4)
 
@@ -692,17 +640,6 @@ class Core(Recordings):
         os.startfile(target)
         return ""
 
-    def open_published(self, sid: str) -> None:
-        folder = getattr(self, "_library", {}).get(sid)
-        target = publish.published(folder).get("folder") if folder else None
-        if target and Path(target).exists():
-            os.startfile(target)
-
-    def open_recording(self, sid: str) -> None:
-        folder = getattr(self, "_library", {}).get(sid)
-        if folder and folder.exists():
-            os.startfile(folder)
-
     def open_result(self) -> None:
         f = self._result()
         if f and f.exists():
@@ -739,9 +676,6 @@ class Core(Recordings):
         message, kind = self.message, self.message_kind
         if info and not message:
             message, kind = self._delivery_message(info)
-            step = self.pipeline.describe(info.get("session_folder"))
-            if step and message:
-                message += " · " + step
         return {"recording": self.session is not None, "asking": self.asking, "paused": self.obs_state["paused"],
                 "time": self.obs_state["time"], "level": round(db, 1), "splitting": splitting,
                 "progress": round(progress, 3), "message": message, "message_kind": kind,

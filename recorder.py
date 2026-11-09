@@ -119,68 +119,14 @@ class Api:
     def open_result(self):
         self._core.open_result()
 
-    def recordings(self):
-        return self._core.recordings()
-
-    def recording(self, sid):
-        return self._core.recording(sid)
-
-    def open_recording(self, sid):
-        self._core.open_recording(sid)
-
-    def redo_transcription(self, sid):
-        return self._core.redo_transcription(sid)
-
-    def start_transcription(self, sid):
-        return self._core.start_transcription(sid)
-
     def set_after_recording(self, value):
         self._core.set_after_recording(value)
-
-    def set_pipeline_place(self, value):
-        self._core.set_pipeline_place(value)
-
-    def change_cut_item(self, sid, item_id, changes):
-        return self._core.change_cut_item(sid, item_id, changes or {})
-
-    def add_cut_item(self, sid, kind, start, end, params=None):
-        return self._core.add_cut_item(sid, kind, start, end, params)
-
-    def remove_cut_item(self, sid, item_id):
-        return self._core.remove_cut_item(sid, item_id)
-
-    def set_cut_metadata(self, sid, title, description):
-        return self._core.set_cut_metadata(sid, title or "", description or "")
-
-    def set_program_rule(self, sid, program, choice):
-        return self._core.set_program_rule(sid, program, choice or "")
-
-    def set_cut_cards(self, sid, cards):
-        return self._core.set_cut_cards(sid, cards or {})
-
-    def approve_cut(self, sid, approved=True):
-        return self._core.approve_cut(sid, bool(approved))
 
     def connect_server(self, code):
         return self._core.connect_server(code)
 
     def disconnect_server(self):
         return self._core.disconnect_server()
-
-    def rerender(self, sid):
-        return self._core.rerender(sid)
-
-    def redo_cut(self, sid):
-        return self._core.redo_cut(sid)
-
-    def publish_plan(self, sid):
-        return self._core.publish_plan(sid)
-
-    def publish(self, sid):
-        return self._core.publish(sid)
-
-    def open_published(self, sid):
-        self._core.open_published(sid)
 
     def server_library(self, browser=False):
         return self._core.server_library(bool(browser))
@@ -191,20 +137,8 @@ class Api:
     def open_server_url(self, url):
         return self._core.open_server_url(str(url))
 
-    def make_summary(self, sid):
-        return self._core.make_summary(sid)
-
-    def open_summary(self, sid):
-        return self._core.open_summary(sid)
-
     def set_cut_settings(self, values):
         self._core.set_cut_settings(values or {})
-
-    def delete_recording(self, sid):
-        return self._core.delete_recording(sid)
-
-    def review_word(self, sid, index, text, as_term=False):
-        return self._core.review_word(sid, index, text, bool(as_term))
 
     def view(self, mode):
         """Switch the window between "full" (setup), "bar" (recording) and "ask" (save question).

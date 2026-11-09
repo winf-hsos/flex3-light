@@ -172,12 +172,9 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
     assert r.redo_cut(folder) and (folder / "edit.previous.json").exists() and not (folder / "edit.json").exists()
 
 
-def test_app_approves_moves_and_remembers_programs(tmp_path):
-    import threading
-    from types import SimpleNamespace
-    import core
-    import pipeline_runner
+def test_the_lecturer_approves_moves_and_remembers_programs(tmp_path):
     import library
+    from shelf import shelf
     folder = _session(tmp_path)
     (folder / "pipeline.json").write_text(json.dumps({"steps": {"transcribe": {"state": "done"},
                                                                 "subtitles": {"state": "done"}}}), encoding="utf-8")
@@ -187,12 +184,7 @@ def test_app_approves_moves_and_remembers_programs(tmp_path):
     b = cut_tools.Workbench(folder)
     b.add_rules()
     b.close()
-    c = core.Core.__new__(core.Core)                      # no OBS: only what the approval needs
-    c._library = {"x": folder}
-    c.settings = {}
-    c.save = lambda: None
-    _profile_of(c, tmp_path)
-    c.pipeline = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: False, lambda m: [])
+    c = shelf(tmp_path, {"x": folder})                    # on the server since phase 5
     assert library.stations(folder)["cut"] == "review"
     e = edit.load(folder)
     outlook = next(x for x in e["items"] if x["params"].get("rule") == "program")
@@ -306,18 +298,15 @@ def _profile_of(c, tmp_path):
 
 def test_nothing_starts_after_a_recording_unless_set(tmp_path):
     import core
-    import pipeline_runner
+    from shelf import shelf
     c = core.Core.__new__(core.Core)
     c.settings, c.save = {}, lambda: None
     _profile_of(c, tmp_path)
-    c.pipeline = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: False, lambda m: [])
     folder = tmp_path / "rec"
     folder.mkdir()
     assert c.after_recording() == "nothing" and c.cut_settings()["auto"] is False
-    c._archived(folder)
-    assert not c.pipeline.queued(folder)                  # only filed
-    c._library = {"x": folder}
-    assert c.start_transcription("x") == "" and c.pipeline.queued(folder)
+    mine = shelf(tmp_path, {"x": folder})                 # started by hand on the server's page
+    assert mine.start_transcription("x") == "" and mine.pipeline.queued(folder)
     c.set_after_recording("cut")
     assert c.after_recording() == "cut" and c.cut_settings()["auto"] is True
     c.profile.set_preferences({"cut.auto": True})        # an older stored switch does not count any more
@@ -340,27 +329,6 @@ def test_changing_one_cut_setting_keeps_the_default_title_rule(tmp_path, monkeyp
     _profile_of(fresh, tmp_path / "other")
     core._move_preferences_to_profile(settings, fresh.profile)
     assert fresh.cut_settings()["cut_titles"] == rules.DEFAULT_POLICY["cut_titles"]
-
-
-def test_a_lecture_is_worked_on_in_one_place_only(tmp_path):
-    import core
-    import pipeline_runner
-    c = core.Core.__new__(core.Core)
-    c.settings, c.save = {}, lambda: None
-    _profile_of(c, tmp_path)
-    c.pipeline = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: False, lambda m: [])
-    c.set_after_recording("transcribe")
-    c.set_pipeline_place("server")
-    folder = tmp_path / "rec"
-    folder.mkdir()
-    assert c.pipeline_place() == "device"                 # without a server it stays here
-    c._archived(folder)
-    assert c.pipeline.queued(folder)
-    c.pipeline.forget(folder)
-    c.delivery.client = object()                          # connected: the server does it
-    assert c.pipeline_place() == "server"
-    c._archived(folder)
-    assert not c.pipeline.queued(folder)
 
 
 def test_the_activity_goes_to_the_server_without_titles(tmp_path):

@@ -97,7 +97,10 @@ def test_session_is_archived_and_delivered(tmp_path, server, segments):
     a = s.data["archive"]
     local = Path(a["session_folder"])                # one folder per recording in the archive
     assert local == tmp_path / "archive" / f"{s.id[:10]} - Schleifen"
-    assert sorted(p.name for p in local.iterdir()) == ["camera.mp4", "recording.mp4", "screen.mp4", "session.json"]
+    wait_for(lambda: (local / delivery.CONFIRMED).exists())   # the server holds it: the local copy may go in 7 days
+    assert sorted(p.name for p in local.iterdir()) == ["camera.mp4", "confirmed.json", "recording.mp4", "screen.mp4",
+                                                       "session.json"]
+    assert json.loads((local / delivery.CONFIRMED).read_text(encoding="utf-8"))["server"] == url
     for name in ("screen.mp4", "camera.mp4", "recording.mp4"):
         assert abs(split.duration(local / name) - 9) < 0.5
     local_meta = json.loads((local / "session.json").read_text(encoding="utf-8"))
@@ -140,6 +143,7 @@ def test_without_server_only_archives(tmp_path, segments):
     local = tmp_path / "archive" / f"{s.id[:10]} - Schleifen"
     assert [p.name for p in (tmp_path / "archive").iterdir()] == [local.name]
     assert sorted(p.name for p in local.iterdir()) == ["activity.json", "recording.mp4", "screen.mp4", "session.json"]
+    # never confirmed by a server: the local copy stays
     assert json.loads((local / "session.json").read_text(encoding="utf-8"))["tracks"] == [
         {"file": "screen.mp4", "kind": "screen"}]
     activity = json.loads((local / "activity.json").read_text(encoding="utf-8"))

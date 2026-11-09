@@ -54,6 +54,47 @@ def free_dir(path: Path) -> Path:
     return p
 
 
+# ---------------------------------------------------------------- the local copy after delivery
+# Since phase 5 (decision of 2026-11-09) the server holds the recordings. Once it has confirmed one
+# completely, its session folder in the archive gets confirmed.json, and KEEP_DAYS days later the
+# app moves the folder to the recycle bin. A recording the server never confirmed is never touched.
+
+KEEP_DAYS = 7
+CONFIRMED = "confirmed.json"
+
+
+def mark_confirmed(folder: Path, server: str, at: float | None = None) -> None:
+    folder = Path(folder)
+    if (folder / "session.json").exists() and not (folder / CONFIRMED).exists():
+        (folder / CONFIRMED).write_text(json.dumps({
+            "confirmed_at": dt.datetime.fromtimestamp(at or time.time()).astimezone().isoformat(timespec="seconds"),
+            "server": server, "note": f"The server holds this recording; this local copy goes to the recycle "
+                                      f"bin {KEEP_DAYS} days after confirmed_at."}, indent=1), encoding="utf-8")
+
+
+def _sessions(archive: Path) -> list[Path]:
+    return [f.parent for f in Path(archive).glob("*/*/*/session.json")]
+
+
+def unconfirmed(archive: Path) -> list[Path]:
+    """Session folders of the archive the server has not confirmed yet (as far as the app knows)."""
+    return [f for f in _sessions(archive) if not (f / CONFIRMED).exists()]
+
+
+def expired(archive: Path, days: float = KEEP_DAYS, now: float | None = None) -> list[Path]:
+    """Session folders whose confirmation is older than days."""
+    limit = dt.datetime.fromtimestamp((now or time.time()) - days * 86400).astimezone()
+    out = []
+    for f in _sessions(archive):
+        try:
+            at = dt.datetime.fromisoformat(json.loads((f / CONFIRMED).read_text(encoding="utf-8"))["confirmed_at"])
+        except (OSError, ValueError, KeyError):
+            continue
+        if at <= limit:
+            out.append(f)
+    return out
+
+
 def recycle(path: Path) -> None:
     """Move a file or folder to the recycle bin; a file is deleted if Windows refuses, a folder never."""
     class SHFILEOPSTRUCTW(ctypes.Structure):
@@ -196,7 +237,7 @@ class Delivery:
         self.server_error = ""
         self._retry = 0
         self.last_exception = ""
-        self.on_archived: Callable[[Path], None] | None = None   # the pipeline picks it up
+        self.on_archived: Callable[[Path], None] | None = None   # called with each filed session folder
 
     def start(self, still_recording: Path | None = None) -> "Delivery":
         """Pick up unfinished sessions from earlier runs and start both threads.
@@ -532,5 +573,7 @@ class Delivery:
         with s.lock:
             sv["completed"] = True
             s.save()
+        if s.data["archive"].get("session_folder"):
+            mark_confirmed(Path(s.data["archive"]["session_folder"]), self.client.url)
         self._finish(s)
         return True
