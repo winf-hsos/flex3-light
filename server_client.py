@@ -85,8 +85,11 @@ class ServerClient:
     def get_profile(self) -> dict:
         return self._call("GET", "/profile")[1]
 
-    def sync_profile(self, modules: list[dict]) -> dict:
-        return self._call("POST", "/profile/sync", body={"modules": modules})[1]
+    def sync_profile(self, modules: list[dict], preferences: dict | None = None) -> dict:
+        body = {"modules": modules}
+        if preferences is not None:
+            body["preferences"] = preferences
+        return self._call("POST", "/profile/sync", body=body)[1]
 
     def me(self) -> dict:
         return self._call("GET", "/me")[1]

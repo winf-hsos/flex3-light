@@ -5,8 +5,8 @@
     PUT    /sessions/{id}/parts/{track}/{n}    one part of a track, body is the MP4, X-Content-SHA256 its hash
     POST   /sessions/{id}/complete             session.json and the number of parts per track
     DELETE /sessions/{id}                      throw away a session that is not complete
-    GET    /profile                            the lecturer's profile: who, and the modules
-    POST   /profile/sync                       {"modules": [...]}: merge the device's entries, return all
+    GET    /profile                            the lecturer's profile: who, the modules and the preferences
+    POST   /profile/sync                       {"modules": [...], "preferences": {...}}: merge the device's entries, return all
     POST   /devices/register                   {"key", "device_name"}: invitation key -> device token (no token needed)
     GET    /me                                 the device and lecturer of the token
 
@@ -258,34 +258,40 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
     def profile_file(user_id: str) -> Path:
         return profile_dir / f"{hashlib.sha256(user_id.encode()).hexdigest()[:32]}.json"
 
-    def load_profile(user_id: str) -> dict[str, dict]:
+    def load_profile(user_id: str) -> tuple[dict[str, dict], dict[str, dict]]:
+        """(modules by id, preferences by key) of a lecturer; empty for a new one."""
         try:
-            return {e["id"]: e for e in json.loads(profile_file(user_id).read_text(encoding="utf-8"))["modules"]}
+            data = json.loads(profile_file(user_id).read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return {}
+            return {}, {}
+        return {e["id"]: e for e in data["modules"]}, data.get("preferences", {})
 
-    def answer(who: dict, modules: dict[str, dict]) -> dict:
+    def answer(who: dict, modules: dict[str, dict], preferences: dict[str, dict]) -> dict:
         return {"user_id": who["user_id"], "user_name": who.get("user_name", ""),
-                "modules": sorted(modules.values(), key=lambda e: e["id"])}
+                "modules": sorted(modules.values(), key=lambda e: e["id"]),
+                "preferences": dict(sorted(preferences.items()))}
 
     @app.get("/profile")
     def get_profile(who: dict = Depends(lecturer)):
-        return answer(who, load_profile(who["user_id"]))
+        return answer(who, *load_profile(who["user_id"]))
 
     @app.post("/profile/sync")
     def sync_profile(body: dict, who: dict = Depends(lecturer)):
         try:
             entries = [profiles.clean(e) for e in body.get("modules") or []]
+            prefs = profiles.clean_preferences(body.get("preferences"))
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
         with lock("profile:" + who["user_id"]):
-            merged = profiles.merge(load_profile(who["user_id"]), entries)
+            modules, preferences = load_profile(who["user_id"])
+            modules = profiles.merge(modules, entries)
+            preferences = profiles.merge_preferences(preferences, prefs)
             f = profile_file(who["user_id"])
             tmp = f.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"user_id": who["user_id"], "modules": list(merged.values())},
-                                      ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.write_text(json.dumps({"user_id": who["user_id"], "modules": list(modules.values()),
+                                       "preferences": preferences}, ensure_ascii=False, indent=1), encoding="utf-8")
             os.replace(tmp, f)
-        return answer(who, merged)
+        return answer(who, modules, preferences)
 
     return app
 

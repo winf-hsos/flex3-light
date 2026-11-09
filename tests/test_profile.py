@@ -144,3 +144,72 @@ def test_device_token_without_lecturer(tmp_path, server):
     assert p.status == "no-profile"
     time.sleep(1)
     assert d.connection() == "online"         # the server answers, recordings can still be delivered
+
+
+# ------------------------------------------------------------------ preferences (phase 2, 2026-11-09)
+
+def test_preferences_reach_the_other_device_key_by_key(tmp_path, server):
+    laptop, office = lp.Profile(tmp_path / "laptop.json"), lp.Profile(tmp_path / "office.json")
+    laptop.set_preferences({"cut.pause_min": 30.0, "cut.pause_mode": "card", "after_recording": "nothing"})
+    laptop.sync(ServerClient(server, LAPTOP))
+    office.sync(ServerClient(server, OFFICE))
+    assert office.preferences("cut.") == {"pause_min": 30.0, "pause_mode": "card"}
+    # both change a different setting offline: neither change is lost
+    laptop.set_preferences({"cut.pause_min": 60.0, "cut.pause_mode": "card"})     # the mode did not change
+    time.sleep(0.01)
+    office.set_preferences({"after_recording": "cut"})
+    for p, token in ((office, OFFICE), (laptop, LAPTOP), (office, OFFICE)):
+        p.sync(ServerClient(server, token))
+    for p in (laptop, office):
+        assert p.preference("cut.pause_min") == 60.0 and p.preference("after_recording") == "cut"
+    # the same setting changed on both: the later change wins everywhere
+    laptop.set_preferences({"cut.pause_mode": "cut"})
+    time.sleep(0.01)
+    office.set_preferences({"cut.pause_mode": "shorten"})
+    for p, token in ((laptop, LAPTOP), (office, OFFICE), (laptop, LAPTOP)):
+        p.sync(ServerClient(server, token))
+    assert laptop.preference("cut.pause_mode") == office.preference("cut.pause_mode") == "shorten"
+
+
+def test_an_unchanged_preference_is_not_a_change(tmp_path):
+    p = lp.Profile(tmp_path / "profile.json")
+    assert p.set_preferences({"after_recording": "cut"})
+    revision, stamp = p.data["revision"], p.data["preferences"]["after_recording"]["updated_at"]
+    assert not p.set_preferences({"after_recording": "cut"})
+    assert p.data["revision"] == revision and p.data["preferences"]["after_recording"]["updated_at"] == stamp
+    assert lp.Profile(tmp_path / "profile.json").preference("after_recording") == "cut"   # saved at once
+
+
+def test_old_settings_move_into_the_profile_and_the_server_wins(tmp_path, server, monkeypatch):
+    import core
+    saved = []
+    monkeypatch.setattr(core, "save_settings", lambda s: saved.append(dict(s)))
+    office = lp.Profile(tmp_path / "office.json")
+    office.set_preferences({"cut.pause_min": 90.0})
+    office.sync(ServerClient(server, OFFICE))
+    settings = {"raw_dir": "R", "after_recording": "transcribe", "language": "en",
+                "cut": {"pause_min": 45.0, "cut_titles": ["inbox"], "auto": True}}
+    laptop = lp.Profile(tmp_path / "laptop.json")
+    core._move_preferences_to_profile(settings, laptop)
+    assert settings == {"raw_dir": "R"} and saved == [{"raw_dir": "R"}]       # only the device's own settings stay
+    assert laptop.preference("after_recording") == "transcribe" and laptop.preference("language") == "en"
+    laptop.sync(ServerClient(server, LAPTOP))
+    assert laptop.preference("cut.pause_min") == 90.0                          # set on the server before: it wins
+    assert laptop.preference("cut.cut_titles") == ["inbox"]                    # unknown there: taken over
+    assert laptop.preference("cut.auto") is None                               # the old switch stays behind
+    core._move_preferences_to_profile(settings, laptop)
+    assert len(saved) == 1                                                     # only once
+
+
+def test_server_checks_preferences_and_keeps_them(tmp_path):
+    from fastapi.testclient import TestClient
+    client = TestClient(create_app(tmp_path, {LAPTOP: {"device_id": "laptop", "user_id": "lecturer1"}}))
+    auth = {"Authorization": f"Bearer {LAPTOP}"}
+    for bad in ({"Cut.Pause": {"value": 1, "updated_at": 1}}, {"cut.pause_min": {"value": 1}},
+                {"cut.notes": {"value": "x" * 9000, "updated_at": 1}}, ["cut.pause_min"]):
+        assert client.post("/profile/sync", headers=auth, json={"modules": [], "preferences": bad}).status_code == 422
+    good = {"cut.cut_programs": {"value": ["outlook.exe"], "updated_at": 5}}
+    assert client.post("/profile/sync", headers=auth, json={"modules": [], "preferences": good}).status_code == 200
+    assert client.post("/profile/sync", headers=auth, json={"modules": []}).json()["preferences"] == {
+        "cut.cut_programs": {"value": ["outlook.exe"], "updated_at": 5.0}}             # an older app sends none
+    assert client.get("/profile", headers=auth).json()["preferences"]["cut.cut_programs"]["value"] == ["outlook.exe"]

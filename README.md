@@ -86,22 +86,15 @@ It bundles ffmpeg and Typst from your `PATH` and writes `dist/flex3-light.exe` (
 
 While recording, every finished one-minute segment is split into screen and camera (and the program mix, if a server is configured) at low priority, so it never slows OBS down. After stopping, the last segment follows, the parts are joined into the two MP4 files without re-encoding, and the raw segments are deleted only once the result has been checked to be as long as the parts. If anything fails, the raw segments are kept. Closing the window during a recording keeps it as well; if the app ends before the recording is filed, it continues at the next start. **Verwerfen** also deletes whatever was already uploaded.
 
-To deliver recordings to a FLEX3 Light server, paste the connection code you got from it under **Einstellungen, Server** and click **Verbinden**. The app exchanges the code once for a token of this computer, keeps the token in the Windows Credential Manager (it is never shown, printed or logged) and from then on sends recordings and module changes there; **Trennen** goes back to recording locally only. Two settings can be added by hand to `settings.json`:
-
-```json
-"language": "de",
-"upload_kbit": 20000
-```
-
-`upload_kbit` caps the upload bandwidth (optional), `language` is used for modules without a language. The window shows how many parts have been transferred. Recordings go to the server as `unassigned`, with consent restricted to recording and nothing published, unless their module has both ILIAS course and Opencast series; then they arrive as `assigned`.
+To deliver recordings to a FLEX3 Light server, paste the connection code you got from it under **Einstellungen, Server** and click **Verbinden**. The app exchanges the code once for a token of this computer, keeps the token in the Windows Credential Manager (it is never shown, printed or logged) and from then on sends recordings and profile changes there; **Trennen** goes back to recording locally only. `"upload_kbit": 20000` in `settings.json` caps the upload bandwidth (optional). The window shows how many parts have been transferred. Recordings go to the server as `unassigned`, with consent restricted to recording and nothing published, unless their module has both ILIAS course and Opencast series; then they arrive as `assigned`.
 
 Keys for the AI services of the pipeline, AssemblyAI, OpenAI and ElevenLabs, are entered under **Einstellungen**, "KI-Dienste". They go into the Windows Credential Manager as "FLEX3 Light/assemblyai", "FLEX3 Light/openai" and "FLEX3 Light/elevenlabs", never into `settings.json` or the log, and the window only shows whether a key is stored. "Prüfen" asks the service whether the key works and, for OpenAI, which transcription models it may use, for AssemblyAI, in which region the data stays; it sends no audio or text. An ElevenLabs key may be restricted: FLEX3 Light only needs the permission for sound effects, and a key without the permission to read the user counts as valid. Environment variables such as `OPENAI_API_KEY` are not used.
 
-To try all this without a real server, `python tools/dev_server.py --configure` and then `python tools/dev_server.py` run one on this computer (see [server/README.md](server/README.md)).
+To try all this without a real server, `python tools/dev_server.py` runs one on this computer and `python tools/dev_server.py --invite` prints a connection code for it (see [server/README.md](server/README.md)).
 
 The current term is derived from the date: winter term from 1 September to the end of February, summer term from 1 March. Folder names follow the pattern `2026-27 - WS` and `2026 - SS`. Module suggestions come from the lecturer's profile (see above).
 
-Settings are stored in `%APPDATA%\flex3-light\settings.json`, the profile in `profile.json` next to it.
+**What belongs to the lecturer and what to the computer** (since 2026-11-09). The lecturer's profile, `profile.json` in `%APPDATA%\flex3-light`, holds the modules and the preferences: everything under **Schnitt**, "Nach der Aufnahme" and the default language for modules without one. It is synced with the server like the modules, setting by setting, so a change on one computer reaches the others without undoing what was changed there meanwhile. `settings.json` next to it keeps only what belongs to this computer: screen, camera, microphone, hiding the taskbar and window switches, the folders, the window size, the upload cap and the server's address and `device_id`. Settings of an older version that belong to the profile move there on the first start, dated so that what the server already has wins.
 
 ## How it works
 
@@ -119,7 +112,7 @@ Settings are stored in `%APPDATA%\flex3-light\settings.json`, the profile in `pr
 | `identify.py` | Frames the recorded screen area for a moment (Tk, in a thread of its own) |
 | `preview.py` | Camera preview: OBS source screenshots as an MJPEG stream on 127.0.0.1 with a random token in the address; also serves the videos and subtitles of listed recordings, with range requests |
 | `library.py` | The session folders of the archive for **Meine Aufnahmen**: summary, transcript, media and the five stations |
-| `lecturer_profile.py` | The lecturer's modules: local copy, seeding on the first start, merge with the server entry by entry |
+| `lecturer_profile.py` | The lecturer's modules and preferences: local copy, seeding on the first start, merge with the server entry by entry |
 | `tools/dev_server.py` | Runs the server on this computer and points the app at it |
 | `server/` | The receiving server (FastAPI), see [server/README.md](server/README.md) |
 | `obs_remote.py` | Minimal obs-websocket v5 client, OBS startup, switching the remote control on |

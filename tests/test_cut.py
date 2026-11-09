@@ -191,6 +191,7 @@ def test_app_approves_moves_and_remembers_programs(tmp_path):
     c._library = {"x": folder}
     c.settings = {}
     c.save = lambda: None
+    _profile_of(c, tmp_path)
     c.pipeline = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: False, lambda m: [])
     assert library.stations(folder)["cut"] == "review"
     e = edit.load(folder)
@@ -293,11 +294,22 @@ def test_switched_off_kinds_are_not_proposed(tmp_path):
         b.close()
 
 
+def _profile_of(c, tmp_path):
+    """A core without OBS gets a local profile, where the cut settings live since 2026-11-09."""
+    import threading
+    from types import SimpleNamespace
+
+    import lecturer_profile
+    c.profile = lecturer_profile.Profile(tmp_path / "profile.json")
+    c.delivery = SimpleNamespace(wake=threading.Event())
+
+
 def test_nothing_starts_after_a_recording_unless_set(tmp_path):
     import core
     import pipeline_runner
     c = core.Core.__new__(core.Core)
     c.settings, c.save = {}, lambda: None
+    _profile_of(c, tmp_path)
     c.pipeline = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: False, lambda m: [])
     folder = tmp_path / "rec"
     folder.mkdir()
@@ -308,8 +320,23 @@ def test_nothing_starts_after_a_recording_unless_set(tmp_path):
     assert c.start_transcription("x") == "" and c.pipeline.queued(folder)
     c.set_after_recording("cut")
     assert c.after_recording() == "cut" and c.cut_settings()["auto"] is True
-    c.settings["cut"] = {"auto": True}                    # an older stored switch does not count any more
+    c.profile.set_preferences({"cut.auto": True})        # an older stored switch does not count any more
     c.set_after_recording("transcribe")
     assert c.cut_settings()["auto"] is False
     c.set_after_recording("everything")                   # unknown values are ignored
     assert c.after_recording() == "transcribe"
+
+
+def test_changing_one_cut_setting_keeps_the_default_title_rule(tmp_path, monkeypatch):
+    import core
+    import pipeline.cut_rules as rules
+    c = core.Core.__new__(core.Core)
+    _profile_of(c, tmp_path)
+    c.set_cut_settings({"pause_min": 40})
+    assert c.cut_settings()["cut_titles"] == sorted(rules.DEFAULT_POLICY["cut_titles"])
+    monkeypatch.setattr(core, "save_settings", lambda s: None)
+    settings = {"cut": {"cut_titles": [], "pause_min": 20}}     # written by the bug before 2026-11-09
+    fresh = core.Core.__new__(core.Core)
+    _profile_of(fresh, tmp_path / "other")
+    core._move_preferences_to_profile(settings, fresh.profile)
+    assert fresh.cut_settings()["cut_titles"] == rules.DEFAULT_POLICY["cut_titles"]

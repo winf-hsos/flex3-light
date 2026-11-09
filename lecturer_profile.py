@@ -1,4 +1,4 @@
-"""The lecturer's profile on this machine: the modules, kept locally and synced with the server.
+"""The lecturer's profile on this machine: modules and preferences, kept locally and synced with the server.
 
 The app always works on this local copy, with or without a server. Changes are saved
 at once and sent when the server can be reached; what other devices of the same
@@ -11,6 +11,13 @@ On the very first start the profile is seeded from what already exists: the modu
 folders of the current term in the archive and an optional Markdown list of modules.
 Seeded entries are dated 0, so whatever the server already knows wins, and a seeded
 entry whose name the server already has is dropped instead of becoming a duplicate.
+
+Preferences are everything else that belongs to the lecturer and not to this computer
+(decision of 2026-11-06): the cut settings ("cut.<field>"), what starts after a
+recording, the default language. Each key carries its own updated_at and is merged on
+its own, so a change on one device reaches the others without overwriting settings
+they changed meanwhile. Settings that came from settings.json before the profile had
+preferences are taken over dated 0, like seeded modules.
 """
 from __future__ import annotations
 
@@ -79,6 +86,7 @@ class Profile:
         except FileNotFoundError:
             self.data = {"user_id": "", "user_name": "", "modules": {}, "revision": 0, "synced_revision": -1,
                          "synced_at": 0}
+        self.data.setdefault("preferences", {})
         self.status = "local"     # "local" (no server), "online", "offline" or "no-profile"
 
     @property
@@ -101,6 +109,16 @@ class Profile:
 
     def find(self, name: str) -> dict | None:
         return next((e for e in self.modules() if _norm(e["name"]) == _norm(name)), None)
+
+    def preference(self, key: str, default=None):
+        with self.lock:
+            item = self.data["preferences"].get(key)
+            return default if item is None else item["value"]
+
+    def preferences(self, prefix: str = "") -> dict:
+        """The values of all preferences whose key starts with prefix, without the prefix."""
+        with self.lock:
+            return {k[len(prefix):]: v["value"] for k, v in self.data["preferences"].items() if k.startswith(prefix)}
 
     def user(self) -> dict:
         return {"user_id": self.data["user_id"], "user_name": self.data["user_name"]}
@@ -141,6 +159,31 @@ class Profile:
             entry = dict(self.data["modules"][eid], deleted=True)
             self._changed(entry)
 
+    def set_preferences(self, values: dict) -> bool:
+        """Change preferences; only keys whose value really changes get a new time. True if any did."""
+        with self.lock:
+            prefs, changed = self.data["preferences"], False
+            for key, value in values.items():
+                old = prefs.get(key)
+                if old is not None and json.dumps(old["value"], sort_keys=True) == json.dumps(value, sort_keys=True):
+                    continue
+                prefs[key] = {"value": value, "updated_at": max(time.time(), (old or {}).get("updated_at", 0) + 0.001)}
+                changed = True
+            if changed:
+                self.data["revision"] += 1
+                self.save()
+            return changed
+
+    def seed_preferences(self, values: dict) -> None:
+        """Take over settings from before the profile had preferences, dated 0 so the server wins."""
+        with self.lock:
+            new = {k: v for k, v in values.items() if k not in self.data["preferences"]}
+            for key, value in new.items():
+                self.data["preferences"][key] = {"value": value, "updated_at": 0.0}
+            if new:
+                self.data["revision"] += 1
+                self.save()
+
     def seed(self, entries: list[dict]) -> None:
         """First start only: take over what already exists, dated 0 so the server wins."""
         with self.lock:
@@ -164,14 +207,15 @@ class Profile:
             self._apply(client.get_profile(), drop_seeds=True)
         with self.lock:
             wire = [{k: v for k, v in e.items() if k != "seed"} for e in self.data["modules"].values()]
-        self._apply(client.sync_profile(wire), drop_seeds=False, revision=revision)
+            prefs = {k: dict(v) for k, v in self.data["preferences"].items()}
+        self._apply(client.sync_profile(wire, prefs), drop_seeds=False, revision=revision)
 
     def _apply(self, answer: dict, drop_seeds: bool, revision: int | None = None) -> None:
         with self.lock:
             if self.data["user_id"] and answer["user_id"] != self.data["user_id"]:
                 # another lecturer's token: keep the old profile next to it and start over
                 os.replace(self.path, self.path.with_name(f"profile-{code_for(self.data['user_id'])}.json"))
-                self.data.update(modules={}, revision=0, synced_revision=-1)
+                self.data.update(modules={}, preferences={}, revision=0, synced_revision=-1)
             self.data["user_id"], self.data["user_name"] = answer["user_id"], answer.get("user_name", "")
             mods = self.data["modules"]
             theirs = answer.get("modules", [])
@@ -182,6 +226,9 @@ class Profile:
             for e in theirs:
                 mine = mods.get(e["id"])
                 mods[e["id"]] = e if mine is None else _newer(mine, e)
+            prefs = self.data["preferences"]
+            for key, item in (answer.get("preferences") or {}).items():   # a server before 2026-11-09 sends none
+                prefs[key] = item if key not in prefs else _newer(prefs[key], item)
             if revision is not None:
                 self.data["synced_revision"] = revision
                 self.data["synced_at"] = time.time()

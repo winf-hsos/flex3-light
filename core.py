@@ -89,6 +89,26 @@ def _move_token_out_of_settings(settings: dict) -> None:
         save_settings(settings)
 
 
+PROFILE_SETTINGS = ("after_recording", "language")     # with "cut", the lecturer's and not the device's
+
+
+def _move_preferences_to_profile(settings: dict, profile: Profile) -> None:
+    """One-off (2026-11-09): the cut settings, what starts after a recording and the default
+    language belong to the lecturer's profile now, which the server keeps for all their devices;
+    settings.json keeps only what belongs to this computer."""
+    if not any(k in settings for k in (*PROFILE_SETTINGS, "cut")):
+        return
+    values = {k: settings[k] for k in PROFILE_SETTINGS if k in settings}
+    values.update({f"cut.{k}": v for k, v in (settings.get("cut") or {}).items()
+                   if k != "auto"})          # the old switch, replaced by after_recording on 2026-11-04
+    if values.get("cut.cut_titles") == []:
+        del values["cut.cut_titles"]        # never chosen (the window has no field for it): the default applies
+    profile.seed_preferences(values)
+    for k in (*PROFILE_SETTINGS, "cut"):
+        settings.pop(k, None)
+    save_settings(settings)
+
+
 def load_settings() -> dict:
     try:
         return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -176,6 +196,7 @@ class Core:
         self.profile = Profile(PROFILE_FILE)
         if self.profile.is_new:
             self.profile.seed(seed_entries(self.archive, self.term, self.settings.get("module_file")))
+        _move_preferences_to_profile(self.settings, self.profile)
         _move_token_out_of_settings(self.settings)
         self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
         # Transcription and the rest of the pipeline run on filed recordings, never during a recording.
@@ -415,7 +436,8 @@ class Core:
         self.delivery.wake.set()
         s = self.delivery.begin(entry, clean_name(self.topic), self.choice.get("camera") != scene.NO_CAMERA,
                                 self.screen_size, self.options["hide_alttab"],
-                                self.archive / semester(dt.date.today()) / entry["name"], self.settings,
+                                self.archive / semester(dt.date.today()) / entry["name"],
+                                {**self.settings, "language": self.profile.preference("language", "de")},
                                 self.profile.user())
         self.on_capture(True)                     # before the first frame, also when started by hotkey
         try:
@@ -536,13 +558,12 @@ class Core:
     def after_recording(self) -> str:
         """What starts by itself once a recording is filed: nothing (the default, decided 2026-11-04),
         the transcription, or the transcription and then the cut proposal."""
-        value = self.settings.get("after_recording")
+        value = self.profile.preference("after_recording")
         return value if value in self.AFTER_RECORDING else "nothing"
 
     def set_after_recording(self, value: str) -> None:
-        if value in self.AFTER_RECORDING:
-            self.settings["after_recording"] = value
-            self.save()
+        if value in self.AFTER_RECORDING and self.profile.set_preferences({"after_recording": value}):
+            self.delivery.wake.set()              # the profile goes to the server at once
 
     def _archived(self, folder: Path) -> None:
         if self.after_recording() != "nothing":
@@ -559,15 +580,15 @@ class Core:
     # ---------------------------------------------------------- the cut: settings and approval
 
     def cut_settings(self) -> dict:
-        """The lecturer's settings for the cut: propose by itself, pauses, programs to cut or keep, cards
-        and sounds; "sounds" lists the sounds already made."""
+        """The lecturer's settings for the cut, from the profile: propose by itself, pauses, programs to
+        cut or keep, cards and sounds; "sounds" lists the sounds already made."""
         return {"title_card": True, "closing_card": True, "chapter_display": "card",
-                "chapter_sound": True, "music": True, **cut_rules.policy(self.settings.get("cut")),
+                "chapter_sound": True, "music": True, **cut_rules.policy(self.profile.preferences("cut.")),
                 "auto": self.after_recording() == "cut",       # the cut follows the transcription by itself
                 "sounds": sorted(sounds.available(APP_DIR / "sounds"))}
 
     def set_cut_settings(self, values: dict) -> None:
-        current = dict(self.settings.get("cut") or {})
+        current = self.profile.preferences("cut.")
         for k in ("pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off",
                   "title_card", "closing_card", "chapter_display", "chapter_sound", "music"):
             if k in values:
@@ -576,14 +597,18 @@ class Core:
             current["pause_mode"] = "card"
         current["pause_min"] = min(600.0, max(10.0, float(current.get("pause_min", 30))))
         for k in ("cut_programs", "keep_programs", "cut_titles"):
-            current[k] = sorted({str(x).strip().lower() for x in current.get(k, []) if str(x).strip()})
+            # a list never set keeps its default: until 2026-11-09 it became empty here, which switched
+            # the title rule (Posteingang, Inbox, ...) off for everyone who changed any cut setting
+            given = current.get(k, cut_rules.DEFAULT_POLICY[k])
+            current[k] = sorted({str(x).strip().lower() for x in given if str(x).strip()})
         current["kinds_off"] = sorted({k for k in current.get("kinds_off", []) if k in edit.KINDS})
         if current.get("chapter_display") not in edit.CHAPTER_DISPLAYS:
             current["chapter_display"] = "card"
         for k in ("title_card", "closing_card", "chapter_sound", "music"):
             current[k] = bool(current.get(k, True))
-        self.settings["cut"] = current
-        self.save()
+        # one preference per field, so a change here does not undo another device's change of a different one
+        if self.profile.set_preferences({f"cut.{k}": v for k, v in current.items()}):
+            self.delivery.wake.set()
 
     def _edit_of(self, sid: str):
         """(folder, edit list) of a recording the lecturer may change now, or an error message."""

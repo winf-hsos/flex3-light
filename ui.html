@@ -1740,7 +1740,8 @@
     $("serverState").textContent = on ? (CONNECTION[sv.connection] || [""])[0] : "nicht verbunden";
     $("serverState").className = "key-state" + (on && sv.connection === "online" ? " ok" : "");
     $("serverNote").textContent = on
-      ? `${sv.url}, als ${sv.user_name || "…"} auf dem Gerät ${sv.device_id}. Aufnahmen und Module gehen an diesen Server.`
+      ? `${sv.url}, als ${sv.user_name || "…"} auf dem Gerät ${sv.device_id}. Aufnahmen gehen an diesen Server; `
+        + "Module, Schnitt und „Nach der Aufnahme“ liegen in deinem Profil dort und gelten auf allen deinen Rechnern."
       : "Mit dem Verbindungscode vom Server meldest du diesen Rechner an. Bis dahin bleibt alles auf diesem Rechner.";
     $("serverConnect").style.display = on ? "none" : "";
     $("serverDisconnect").style.display = on ? "" : "none";
@@ -1874,7 +1875,12 @@
       if (st.profile_stamp !== profileStamp) {              // changed here or on another device
         const first = !profileStamp;
         profileStamp = st.profile_stamp;
-        if (!first && !st.recording) fillModules(await api().data());
+        if (!first && !st.recording) {                        // modules and the preferences of the profile
+          const d = await api().data();
+          fillModules(d);
+          $("after_recording").value = d.after_recording || "nothing";
+          if (document.activeElement !== $("cut_pause_min")) { cutSettings = d.cut || {}; fillCutSettings(); }
+        }
       }
       document.body.classList.toggle("paused", st.recording && st.paused && !st.asking);
       const priv = st.recording && st.private && !st.asking;

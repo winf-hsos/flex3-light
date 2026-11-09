@@ -19,8 +19,8 @@ Every request except registration carries `Authorization: Bearer <token>`. The t
 | `PUT /sessions/{id}/parts/{track}/{n}` | part `n` of `mix`, `screen` or `camera`; body is the MP4, `X-Content-SHA256` its hash. A part sent twice replaces itself |
 | `POST /sessions/{id}/complete` | `{"session": {...session.json...}, "parts": {"mix": n, "screen": n, "camera": n}}`; answers 202 and joins the parts in the background |
 | `DELETE /sessions/{id}` | throws away a session that is not complete, for "Verwerfen" in the app |
-| `GET /profile` | the lecturer's profile: `user_id`, `user_name` and the modules |
-| `POST /profile/sync` | `{"modules": [...]}`: merges the device's entries and returns all of them |
+| `GET /profile` | the lecturer's profile: `user_id`, `user_name`, the modules and the preferences |
+| `POST /profile/sync` | `{"modules": [...], "preferences": {...}}`: merges the device's entries and returns all of them |
 | `POST /devices/register` | `{"key", "device_name"}`, no token: exchanges an invitation key for the device token |
 | `GET /me` | the device and lecturer of the token |
 
@@ -37,6 +37,8 @@ python -m flex3_light_server.admin --data /srv/flex3-light --url https://flex3.e
 ### Profiles
 
 A profile holds the modules a lecturer records, so that every device of that person offers the same list. Each module is an entry with `id`, `name` (also the folder in the local archive), `code` (used in the session id), `language`, optionally `ilias_course_id` and `opencast_series_id`, plus `updated_at` and `deleted`. Devices work offline on a local copy and send all their entries when they reach the server; the merge goes entry by entry, the newer change wins, and a deleted entry stays as a tombstone so that an old copy on another device cannot bring it back. The app (`lecturer_profile.py`) merges with the same rule (`profiles.py`), checked by a test. A module with both ILIAS course and Opencast series makes its sessions arrive as `assigned`.
+
+Since 2026-11-09 the profile also holds the lecturer's **preferences**, everything that belongs to the person and not to a computer: the cut settings (`cut.pause_min`, `cut.cut_programs` and so on), `after_recording` and the default `language`. Each is a key with `{"value", "updated_at"}` and is merged on its own with the same rule, so two devices that changed different settings offline both keep their change. Keys are lower case with at most one dot, a value is any JSON up to 8 KB, at most 200 keys; the server stores them without interpreting them, and the pipeline will read them from here once it runs on the server. An app from before that date sends no preferences and keeps working.
 
 Joining copies the streams without re-encoding (ffmpeg concat demuxer, `-c copy`) and checks that every track is as long as its parts. The session folder appears under `sessions/` only when it is complete; until then everything stays under `incoming/`. If joining fails, the session goes back to `open` with an `error`, and the client can complete it again.
 
@@ -68,4 +70,4 @@ pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 
-`tests/test_server.py` covers the API, `tests/test_accounts.py` keys, registration and revoked devices, `tests/test_delivery.py` the whole way from synthetic OBS segments through the app's background processing to a running server, and `tests/test_profile.py` the profile: seeding, offline changes, two devices of one lecturer, and the same merge rule in app and server.
+`tests/test_server.py` covers the API, `tests/test_accounts.py` keys, registration and revoked devices, `tests/test_delivery.py` the whole way from synthetic OBS segments through the app's background processing to a running server, and `tests/test_profile.py` the profile: seeding, offline changes, two devices of one lecturer, preferences key by key, the move of old settings into the profile, and the same merge rule in app and server.

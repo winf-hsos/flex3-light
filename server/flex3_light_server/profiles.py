@@ -1,4 +1,4 @@
-"""Profiles per lecturer: the modules they record, merged entry by entry.
+"""Profiles per lecturer: the modules they record and their preferences, merged entry by entry.
 
 Every module is an entry with a stable id, an updated_at time and a deleted flag.
 Two devices that changed the profile offline are merged entry by entry: the newer
@@ -61,4 +61,48 @@ def merge(ours: dict[str, dict], theirs: list[dict]) -> dict[str, dict]:
     for entry in theirs:
         mine = result.get(entry["id"])
         result[entry["id"]] = entry if mine is None else newer(mine, entry)
+    return result
+
+
+# ---------------------------------------------------------------- preferences
+# Everything else that belongs to the lecturer and not to a device: the cut settings, what
+# starts after a recording, the default language (decision of 2026-11-06). Each preference
+# is one key with a value and its own updated_at, merged key by key like the modules, so two
+# devices that changed different settings offline both keep their change. Keys are flat,
+# a group is a prefix ("cut.pause_min"); the server keeps any key the app sends within limits
+# and leaves the meaning to whoever reads it.
+
+PREF_KEY = re.compile(r"^[a-z][a-z0-9_]{0,39}(\.[a-z][a-z0-9_]{0,39})?$")
+MAX_PREFERENCES, PREFERENCE_BYTES = 200, 8000
+
+
+def clean_preferences(prefs) -> dict[str, dict]:
+    """Valid preferences {key: {"value", "updated_at"}}; raises ValueError otherwise."""
+    if prefs is None:
+        return {}
+    if not isinstance(prefs, dict) or len(prefs) > MAX_PREFERENCES:
+        raise ValueError("invalid preferences")
+    out = {}
+    for key, item in prefs.items():
+        if not isinstance(key, str) or not PREF_KEY.match(key):
+            raise ValueError(f"invalid preference key {key!r}")
+        updated = item.get("updated_at") if isinstance(item, dict) else None
+        if not isinstance(updated, (int, float)) or isinstance(updated, bool):
+            raise ValueError(f"invalid updated_at of {key}")
+        value = item.get("value")
+        try:
+            size = len(json.dumps(value))
+        except (TypeError, ValueError):
+            raise ValueError(f"invalid value of {key}") from None
+        if size > PREFERENCE_BYTES:
+            raise ValueError(f"value of {key} is too large")
+        out[key] = {"value": value, "updated_at": float(updated)}
+    return out
+
+
+def merge_preferences(ours: dict[str, dict], theirs: dict[str, dict]) -> dict[str, dict]:
+    """Merge key by key with the same rule as the modules; neither input is changed."""
+    result = dict(ours)
+    for key, item in theirs.items():
+        result[key] = item if key not in result else newer(result[key], item)
     return result
