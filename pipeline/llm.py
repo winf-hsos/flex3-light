@@ -27,6 +27,7 @@ from typing import Callable
 # data folder): {"cut": {"adapter": ..., "model": ..., "effort": ...}, ...}
 DEFAULTS = {
     "cut": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "high"},
+    "outline": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "high"},
     "summary": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},
 }
 

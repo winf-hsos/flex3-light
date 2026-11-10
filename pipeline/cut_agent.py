@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import edit, llm, locks
+from . import edit, llm, locks, outline
 from .cut_tools import Workbench, as_json, summary_line
 
 MODEL, EFFORT = llm.DEFAULTS["cut"]["model"], llm.DEFAULTS["cut"]["effort"]
@@ -225,6 +225,7 @@ class CutAgent:
             "Rule proposals already in the edit list (check them):\n" + "\n".join(summary_line(x) for x in rules)
             if rules else "No rule proposals.",
             self._privacy(),
+            outline.lines(self.bench.folder) or "No outline of the recording; find its structure yourself.",
             "Transcript by sentence, [clock start-end in seconds]:\n" + self.bench.sentences(),
         ])
 

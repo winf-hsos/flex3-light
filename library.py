@@ -13,7 +13,7 @@ import datetime as dt
 import re
 from pathlib import Path
 
-from pipeline import cut_rules, edit, files, locks, publish, render, review
+from pipeline import cut_rules, edit, files, locks, outline, publish, render, review
 from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
@@ -143,6 +143,11 @@ def cut_view(folder: Path) -> dict:
     """What the approval of the cut needs: the edit list, its problems, what remains, and the programs."""
     log = _read(folder / "activity.json")
     view = {"programs": cut_rules.program_summary(log.get("activity", [])), "edit": None}
+    plan = _read(folder / "outline.json")
+    if plan:
+        view["outline"] = plan if plan.get("error") else {
+            **{k: plan.get(k) for k in ("duration", "summary", "topics", "inputs", "problems", "created")},
+            "phases": [{**p, "label": outline.KINDS.get(p["kind"], p["kind"])} for p in plan.get("phases", [])]}
     e = _read(folder / "edit.json")
     if e:
         kept = edit.kept(e, ("accepted",))

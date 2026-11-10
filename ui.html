@@ -323,6 +323,24 @@
   .lock.open .lock-state { color: #b3261e; font-weight: 600; }
   .lock-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .privacy-cands summary { cursor: pointer; font-size: 12.5px; color: var(--slate); padding: 4px 0; }
+  .outline { display: grid; gap: 8px; }
+  .outline-sum { margin: 0; font-size: 13px; line-height: 1.5; max-width: 72ch; }
+  .phasebar { display: flex; height: 18px; border-radius: 4px; overflow: hidden; cursor: pointer; background: var(--line); }
+  .phasebar div { height: 100%; min-width: 2px; border-right: 1px solid var(--surface); }
+  .phasebar div:last-child { border-right: 0; }
+  .phasebar div:hover { filter: brightness(1.12); }
+  .ph-input { background: var(--blue); } .ph-demo { background: var(--deep); } .ph-exercise { background: var(--green); }
+  .ph-discussion { background: var(--amber); } .ph-organisation { background: var(--slate); }
+  .ph-break, .ph-idle { background: var(--line-strong); } .ph-technical { background: var(--red); }
+  .phase-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--slate); }
+  .phase-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .phase-legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .topic { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; padding: 6px 10px;
+           border-left: 3px solid var(--line); }
+  .topic.input { border-left-color: var(--blue); }
+  .topic .cut-text p { margin: 2px 0 0; font-size: 12.5px; color: var(--slate); max-width: 72ch; }
+  .topic-tag { font-size: 11px; font-weight: 600; color: var(--deep); background: var(--sky); border-radius: 4px; padding: 1px 6px; }
+  .outline-inputs summary { cursor: pointer; font-size: 12.5px; color: var(--slate); padding: 4px 0; }
   .cut-foot .hint { flex: 1; }
   .station.review .no { border-color: var(--amber); color: #8a6200; background: var(--amber-soft); }
   .station.review small { color: #8a6200; font-weight: 600; }
@@ -875,7 +893,11 @@
   const fmtShort = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"}) : "";
   const fmtLength = s => { s = Math.round(s || 0); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
     return h ? `${h} h ${m} min` : m ? `${m} min` : `${s} s`; };
-  const fmtClock = s => { s = Math.floor(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+  const fmtClock = s => {                       // 7:05, or 1:46:54 from an hour on
+    s = Math.max(0, Math.floor(s));
+    const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  };
 
   // the sidebar shows that something is being worked on, on every page: transcription or cut agent
   function showBadge() {
@@ -1293,7 +1315,7 @@
   function renderCut(d) {
     const box = $("cut"), st = d.stations.cut, view = d.cut || {}, e = view.edit;
     const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
-    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.render, cutTab, markIn, markOut, selectedItem,
+    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.render, cutTab, markIn, markOut, selectedItem,
                                 cutPreview, cutSettings, playing]);
     if (box.dataset.sig === sig || typing) return;
     box.dataset.sig = sig;
@@ -1352,6 +1374,7 @@
     box.appendChild(stats);
     const locks = (view.privacy || {}).locks || [];
     const exposed = locks.filter(x => x.status === "open").length;
+    if (view.outline) box.appendChild(outlineBlock(view.outline));
     if (view.privacy) box.appendChild(privacyBlock(view.privacy, !!e.approved));
     const foot = el("div", "cut-foot");
     const note = el("span", "hint");
@@ -1426,6 +1449,73 @@
       for (const p of e.problems) ul.appendChild(el("li", "", p));
       det.appendChild(ul);
     }
+  }
+
+  // the outline of stage C: the course of the session as phases, the topics (chapters) and the slide inputs
+  const PHASE_ORDER = ["input", "demo", "exercise", "discussion", "organisation", "break", "technical", "idle"];
+  function outlineBlock(o) {
+    const g = el("div", "outline");
+    const head = el("div", "privacy-head");
+    head.appendChild(el("h3", "", "Gliederung"));
+    g.appendChild(head);
+    if (o.error) {
+      g.appendChild(el("p", "hint error", "Die Gliederung ist nicht entstanden: " + o.error
+                                          + " Der nächste Vorschlag versucht es erneut."));
+      return g;
+    }
+    const phases = o.phases || [], topics = o.topics || [], inputs = o.inputs || [];
+    head.appendChild(el("span", "hint", [`${phases.length} Phasen`, `${topics.length} Themen`,
+      inputs.length ? `${inputs.length} ${inputs.length === 1 ? "Folien-Input" : "Folien-Inputs"}` : "keine Folien-Inputs"].join(", ")));
+    if (o.summary) g.appendChild(el("p", "outline-sum", o.summary));
+    const dur = o.duration || (phases.length ? phases[phases.length - 1].end : 1) || 1;
+    const bar = el("div", "phasebar");
+    for (const p of phases) {
+      const s = el("div", "ph-" + p.kind);
+      s.style.flex = `${Math.max(0, p.end - p.start)} 0 0`;
+      s.title = `${p.label} ${fmtClock(p.start)}–${fmtClock(p.end)}: ${p.title}` + (p.note ? ` (${p.note})` : "");
+      s.onclick = () => { $("player").currentTime = p.start; };
+      bar.appendChild(s);
+    }
+    g.appendChild(bar);
+    const legend = el("div", "phase-legend");
+    for (const kind of PHASE_ORDER) {
+      const p = phases.find(x => x.kind === kind);
+      if (!p) continue;
+      const total = phases.filter(x => x.kind === kind).reduce((n, x) => n + x.end - x.start, 0);
+      const item = el("span");
+      item.append(el("i", "ph-" + kind), `${p.label} ${fmtLength(total)}`);
+      legend.appendChild(item);
+    }
+    g.appendChild(legend);
+    const overlap = (a, b) => Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start));
+    const row = (x, tag) => {
+      const r = el("div", "topic" + (tag ? " input" : ""));
+      const go = button("round", "", () => { const v = $("player"); v.currentTime = x.start; v.play(); }, "Ab hier abspielen");
+      go.innerHTML = '<svg class="i"><use href="#i-play"/></svg>';
+      const t = el("div", "cut-text");
+      const line = el("div", "cut-line");
+      line.append(el("b", "", x.title), el("span", "tabular", `${fmtClock(x.start)}–${fmtClock(x.end)}`));
+      if (tag) line.appendChild(el("span", "topic-tag", tag));
+      t.appendChild(line);
+      if (x.summary) t.appendChild(el("p", "", x.summary));
+      r.append(go, t);
+      return r;
+    };
+    for (const x of topics) {
+      const isInput = inputs.some(i => overlap(i, x) > 0.5 * (x.end - x.start));
+      g.appendChild(row(x, isInput ? "Folien-Input" : ""));
+    }
+    if (inputs.length) {
+      const det = el("details", "outline-inputs");
+      det.appendChild(el("summary", "", `Folien-Inputs (${inputs.length}), daraus können später eigene Videos werden`));
+      for (const x of inputs) {
+        const n = new Set((x.slides || []).map(s => s.title)).size;
+        det.appendChild(row(x, n ? `${n} ${n === 1 ? "Folie" : "Folien"}` : ""));
+      }
+      g.appendChild(det);
+    }
+    if ((o.problems || []).length) g.appendChild(el("p", "hint", "Nicht übernommen: " + o.problems.join("; ")));
+    return g;
   }
 
   // what the safety net found: locks block the approval until hidden or lifted by hand, candidates are hints

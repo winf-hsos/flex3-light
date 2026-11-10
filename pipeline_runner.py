@@ -26,7 +26,7 @@ try:
     import services          # the app's keys in the Windows Credential Manager
 except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
     services = None
-from pipeline import cut_agent, edit, files, llm, render, screening, sounds, subtitles, summary, transcribe
+from pipeline import cut_agent, edit, files, llm, outline, render, screening, sounds, subtitles, summary, transcribe
 
 STEPS = ("transcribe", "subtitles", "cut", "render", "summary")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
@@ -262,6 +262,10 @@ class PipelineRunner:
                     self._set(folder, "cut", "running", "Sichtung der Aufnahme …")
                     screening.run(folder, listener, settings, progress=lambda text: self._set(
                         folder, "cut", "running", text))
+                if not outline.current(folder):                # stage C, once; a failed try is repeated next time
+                    self._set(folder, "cut", "running", "Gliederung der Aufnahme …")
+                    outline.run(folder, self.key, settings, progress=lambda text: self._set(
+                        folder, "cut", "running", text), config=llm.stage_config("outline", self.models()))
                 self._set(folder, "cut", "running", "Der Schnitt-Agent sieht sich die Aufnahme an …")
                 result = cut_agent.run(folder, self.key, listener, settings, progress=lambda text: self._set(
                     folder, "cut", "running", text), config=llm.stage_config("cut", self.models()))

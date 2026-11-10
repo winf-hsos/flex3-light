@@ -131,6 +131,7 @@ def test_the_pipeline_runs_on_the_server_for_its_lecturer(tmp_path, monkeypatch)
     monkeypatch.setattr(pipeline_runner.subtitles, "run", lambda f: None)
     monkeypatch.setattr(pipeline_runner.cut_agent, "run", cut_run)
     monkeypatch.setattr(pipeline_runner.screening, "run", lambda f, listener, settings, progress=None: (f / "privacy.json").write_text("{}", encoding="utf-8"))
+    monkeypatch.setattr(pipeline_runner.outline, "run", lambda f, key, settings, progress=None, config=None: (f / "outline.json").write_text('{"phases": []}', encoding="utf-8"))
     monkeypatch.setattr(pipeline_runner.render, "run", render_run)
     monkeypatch.setattr(pipeline_runner.summary, "run", summary_run)
     worker.runner.video_args = ["-c:v", "libx264"]
