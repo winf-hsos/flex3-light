@@ -103,8 +103,9 @@ def test_the_pipeline_runs_on_the_server_for_its_lecturer(tmp_path, monkeypatch)
         seen["terms"], seen["transcriber"] = terms, t.name
         (f / "transcript.json").write_text("{}", encoding="utf-8")
 
-    def cut_run(f, key, listener, settings, progress=None):
-        seen["cut"] = (key, settings["pause_min"], settings["auto"])
+    def cut_run(f, key, listener, settings, progress=None, config=None):
+        seen["cut"] = (key("openai"), settings["pause_min"], settings["auto"])
+        seen["model"] = config
         e = edit.new(60.0)
         e["items"].append(edit.item("cut", 1.0, 2.0, "Mikrofontest", "agent", 0.9, "accepted", "technical"))
         edit.save(f, e)
@@ -150,6 +151,9 @@ def test_the_pipeline_runs_on_the_server_for_its_lecturer(tmp_path, monkeypatch)
     client.post(f"/sessions/{sid}/pipeline", headers=AUTH, json={"action": "cut"})
     state = work()
     assert seen["cut"] == ("openai-key", 90.0, False)                        # the project's key, the lecturer's settings
+    assert seen["model"]["model"] == "gpt-6.1-sol"                            # no models.json: the default
+    (data / "models.json").write_text(json.dumps({"cut": {"model": "gpt-6.1-mini"}}), encoding="utf-8")
+    assert worker.runner.models()["cut"]["model"] == "gpt-6.1-mini"           # the server's choice, read anew
     assert state["status"] == "Schnitt vorgeschlagen, wartet auf deine Freigabe"
     r = client.post(f"/sessions/{sid}/pipeline", headers=AUTH, json={"action": "approve"})
     assert r.status_code == 200 and r.json()["queued"]

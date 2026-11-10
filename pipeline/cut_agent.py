@@ -5,27 +5,30 @@ decides cuts, pauses, chapters and the rest (cut_tools.py, edit.py): the lecture
 finished proposal with a short summary and changes only what he wants to. It never
 renders; the lecturer approves the list first. Every tool call is logged in edit.log.jsonl.
 
-The model is OpenAI gpt-6.1-sol with reasoning effort "high" over the Responses API
-(docs/pipeline.md, 2026-10-28). The conversation is continued with previous_response_id,
-so that pictures already seen are not sent again.
+The model sits behind pipeline/llm.py (since 2026-11-10): the stage "cut" of the server's
+configuration says which adapter and model, by default OpenAI gpt-6.1-sol with reasoning
+effort "high" over the Responses API. There is no budget of rounds or pictures (decision of
+2026-11-10); every run measures its rounds, pictures, tokens and time instead, and only an
+emergency stop ends a loop that goes nowhere. When the agent is done, its list is kept as
+edit.agent.json, so what the lecturer changed before approving can be compared with it.
 """
 from __future__ import annotations
 
-import base64
 import datetime as dt
 import json
+import shutil
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Callable
 
-from . import edit
+from . import edit, llm
 from .cut_tools import Workbench, as_json, summary_line
 
-MODEL, EFFORT = "gpt-6.1-sol", "high"
-URL = "https://api.openai.com/v1/responses"
-MAX_ROUNDS, MAX_IMAGES = 60, 80
+MODEL, EFFORT = llm.DEFAULTS["cut"]["model"], llm.DEFAULTS["cut"]["effort"]
+SAFETY_ROUNDS = 250        # not a budget: only against an agent that never finishes
+SAME_ROUNDS = 4            # rounds with exactly the same calls in a row count as stuck
+AGENT_COPY = "edit.agent.json"
+OpenAIResponses, AgentError = llm.OpenAIResponses, llm.ModelError     # older names, used by the summary
 
 INSTRUCTIONS = """You are the editor of lecture recordings at a university of applied sciences. You prepare the
 cut of one recording: a list of proposals the lecturer approves before anything is rendered.
@@ -187,40 +190,12 @@ DOING = {"get_words": "liest die Transkription", "search_transcript": "sucht in 
          "finish": "ist fertig"}
 
 
-class AgentError(RuntimeError):
-    pass
-
-
-class OpenAIResponses:
-    def __init__(self, key: str, model: str = MODEL, effort: str = EFFORT, timeout: float = 600):
-        self._key, self.model, self.effort, self.timeout = key, model, effort, timeout
-
-    def __repr__(self) -> str:
-        return f"OpenAIResponses({self.model})"   # never the key
-
-    def create(self, body: dict) -> dict:
-        body = {"model": self.model, "reasoning": {"effort": self.effort}, **body}
-        req = urllib.request.Request(URL, data=json.dumps(body).encode("utf-8"), method="POST", headers={
-            "Authorization": f"Bearer {self._key}", "Content-Type": "application/json"})
-        for attempt in range(3):
-            try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                    return json.loads(r.read())
-            except urllib.error.HTTPError as e:
-                detail = e.read().decode("utf-8", "replace")[:500]
-                if e.code in (429, 500, 502, 503) and attempt < 2:
-                    time.sleep(10 * (attempt + 1))
-                    continue
-                raise AgentError(f"OpenAI antwortet mit Fehler {e.code}: {detail}") from None
-        raise AgentError("OpenAI antwortet nicht.")
-
-
 class CutAgent:
     def __init__(self, bench: Workbench, client, progress: Callable[[str], None] | None = None,
-                 max_rounds: int = MAX_ROUNDS, max_images: int = MAX_IMAGES):
+                 safety_rounds: int = SAFETY_ROUNDS):
         self.bench, self.client, self.progress = bench, client, progress or (lambda text: None)
-        self.max_rounds, self.max_images = max_rounds, max_images
-        self.images, self.usage, self.summary = 0, {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}, ""
+        self.safety_rounds = safety_rounds
+        self.images, self.rounds, self.usage, self.summary = 0, 0, llm.Usage(), ""
         self.log_path = bench.folder / "edit.log.jsonl"
 
     def _log(self, **entry) -> None:
@@ -237,19 +212,10 @@ class CutAgent:
             "Transcript by sentence, [clock start-end in seconds]:\n" + self.bench.sentences(),
         ])
 
-    def _image(self, data: bytes, label: str) -> dict:
-        self.images += 1
-        return {"role": "user", "content": [
-            {"type": "input_text", "text": label},
-            {"type": "input_image", "image_url": "data:image/jpeg;base64," + base64.b64encode(data).decode(),
-             "detail": "high"}]}
-
-    def _call(self, name: str, args: dict) -> tuple[str, dict | None]:
-        """Run one tool; returns its text output and, for pictures, a message carrying the picture."""
+    def _call(self, name: str, args: dict) -> tuple[str, llm.Image | None]:
+        """Run one tool; returns its text output and, for pictures, the picture."""
         b = self.bench
         if name in ("get_frame", "get_contact_sheet", "check_region"):
-            if self.images >= self.max_images:
-                return "Bildbudget erschöpft; arbeite mit dem, was du gesehen hast.", None
             if name == "get_frame":
                 data = b.frame(float(args["t"]), args.get("track", "program"), int(args.get("width") or 1280))
                 label = f"Frame {args.get('track', 'program')} at {args['t']} s"
@@ -260,7 +226,8 @@ class CutAgent:
                 data = b.contact_sheet(float(args["start"]), float(args["end"]), int(args.get("count") or 12),
                                        args.get("track", "program"))
                 label = f"Contact sheet {args.get('track', 'program')} {args['start']}–{args['end']} s"
-            return f"{label}: the picture follows in the next message.", self._image(data, label)
+            self.images += 1
+            return f"{label}: the picture follows in the next message.", llm.Image(data, label)
         if name == "locate_text":
             return as_json(b.locate_text(float(args["t"]), args.get("query", ""), args.get("track", "program"))), None
         if name == "get_words":
@@ -305,63 +272,78 @@ class CutAgent:
         raise ValueError(f"unknown tool {name}")
 
     def run(self) -> str:
-        self._log(event="start", model=getattr(self.client, "model", ""), folder=str(self.bench.folder))
+        started = time.monotonic()
+        self._log(event="start", model=getattr(self.client, "model", ""), adapter=type(self.client).__name__,
+                  folder=str(self.bench.folder))
         off = self.bench.kinds_off
-        tools, instructions = tools_for(off), instructions_for(off)
-        body = {"instructions": instructions, "tools": tools, "input": [
-            {"role": "user", "content": [{"type": "input_text", "text": self._first_message()}]}]}
-        for round_ in range(1, self.max_rounds + 1):
-            response = self.client.create(body)
-            u = response.get("usage") or {}
-            self.usage["input_tokens"] += u.get("input_tokens", 0)
-            self.usage["output_tokens"] += u.get("output_tokens", 0)
-            self.usage["reasoning_tokens"] += (u.get("output_tokens_details") or {}).get("reasoning_tokens", 0)
-            calls = [o for o in response.get("output", []) if o.get("type") == "function_call"]
-            text = " ".join(c.get("text", "") for o in response.get("output", []) if o.get("type") == "message"
-                            for c in o.get("content", []) if c.get("type") == "output_text").strip()
-            if text:
-                self._log(event="message", text=text[:2000])
-            if not calls:
-                self.summary = self.summary or text
+        tools = [llm.Tool(t["name"], t["description"], t["parameters"]) for t in tools_for(off)]
+        instructions = instructions_for(off)
+        messages = [llm.Message("user", [llm.Text(self._first_message())])]
+        last_calls, same, stopped = None, 0, ""
+        while True:
+            if self.rounds >= self.safety_rounds:
+                stopped = f"Notstopp nach {self.rounds} Runden; die Liste ist unvollständig."
                 break
-            outputs, pictures = [], []
-            for c in calls:
+            self.rounds += 1
+            t0 = time.monotonic()
+            reply = self.client.complete(instructions, messages, tools)
+            self.usage.add(reply.usage)
+            self._log(event="round", round=self.rounds, seconds=round(time.monotonic() - t0, 1),
+                      usage=reply.usage.as_dict(), calls=len(reply.calls))
+            if reply.text:
+                self._log(event="message", text=reply.text[:2000])
+            if not reply.calls:
+                self.summary = self.summary or reply.text
+                break
+            messages.append(reply.message())
+            results = []
+            for c in reply.calls:
                 try:
-                    args = json.loads(c.get("arguments") or "{}")
-                    out, picture = self._call(c["name"], args)
+                    out, picture = self._call(c.name, c.arguments)
                 except Exception as e:                     # the model gets the error and can correct itself
-                    args, out, picture = {}, f"error: {e}", None
-                self._log(event="tool", round=round_, name=c["name"], args=args, result=out[:600])
+                    out, picture = f"error: {e}", None
+                self._log(event="tool", round=self.rounds, name=c.name, args=c.arguments, result=out[:600])
                 found = sum(1 for x in self.bench.edit["items"] if x["source"] == "agent")
-                self.progress(f"Der Schnitt-Agent {DOING.get(c['name'], 'arbeitet')}"
+                self.progress(f"Der Schnitt-Agent {DOING.get(c.name, 'arbeitet')}"
                               + (f", {found} Vorschläge bisher" if found else ""))
-                outputs.append({"type": "function_call_output", "call_id": c["call_id"], "output": out[:60000]})
-                if picture:
-                    pictures.append(picture)
-            if self.summary and any(c["name"] == "finish" for c in calls):
+                results.append(llm.ToolResult(c.id, out[:60000], [picture] if picture else []))
+            messages.append(llm.Message("user", results))
+            if self.summary and any(c.name == "finish" for c in reply.calls):
                 break
-            body = {"previous_response_id": response["id"], "tools": tools, "instructions": instructions,
-                    "input": outputs + pictures}
-        else:
-            self.summary = self.summary or "Rundenbudget erschöpft; die Liste ist unvollständig."
+            signature = json.dumps([(c.name, c.arguments) for c in reply.calls], sort_keys=True, default=str)
+            same = same + 1 if signature == last_calls else 1
+            last_calls = signature
+            if same >= SAME_ROUNDS:
+                stopped = f"Notstopp: {SAME_ROUNDS} Runden mit denselben Aufrufen; die Liste ist unvollständig."
+                break
+        if stopped:
+            self.summary = self.summary or stopped
+            self._log(event="stopped", reason=stopped)
+        seconds = round(time.monotonic() - started, 1)
         decided_here = self.bench.decide_rest()            # nothing stays open for the lecturer
         if "cards" not in self.bench.edit:                  # the texts of the added cards, to change before approving
             self.bench.edit["cards"] = edit.default_cards(self.bench.edit, self.bench.meta, self.bench.settings)
-        self.bench.edit["agent"] = {"model": getattr(self.client, "model", ""), "summary": self.summary,
-                                    "decided_by_fallback": decided_here,
-                                    "images": self.images, "usage": self.usage,
+        self.bench.edit["agent"] = {"model": getattr(self.client, "model", ""), "adapter": type(self.client).__name__,
+                                    "summary": self.summary, "decided_by_fallback": decided_here,
+                                    "rounds": self.rounds, "images": self.images, "seconds": seconds,
+                                    "usage": self.usage.as_dict(),
                                     "finished": dt.datetime.now().astimezone().isoformat(timespec="seconds")}
         self.bench.save()
-        self._log(event="finish", summary=self.summary, usage=self.usage, images=self.images)
+        shutil.copyfile(self.bench.folder / "edit.json", self.bench.folder / AGENT_COPY)   # to compare with the approval
+        self._log(event="finish", summary=self.summary, usage=self.usage.as_dict(), images=self.images,
+                  rounds=self.rounds, seconds=seconds)
         return self.summary
 
 
-def run(folder: Path, openai_key: str, listener=None, settings: dict | None = None,
-        progress: Callable[[str], None] | None = None, model: str = MODEL, effort: str = EFFORT) -> dict:
-    """Propose the cut of a session folder; returns the edit list."""
+def run(folder: Path, key, listener=None, settings: dict | None = None,
+        progress: Callable[[str], None] | None = None, config: dict | None = None) -> dict:
+    """Propose the cut of a session folder; returns the edit list. key: the OpenAI key, or a function
+    giving the key of a service; config: the model of the stage (llm.stage_config("cut", ...))."""
+    keys = key if callable(key) else (lambda service: key if service == "openai" else None)
+    client = llm.make(config or llm.stage_config("cut"), keys)
     bench = Workbench(Path(folder), settings, listener)
     try:
-        CutAgent(bench, OpenAIResponses(openai_key, model, effort), progress).run()
+        CutAgent(bench, client, progress).run()
         return bench.edit
     finally:
         bench.close()

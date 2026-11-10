@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pipeline import cut_agent, cut_rules, cut_tools, edit  # noqa: E402
+from pipeline import cut_agent, cut_rules, cut_tools, edit, llm  # noqa: E402
 
 WORDS = [{"word": w, "start": s, "end": s + 0.4} for w, s in
          [("Hallo,", 5.0), ("hört", 5.5), ("man", 6.0), ("mich?", 6.5), ("Gut.", 8.0), ("Heute", 9.0),
@@ -122,11 +122,16 @@ class FakeModel:
                            for i, (name, a) in enumerate(calls)]}
 
 
+def responses(fake) -> llm.OpenAIResponses:
+    """The real Responses adapter, with a fake in place of the network."""
+    return llm.OpenAIResponses("k", "fake", post=lambda url, body, headers, timeout: fake.create(body))
+
+
 def test_agent_loop_uses_tools_and_writes_the_list(tmp_path):
     b = cut_tools.Workbench(_session(tmp_path))
     model = FakeModel()
     try:
-        summary = cut_agent.CutAgent(b, model).run()
+        summary = cut_agent.CutAgent(b, responses(model)).run()
     finally:
         b.close()
     assert summary == "Mikrofontest am Anfang vorgeschlagen."
@@ -138,8 +143,42 @@ def test_agent_loop_uses_tools_and_writes_the_list(tmp_path):
     assert second["input"][3]["content"][1]["type"] == "input_image"          # the contact sheet follows as a picture
     saved = json.loads((tmp_path / "edit.json").read_text(encoding="utf-8"))
     assert {x["kind"] for x in saved["items"]} >= {"cut", "chapter"} and saved["agent"]["images"] == 1
-    log = (tmp_path / "edit.log.jsonl").read_text(encoding="utf-8").splitlines()
-    assert json.loads(log[0])["event"] == "start" and json.loads(log[-1])["event"] == "finish"
+    agent = saved["agent"]
+    assert agent["rounds"] == 2 and agent["usage"]["input_tokens"] == 200 and agent["seconds"] >= 0
+    assert agent["adapter"] == "OpenAIResponses" and agent["model"] == "fake"
+    copy = json.loads((tmp_path / cut_agent.AGENT_COPY).read_text(encoding="utf-8"))
+    assert copy["items"] == saved["items"]                                    # the agent's own list, kept
+    log = [json.loads(x) for x in (tmp_path / "edit.log.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert log[0]["event"] == "start" and log[-1]["event"] == "finish"
+    assert [x["round"] for x in log if x["event"] == "round"] == [1, 2]
+
+
+class Stuck:
+    """A model that asks for the same thing again and again."""
+    model = "stuck"
+
+    def __init__(self):
+        self.rounds = 0
+
+    def complete(self, instructions, messages, tools):
+        self.rounds += 1
+        return llm.Reply("", [llm.ToolCall(f"c{self.rounds}", "list_items", {})], llm.Usage(10, 5, 1, 0))
+
+
+def test_only_an_emergency_stop_ends_a_loop_that_goes_nowhere(tmp_path):
+    b = cut_tools.Workbench(_session(tmp_path))
+    model = Stuck()
+    try:
+        summary = cut_agent.CutAgent(b, model).run()
+    finally:
+        b.close()
+    assert model.rounds == cut_agent.SAME_ROUNDS and summary.startswith("Notstopp")
+    saved = json.loads((tmp_path / "edit.json").read_text(encoding="utf-8"))
+    assert saved["agent"]["usage"] == {"input_tokens": 40, "cached_tokens": 20, "output_tokens": 4,
+                                       "reasoning_tokens": 0}
+    assert not [x for x in saved["items"] if x["state"] == "proposed"]       # nothing left open all the same
+    log = [json.loads(x) for x in (tmp_path / "edit.log.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert any(x["event"] == "stopped" for x in log)
 
 
 def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
@@ -151,8 +190,9 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
                                                                 "subtitles": {"state": "done"}}}), encoding="utf-8")
     calls = []
 
-    def fake_run(f, key, listener, settings, progress):
-        calls.append((key, settings["pause_mode"]))
+    def fake_run(f, key, listener, settings, progress, config=None):
+        calls.append((key("openai"), settings["pause_mode"]))
+        assert config["model"] == "gpt-6.1-sol"                        # the default of the stage
         progress("Schnitt-Agent: propose (Runde 1)")
         e = edit.new(60)
         e["agent"] = {"model": "fake"}

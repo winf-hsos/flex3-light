@@ -42,12 +42,18 @@ class Worker:
         binaries.configure(ffmpeg=ffmpeg, typst=typst)
         self.runner = pipeline_runner.PipelineRunner(
             Path(data_dir) / "pipeline-queue.json", lambda: True, self._terms_for, self._cut_settings,
-            sound_dir=Path(data_dir) / "sounds", keys=keys or (lambda service: None))
+            sound_dir=Path(data_dir) / "sounds", keys=keys or (lambda service: None), models=self._models)
+        self.models_file = Path(data_dir) / "models.json"
 
     def start(self) -> "Worker":
         self.runner.video_args = binaries.video_args()      # NVENC with an NVIDIA card, x264 otherwise
         self.runner.start()
         return self
+
+    def _models(self) -> dict:
+        """The model per stage, if the server's configuration sets one (models.json in the data folder,
+        e.g. {"cut": {"model": "gpt-6.1-sol", "effort": "high"}}); the defaults of pipeline/llm.py otherwise."""
+        return files.read_json(self.models_file, {})
 
     # ---------------------------------------------------------- the lecturer behind a folder
 

@@ -26,7 +26,7 @@ try:
     import services          # the app's keys in the Windows Credential Manager
 except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
     services = None
-from pipeline import cut_agent, edit, files, render, sounds, subtitles, summary, transcribe
+from pipeline import cut_agent, edit, files, llm, render, sounds, subtitles, summary, transcribe
 
 STEPS = ("transcribe", "subtitles", "cut", "render", "summary")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
@@ -42,15 +42,18 @@ class PipelineRunner:
     def __init__(self, queue_file: Path, can_run: Callable[[], bool], terms_for: Callable[[dict], list[str]],
                  cut_settings: Callable[[Path], dict] = lambda folder: {"auto": False},
                  video_args: list[str] | None = None, sound_dir: Path | None = None,
-                 keys: Callable[[str], str | None] | None = None):
+                 keys: Callable[[str], str | None] | None = None, models: Callable[[], dict] | None = None):
         """cut_settings: the settings for the cut of the recording in a folder, with "auto" (propose
         by itself) and the rule policy of pipeline/cut_rules.py; in the app those of its one lecturer,
         on the server those of whoever recorded it. keys: the key of a service ("openai",
-        "assemblyai", "elevenlabs") or None; the app's Credential Manager unless given."""
+        "assemblyai", "elevenlabs") or None; the app's Credential Manager unless given. models: the
+        server's choice of model per stage ({"cut": {"adapter", "model", "effort"}, ...}, see
+        pipeline/llm.py), read anew for every step so a change needs no restart."""
         self.queue_file = Path(queue_file)
         self.can_run, self.terms_for, self.cut_settings = can_run, terms_for, cut_settings
         self.key = keys or (lambda service: services.key(service))
         self.video_args, self.sound_dir = video_args, sound_dir
+        self.models = models or (lambda: {})
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.failed: set[str] = set()          # not retried before the next start of the app
@@ -256,8 +259,8 @@ class PipelineRunner:
                 if base:
                     listener = transcribe.AssemblyAI(aai, base)
                 self._set(folder, "cut", "running", "Der Schnitt-Agent sieht sich die Aufnahme an …")
-                result = cut_agent.run(folder, key, listener, settings, progress=lambda text: self._set(
-                    folder, "cut", "running", text))
+                result = cut_agent.run(folder, self.key, listener, settings, progress=lambda text: self._set(
+                    folder, "cut", "running", text), config=llm.stage_config("cut", self.models()))
                 self._set(folder, "cut", "done", model=(result.get("agent") or {}).get("model", ""))
                 return True
             e = edit.load(folder)
@@ -280,7 +283,8 @@ class PipelineRunner:
                               "(Einstellungen, KI-Dienste)")
                     return False
                 self._set(folder, "summary", "running", "Die Zusammenfassung entsteht …")
-                result = summary.run(folder, cut_agent.OpenAIResponses(key, summary.MODEL, summary.EFFORT),
+                model = llm.stage_config("summary", self.models())     # the summary needs the Responses API
+                result = summary.run(folder, llm.OpenAIResponses(key, model["model"], model.get("effort", "medium")),
                                      progress=lambda text: self._set(folder, "summary", "running", text))
                 data = read_state(folder)
                 data.pop("summary_requested", None)
