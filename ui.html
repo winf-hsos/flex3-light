@@ -91,6 +91,7 @@
   .btn:hover { border-color: var(--blue); background: var(--sky); color: var(--deep); }
   .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
   .btn.primary:hover { background: var(--deep); border-color: var(--deep); color: #fff; }
+  .btn:disabled, .btn:disabled:hover { opacity: .45; cursor: not-allowed; }
   .btn.danger:hover, .btn.danger.confirm { background: var(--red); border-color: var(--red); color: #fff; }
   .btn.danger.solid { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
   .btn.danger.solid:hover { background: #b9281f; border-color: #b9281f; }
@@ -308,6 +309,20 @@
   .problems { margin: 0; padding: 8px 12px 8px 28px; background: var(--amber-soft); border-radius: 10px; color: #6b4d00; font-size: 12.5px; }
   .publish-files { margin: 0; padding-left: 18px; color: var(--slate); font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
   .cut-foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; }
+  .privacy { display: grid; gap: 4px; }
+  .privacy-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  .privacy-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .lock { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: start; padding: 8px 10px;
+    border-radius: 9px; border-left: 3px solid var(--line); }
+  .lock.open { background: #fdecea; border-left-color: var(--red); }
+  .lock.hidden { border-left-color: var(--green); }
+  .lock.lifted { border-left-color: var(--amber); }
+  .lock.candidate { border-left-color: var(--line); }
+  .lock .cut-text p { overflow-wrap: anywhere; }
+  .lock-state { font-size: 11.5px; color: var(--slate); }
+  .lock.open .lock-state { color: #b3261e; font-weight: 600; }
+  .lock-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .privacy-cands summary { cursor: pointer; font-size: 12.5px; color: var(--slate); padding: 4px 0; }
   .cut-foot .hint { flex: 1; }
   .station.review .no { border-color: var(--amber); color: #8a6200; background: var(--amber-soft); }
   .station.review small { color: #8a6200; font-weight: 600; }
@@ -1278,7 +1293,7 @@
   function renderCut(d) {
     const box = $("cut"), st = d.stations.cut, view = d.cut || {}, e = view.edit;
     const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
-    const sig = JSON.stringify([st, d.status, e, view.programs, view.render, cutTab, markIn, markOut, selectedItem,
+    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.render, cutTab, markIn, markOut, selectedItem,
                                 cutPreview, cutSettings, playing]);
     if (box.dataset.sig === sig || typing) return;
     box.dataset.sig = sig;
@@ -1335,6 +1350,9 @@
     toggle.append(box2, " Mit Schnitt abspielen");
     stats.appendChild(toggle);
     box.appendChild(stats);
+    const locks = (view.privacy || {}).locks || [];
+    const exposed = locks.filter(x => x.status === "open").length;
+    if (view.privacy) box.appendChild(privacyBlock(view.privacy, !!e.approved));
     const foot = el("div", "cut-foot");
     const note = el("span", "hint");
     if (e.approved) {
@@ -1351,9 +1369,11 @@
       foot.appendChild(button("btn", "Freigabe zurücknehmen", () => approve(false)));
       if (st === "done") box.appendChild(results(made));   // above the foot, which follows
     } else {
-      note.textContent = open ? `Noch ${open} Vorschläge offen.` : "";
+      note.textContent = [open ? `Noch ${open} Vorschläge offen.` : "",
+                          exposed ? `${exposed === 1 ? "Eine Datenschutz-Sperre ist" : exposed + " Datenschutz-Sperren sind"} noch offen.` : ""]
+                         .filter(Boolean).join(" ");
       const go = button("btn primary", "Schnitt freigeben", () => approve(true));
-      go.disabled = open > 0;
+      go.disabled = open > 0 || exposed > 0;
       foot.append(note, go);
     }
     foot.appendChild(button("link", "Neu vorschlagen lassen", redoCut));
@@ -1406,6 +1426,60 @@
       for (const p of e.problems) ul.appendChild(el("li", "", p));
       det.appendChild(ul);
     }
+  }
+
+  // what the safety net found: locks block the approval until hidden or lifted by hand, candidates are hints
+  const LOCK_STATUS = {open: "offen", hidden: "abgedeckt", lifted: "von dir aufgehoben"};
+  function privacyBlock(p, approved) {
+    const g = el("div", "privacy");
+    const locks = p.locks || [], cands = p.candidates || [], checked = p.checked || {};
+    const exposed = locks.filter(x => x.status === "open");
+    const head = el("div", "privacy-head");
+    head.appendChild(el("h3", "", "Datenschutz"));
+    head.appendChild(el("span", "hint", !locks.length ? "Keine Sperren gefunden."
+      : exposed.length ? `${exposed.length} von ${locks.length} Sperren offen. Ohne Abdecken oder Aufheben wird nicht gerendert.`
+      : `${locks.length} ${locks.length === 1 ? "Sperre" : "Sperren"}, alle abgedeckt oder aufgehoben.`));
+    g.appendChild(head);
+    const gaps = [];
+    if (checked.picture === false) gaps.push("das Bild wurde nicht gelesen");
+    if (checked.sound === false) gaps.push("der Ton wurde nicht abgehört");
+    if (gaps.length) g.appendChild(el("p", "hint error", "Nicht geprüft: " + gaps.join(", ") + "."));
+    const row = (x, isLock) => {
+      const r = el("div", "lock " + (isLock ? x.status : "candidate"));
+      const play = button("round", "", () => listen(x.start, x.end), "Ansehen und anhören");
+      play.innerHTML = '<svg class="i"><use href="#i-play"/></svg>';
+      const t = el("div", "cut-text");
+      const line = el("div", "cut-line");
+      line.append(el("b", "", x.label), el("span", "tabular", `${fmtClock(x.start)}–${fmtClock(x.end)}`));
+      if (isLock) line.appendChild(el("span", "lock-state", LOCK_STATUS[x.status] || x.status));
+      t.appendChild(line);
+      if (x.text) t.appendChild(el("p", "", x.kind === "room_voice" ? `„${x.text}“` : x.text));
+      if (x.kind === "room_voice" && x.quieter != null) t.appendChild(el("small", "", `${Math.round(x.quieter)} dB leiser als du`));
+      const act = el("div", "lock-actions");
+      if (isLock && !approved && x.status === "open") {
+        act.append(button("btn", x.sense === "sound" ? "Stummschalten" : x.region ? "Verpixeln" : "Herausschneiden", () => coverLock(x.id)),
+                   button("link", "Aufheben", () => liftLock(x, true)));
+      } else if (isLock && !approved && x.status === "lifted") {
+        act.appendChild(button("link", "Sperre wieder setzen", () => liftLock(x, false)));
+      }
+      r.append(play, t, act);
+      return r;
+    };
+    for (const x of locks) g.appendChild(row(x, true));
+    if (cands.length) {
+      const det = el("details", "privacy-cands");
+      det.appendChild(el("summary", "", `${cands.length} ${cands.length === 1 ? "Hinweis" : "Hinweise"} ohne Sperre (der Schnitt-Agent hat sie geprüft)`));
+      for (const x of cands) det.appendChild(row(x, false));
+      g.appendChild(det);
+    }
+    return g;
+  }
+  const coverLock = async id => cutResult(await api().cover_lock(selectedId, id));
+  async function liftLock(x, lifted) {
+    if (lifted && !await ask({title: "Sperre aufheben?", confirm: "Aufheben", danger: true,
+                              text: `${x.label} (${fmtClock(x.start)}–${fmtClock(x.end)}) bleibt dann so im Video, wie es ist. `
+                                    + "Heb eine Sperre nur auf, wenn du dir die Stelle angesehen hast und nichts Privates zu sehen oder zu hören ist."})) return;
+    cutResult(await api().lift_lock(selectedId, x.id, lifted));
   }
 
   // what the approved cut became: the long version and the clips, to play here

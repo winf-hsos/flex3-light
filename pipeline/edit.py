@@ -237,6 +237,11 @@ def approve(folder: Path, settings: dict | None = None) -> str:
     open_items = [x for x in e["items"] if x["state"] == "proposed"]
     if open_items:
         return f"Noch {len(open_items)} Vorschläge offen: annehmen oder ablehnen, dann freigeben."
+    from . import locks                              # here, because locks builds on this module
+    exposed = locks.open_locks(folder, e)
+    if exposed:
+        return (f"{len(exposed)} Datenschutz-Sperre{'n' if len(exposed) > 1 else ''} noch sichtbar oder hörbar "
+                f"({', '.join(x['id'] for x in exposed[:6])}): abdecken oder ausdrücklich aufheben, dann freigeben.")
     if "cards" not in e:
         meta = files.read_json(folder / "session.json")
         e["cards"] = default_cards(e, meta, settings)

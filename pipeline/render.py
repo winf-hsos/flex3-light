@@ -42,7 +42,7 @@ import wave
 from pathlib import Path
 from typing import Callable
 
-from . import binaries, cards, edit, files, publish, sounds, timeline
+from . import binaries, cards, edit, files, locks, publish, sounds, timeline
 
 X264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
 EPS = 0.0005                     # half a millisecond, so that a frame exactly on a bound is decided as intended
@@ -389,6 +389,9 @@ def run(folder: Path, video_args: list[str] | None = None,
     e = edit.load(folder)
     if not e or not e.get("approved"):
         raise ValueError("Der Schnitt ist nicht freigegeben.")
+    exposed = locks.open_locks(folder, e)          # hard locks (2026-11-10): nothing private leaves unasked
+    if exposed:
+        raise ValueError(f"Datenschutz-Sperren noch offen: {', '.join(x['id'] for x in exposed[:6])}")
     say = progress or (lambda text: None)
     video_args = video_args or X264
     transcript = files.read_json(folder / "transcript.json")

@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 
 import library
-from pipeline import cut_rules, edit, publish, review
+from pipeline import cut_rules, edit, locks, publish, review
 
 
 class Recordings:
@@ -102,6 +102,35 @@ class Recordings:
         except (TypeError, ValueError) as ex:
             return str(ex)
         edit.add(e, x)
+        self._save_edit(folder, e)
+        return ""
+
+    def cover_lock(self, sid: str, lock_id: str) -> str:
+        """Hide a privacy lock: a mute, a blur or a cut over its span, set as the lecturer's own."""
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        lock = next((x for x in locks.load(folder).get("locks", []) if x["id"] == lock_id), None)
+        if lock is None:
+            return "Diese Sperre gibt es nicht mehr."
+        edit.add(e, locks.cover_item(lock, self._words(folder)))
+        e.get("lifted", {}).pop(lock_id, None)
+        self._save_edit(folder, e)
+        return ""
+
+    def lift_lock(self, sid: str, lock_id: str, lifted: bool = True) -> str:
+        """Let a lock pass: only the lecturer, only by hand, for one lock at a time (decision of 2026-11-10)."""
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        if not any(x["id"] == lock_id for x in locks.load(folder).get("locks", [])):
+            return "Diese Sperre gibt es nicht mehr."
+        if lifted:
+            e.setdefault("lifted", {})[lock_id] = {"at": edit._now()}
+        else:
+            e.get("lifted", {}).pop(lock_id, None)
         self._save_edit(folder, e)
         return ""
 

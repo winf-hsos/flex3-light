@@ -26,7 +26,7 @@ try:
     import services          # the app's keys in the Windows Credential Manager
 except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
     services = None
-from pipeline import cut_agent, edit, files, llm, render, sounds, subtitles, summary, transcribe
+from pipeline import cut_agent, edit, files, llm, render, screening, sounds, subtitles, summary, transcribe
 
 STEPS = ("transcribe", "subtitles", "cut", "render", "summary")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
@@ -258,6 +258,10 @@ class PipelineRunner:
                 base = aai and transcribe.assemblyai_base(aai)
                 if base:
                     listener = transcribe.AssemblyAI(aai, base)
+                if not (folder / "privacy.json").exists():   # stages A and B, once; a new proposal reuses them
+                    self._set(folder, "cut", "running", "Sichtung der Aufnahme …")
+                    screening.run(folder, listener, settings, progress=lambda text: self._set(
+                        folder, "cut", "running", text))
                 self._set(folder, "cut", "running", "Der Schnitt-Agent sieht sich die Aufnahme an …")
                 result = cut_agent.run(folder, self.key, listener, settings, progress=lambda text: self._set(
                     folder, "cut", "running", text), config=llm.stage_config("cut", self.models()))

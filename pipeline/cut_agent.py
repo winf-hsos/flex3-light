@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import edit, llm
+from . import edit, llm, locks
 from .cut_tools import Workbench, as_json, summary_line
 
 MODEL, EFFORT = llm.DEFAULTS["cut"]["model"], llm.DEFAULTS["cut"]["effort"]
@@ -69,8 +69,18 @@ microphone was too quiet at the start). Clips and chapters are listed from the i
 The title of the recording and every chapter title also appear on cards in the video (a title card at the start, a
 card at each chapter): keep chapter titles to about five words, and the title to one line of about eight words.
 
-Write every reason, title, description and chapter title in the language of the lecture, short and factual, as the
-lecturer reads them while approving. Times are seconds of the recording. Boundaries of spans are moved out of words
+Privacy locks: before you start, fixed rules have searched every frame and the whole sound (privacy.json). Each lock
+is a span where something private is visible or audible: a mail address, a key, a student number, a voice from the
+room, a span the lecturer marked with the privacy key, a mailbox in front. Locks are hard: the video is not rendered
+while one stays visible or audible. Hide every lock: mute for a voice (unless the span goes anyway), blur over its
+region for text in the picture (check the region first; the lock's region is from the text recognition), a cut where
+the whole picture is private. Check the lock before you decide how, but you cannot lift it: if you are sure a lock is a
+false alarm (the lecturer's own address on a slide, a voice that is the lecturer's), leave it and say so in "notes";
+only the lecturer lifts a lock. Candidates are weaker hints: look at them and decide.
+
+Write every title, description and chapter title in the language of the lecture, short and factual. Write reasons,
+the summary sentences, "check", "notes" and the final summary in the language of the interface, as the lecturer reads
+them while approving: {ui_language}. Times are seconds of the recording. Boundaries of spans are moved out of words
 automatically. Call check_edit before you finish, fix what it reports, then call finish with a short summary."""
 
 
@@ -167,11 +177,16 @@ def tools_for(kinds_off: set[str]) -> list[dict]:
     return out
 
 
-def instructions_for(kinds_off: set[str]) -> str:
+LANGUAGES = {"de": "German", "en": "English"}
+
+
+def instructions_for(kinds_off: set[str], ui_language: str = "de") -> str:
+    """The instructions, with what the lecturer switched off and the language of the interface."""
+    text = INSTRUCTIONS.replace("{ui_language}", LANGUAGES.get(ui_language, ui_language))
     if not kinds_off:
-        return INSTRUCTIONS
+        return text
     names = ", ".join(sorted(kinds_off))
-    return (INSTRUCTIONS + f"\n\nThe lecturer has switched off: {names}. Do not propose these and do not work around "
+    return (text + f"\n\nThe lecturer has switched off: {names}. Do not propose these and do not work around "
             "them with other kinds; where one of them would have been the right answer (say, a pixelation for a mail on "
             "screen), mention it among the items worth a look or in the notes, so the lecturer can decide.")
 
@@ -209,8 +224,27 @@ class CutAgent:
             "Recording: " + as_json(self.bench.overview()),
             "Rule proposals already in the edit list (check them):\n" + "\n".join(summary_line(x) for x in rules)
             if rules else "No rule proposals.",
+            self._privacy(),
             "Transcript by sentence, [clock start-end in seconds]:\n" + self.bench.sentences(),
         ])
+
+    def _privacy(self) -> str:
+        """The locks and candidates of the safety net, and what it could not check."""
+        found = locks.load(self.bench.folder)
+        checked = found.get("checked") or {}
+        if not checked:
+            return "The safety net has not looked at this recording; check privacy yourself."
+        head = ("Privacy locks (hide every one):\n" + "\n".join(locks.lines(self.bench.folder, self.bench.edit))
+                if found.get("locks") else "No privacy locks.")
+        cands = found.get("candidates", [])
+        tail = ("\nCandidates (look and decide):\n" + "\n".join(
+            f"{x['id']} {x['kind']} ({x['sense']}) {x['start']:.1f}-{x['end']:.1f}"
+            + (f" region {x['region']}" if x.get("region") else "") + (f" {x['text']}" if x.get("text") else "")
+            for x in cands[:80])) if cands else ""
+        gaps = [note for key, note in (("picture", "the picture was not read"), ("sound", "the sound was not listened to"))
+                if checked.get(key) is False]
+        return head + tail + ("\nNot checked by the safety net: " + "; ".join(gaps) + ". Check that part yourself."
+                              if gaps else "")
 
     def _call(self, name: str, args: dict) -> tuple[str, llm.Image | None]:
         """Run one tool; returns its text output and, for pictures, the picture."""
@@ -277,7 +311,7 @@ class CutAgent:
                   folder=str(self.bench.folder))
         off = self.bench.kinds_off
         tools = [llm.Tool(t["name"], t["description"], t["parameters"]) for t in tools_for(off)]
-        instructions = instructions_for(off)
+        instructions = instructions_for(off, self.bench.settings.get("ui_language", "de"))
         messages = [llm.Message("user", [llm.Text(self._first_message())])]
         last_calls, same, stopped = None, 0, ""
         while True:

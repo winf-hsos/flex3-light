@@ -22,7 +22,7 @@ from . import binaries
 MAX_SIDE = 2560                      # Windows' OCR refuses larger pictures (OcrEngine.MaxImageDimension)
 
 SCRIPT = r'''
-param([string]$Path, [string]$Lang = "de-DE")
+param([string]$Path, [string]$Lang = "de-DE", [string]$List = "")
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -35,22 +35,29 @@ $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
     $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
 function Await($op, [Type]$type) {
     $task = $asTask.MakeGenericMethod($type).Invoke($null, @($op)); $task.Wait(-1) | Out-Null; $task.Result }
-$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($Path)) ([Windows.Storage.StorageFile])
-$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
-$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
-$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
 $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new($Lang))
 if (-not $engine) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }
-$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
-$lines = @()
-foreach ($line in $result.Lines) {
-    $words = @()
-    foreach ($w in $line.Words) {
-        $r = $w.BoundingRect
-        $words += @{ text = $w.Text; x = $r.X; y = $r.Y; w = $r.Width; h = $r.Height } }
-    $lines += @{ text = $line.Text; words = $words } }
-$stream.Dispose()
-@{ width = $bitmap.PixelWidth; height = $bitmap.PixelHeight; lines = $lines } | ConvertTo-Json -Depth 5 -Compress
+function Read-Picture([string]$P) {
+    $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($P)) ([Windows.Storage.StorageFile])
+    $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+    $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+    $lines = @()
+    foreach ($line in $result.Lines) {
+        $words = @()
+        foreach ($w in $line.Words) {
+            $r = $w.BoundingRect
+            $words += @{ text = $w.Text; x = $r.X; y = $r.Y; w = $r.Width; h = $r.Height } }
+        $lines += @{ text = $line.Text; words = $words } }
+    $stream.Dispose()
+    @{ width = $bitmap.PixelWidth; height = $bitmap.PixelHeight; lines = $lines } | ConvertTo-Json -Depth 5 -Compress
+}
+if ($List) {            # many pictures with one start of PowerShell: one line of JSON per picture
+    foreach ($p in (Get-Content -LiteralPath $List -Encoding UTF8)) {
+        if (-not $p) { continue }
+        try { Read-Picture $p } catch { '{"error": "unreadable"}' } }
+} else { Read-Picture $Path }
 '''
 
 _script_file: Path | None = None
@@ -75,7 +82,38 @@ def recognize(image: Path, language: str = "de") -> dict:
     out = r.stdout.decode("utf-8", "replace").strip()
     if r.returncode != 0 or not out.startswith("{"):
         raise RuntimeError("Texterkennung fehlgeschlagen: " + (r.stderr.decode("utf-8", "replace") or out)[-300:])
-    data = json.loads(out)
+    return _tidy(json.loads(out))
+
+
+def recognize_many(images: list[Path], language: str = "de", timeout: float = 3600) -> list[dict | None]:
+    """recognize() for many pictures with one start of PowerShell; None for a picture it could not read."""
+    if os.name != "nt":
+        raise RuntimeError("Texterkennung gibt es nur unter Windows; auf diesem Server nicht verfügbar")
+    if not images:
+        return []
+    tag = {"de": "de-DE", "en": "en-US"}.get(language, language)
+    handle, name = tempfile.mkstemp(prefix="flex3-ocr-", suffix=".txt")
+    os.close(handle)
+    listing = Path(name)
+    try:
+        listing.write_text("\n".join(str(Path(p).resolve()) for p in images), encoding="utf-8-sig")
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                            "-File", str(_script()), "-List", str(listing), "-Lang", tag],
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
+                           creationflags=binaries.flags(low=True))
+    finally:
+        listing.unlink(missing_ok=True)
+    rows = [x for x in r.stdout.decode("utf-8", "replace").splitlines() if x.strip().startswith("{")]
+    if r.returncode != 0 or len(rows) != len(images):
+        raise RuntimeError("Texterkennung fehlgeschlagen: " + r.stderr.decode("utf-8", "replace")[-300:])
+    out = []
+    for row in rows:
+        data = json.loads(row)
+        out.append(None if "error" in data else _tidy(data))
+    return out
+
+
+def _tidy(data: dict) -> dict:
     lines = data.get("lines") or []
     if isinstance(lines, dict):                                     # PowerShell drops the list around a single line
         lines = [lines]

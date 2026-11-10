@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from . import audio, binaries, cut_rules, edit, files, ocr
+from . import audio, binaries, cut_rules, edit, files, locks, ocr
 
 TRACKS = {"program": "recording.mp4", "screen": "screen.mp4", "camera": "camera.mp4"}
 
@@ -323,8 +323,11 @@ class Workbench:
 
     def check(self) -> list[str]:
         open_items = self.undecided()
-        return edit.problems(self.edit) + ([f"Noch nicht entschieden: {', '.join(x['id'] for x in open_items)}"]
-                                           if open_items else [])
+        exposed = locks.open_locks(self.folder, self.edit)
+        return (edit.problems(self.edit)
+                + ([f"Noch nicht entschieden: {', '.join(x['id'] for x in open_items)}"] if open_items else [])
+                + ([f"Datenschutz-Sperren noch sichtbar oder hörbar: {', '.join(x['id'] for x in exposed)}"]
+                   if exposed else []))
 
     def save(self) -> None:
         edit.save(self.folder, self.edit)

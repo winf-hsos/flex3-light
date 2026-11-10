@@ -198,7 +198,13 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
         e["agent"] = {"model": "fake"}
         edit.save(f, e)
         return e
+    screened = []
+
+    def fake_screening(f, listener, settings, progress):
+        screened.append(f)
+        (f / "privacy.json").write_text('{"locks": [], "candidates": []}', encoding="utf-8")
     monkeypatch.setattr(pipeline_runner.cut_agent, "run", fake_run)
+    monkeypatch.setattr(pipeline_runner.screening, "run", fake_screening)
     monkeypatch.setattr(pipeline_runner.services, "key", lambda s: "sk" if s == "openai" else None)
     settings = {"auto": False, **cut_rules.policy(None)}
     r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda f: settings)
@@ -206,7 +212,7 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
     assert r._process(folder) and calls == []                    # switched off: nothing proposed
     settings["auto"] = True
     r.enqueue(folder)
-    assert r._process(folder) and calls == [("sk", "card")]
+    assert r._process(folder) and calls == [("sk", "card")] and screened == [folder]   # screening first, once
     assert pipeline_runner.read_state(folder)["steps"]["cut"]["state"] == "done"
     assert r.describe(folder) == "Schnitt vorgeschlagen, wartet auf deine Freigabe"
     assert r.redo_cut(folder) and (folder / "edit.previous.json").exists() and not (folder / "edit.json").exists()
