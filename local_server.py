@@ -19,7 +19,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 IDLE_MINUTES = 30
-NO_WINDOW, DETACHED = 0x08000000, 0x00000008
+# A hidden console rather than none (DETACHED_PROCESS): the server's own children, ffmpeg above all,
+# share it instead of each opening a window of its own (2026-11-10).
+NO_WINDOW, NEW_GROUP = 0x08000000, 0x00000200
 
 
 def is_local(url: str) -> bool:
@@ -49,5 +51,5 @@ def ensure(url: str) -> bool:
         subprocess.Popen([str(python), str(HERE / "tools" / "dev_server.py"), "--port", str(port),
                           "--idle-exit", str(IDLE_MINUTES)],
                          cwd=str(HERE), stdin=subprocess.DEVNULL, stdout=out, stderr=out,
-                         creationflags=NO_WINDOW | DETACHED if sys.platform == "win32" else 0, close_fds=True)
+                         creationflags=NO_WINDOW | NEW_GROUP if sys.platform == "win32" else 0, close_fds=True)
     return True
