@@ -239,9 +239,7 @@ class Workbench:
             raise ValueError(f"the lecturer switched {kind} off; do not propose it")
         if kind not in edit.SPANLESS:
             start, end = edit.snap(start, self.words), edit.snap(end, self.words)
-        start = max(0.0, start)
-        if end is not None:
-            end = min(self.duration, end)
+        start, end = self._bounds(kind, start, end)
         if kind in edit.REMOVING | edit.MARKING and category is None:
             category = "pause" if kind == "pause" else "other"
         entry = edit.item(kind, start, end, reason, "agent", confidence, state, category, **params)
@@ -251,6 +249,20 @@ class Workbench:
         edit.add(self.edit, entry)
         self.save()
         return entry
+
+    def _bounds(self, kind: str, start: float, end: float | None) -> tuple[float, float | None]:
+        """Keep a span inside the recording as the edit list measures it. A removal that stops short of the
+        beginning or the end by less than a remnant may be reaches it, so that no sliver is left."""
+        limit = float(self.edit.get("duration") or self.duration)
+        start = min(max(0.0, float(start)), limit)
+        if end is not None:
+            end = min(float(end), limit)
+        if kind in edit.REMOVING:
+            if start < edit.SHORTEST_KEPT:
+                start = 0.0
+            if end is not None and limit - end < edit.SHORTEST_KEPT:
+                end = limit
+        return start, end
 
     def assess(self, item_id: str, verdict: str, reason: str) -> dict:
         """The agent's decision on a rule's proposal: agree accepts it, disagree rejects it. The rule's
@@ -275,6 +287,13 @@ class Workbench:
         for k in ("start", "end"):
             if fields.get(k) is not None and x["kind"] not in edit.SPANLESS:
                 fields[k] = edit.snap(float(fields[k]), self.words)
+        if fields.get("start") is not None or fields.get("end") is not None:
+            new = (fields["start"] if fields.get("start") is not None else x["start"],
+                   fields["end"] if fields.get("end") is not None else x["end"])
+            start, end = self._bounds(x["kind"], *new)
+            for k, v in (("start", start), ("end", end)):
+                if fields.get(k) is not None:
+                    fields[k] = v
         if fields.get("state") in edit.STATES:
             x["state"] = fields["state"]
         if fields.get("category") in edit.CATEGORIES:

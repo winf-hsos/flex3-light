@@ -408,3 +408,17 @@ def test_the_activity_goes_to_the_server_without_titles(tmp_path):
     assert d._activity_for_server(s) == {"activity": [[0, 5, "chrome.exe", "moodle"], [5, 9, "chrome.exe", ""]],
                                          "private": [[1, 2]]}
     assert d._activity_for_server(SimpleNamespace(data={})) is None
+
+
+def test_spans_stay_inside_the_recording_without_slivers(tmp_path):
+    b = cut_tools.Workbench(_session(tmp_path))
+    try:
+        b.edit["duration"] = 59.97                 # the edit list measures the recording a little shorter
+        x = b.propose("cut", 52.0, 60.0, "Schluss", 0.8, category="organisation")
+        assert x["end"] == 59.97 and not any("außerhalb" in p for p in edit.problems(b.edit))
+        assert b.change(x["id"], end=59.6)["end"] == 59.97               # no remnant of 0.4 s at the end
+        y = b.propose("pause", 0.5, 4.0, "Ankommen", 0.8)
+        assert y["start"] == 0.0                                          # nor at the beginning
+        assert b.propose("mute", 59.5, 61.0, "Stimme", 0.8, category="privacy")["end"] == 59.97
+    finally:
+        b.close()
