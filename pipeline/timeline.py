@@ -2,7 +2,8 @@
 
 From the accepted items of the edit list: cuts take their span out; a long pause is taken
 out down to a card "Pause entfernt" of CARD seconds at its start (the card covers those
-seconds), shortened to one second at either end, or cut without a trace, as its mode says.
+seconds), shortened to about one second at either end (moved out of a word, edit.pause_inner),
+or cut without a trace, as its mode says.
 All bounds are put on frame boundaries, so that picture and sound lose exactly the same
 time and stay in sync however many cuts there are.
 
@@ -16,7 +17,7 @@ from __future__ import annotations
 from . import edit, subtitles
 
 CARD = 2.5                       # seconds a removed pause shows its card
-SHORTENED = 1.0                  # seconds a shortened pause keeps at either end
+SHORTENED = edit.SHORTENED       # seconds a shortened pause keeps at either end, out of a word (edit.pause_inner)
 TITLE, CHAPTER, CLOSING = 4.0, 2.0, 4.0     # seconds of the inserted cards
 
 
@@ -40,7 +41,7 @@ def plan(e: dict, fps: float = 30.0) -> dict:
                 cards.append((_frame(a, fps), _frame(a + CARD, fps), text))
                 a = a + CARD
             elif mode == "shorten" and b - a > 2 * SHORTENED + 0.5:
-                a, b = a + SHORTENED, b - SHORTENED
+                a, b = edit.pause_inner(x)
         spans.append((_frame(a, fps), _frame(b, fps)))
     removed: list[list[float]] = []
     for a, b in sorted(spans):

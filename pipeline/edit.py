@@ -65,6 +65,7 @@ def load(folder: Path) -> dict | None:
 
 def save(folder: Path, edit: dict) -> None:
     edit["changed"] = _now()
+    _settle_pauses(Path(folder), edit)
     files.write_json(Path(folder) / "edit.json", edit)
 
 
@@ -150,6 +151,7 @@ def problems(edit: dict, states=("proposed", "accepted")) -> list[str]:
 
 
 MARGIN = 0.12                             # seconds of pause kept next to a word at a boundary
+SHORTENED = 1.0                           # seconds a shortened pause keeps at either end
 
 
 def snap(t: float, words: list[dict]) -> float:
@@ -163,6 +165,29 @@ def snap(t: float, words: list[dict]) -> float:
             right = w["end"] + min(MARGIN, max(0.0, after) / 2)
             return round(left if t - w["start"] <= w["end"] - t else right, 3)
     return round(t, 3)
+
+
+def pause_inner(x: dict) -> tuple[float, float]:
+    """The span a shortened pause takes out: a second in from either bound, out of a word where
+    save() could see the words (the agent may stretch a pause over speech, and a fixed second then
+    ended inside a word: found by the check on the rendered result, 2026-11-11)."""
+    a, b, p = x["start"], x["end"], x["params"]
+    if p.get("inner") and p.get("inner_for") == [a, b]:
+        return p["inner"][0], p["inner"][1]
+    return a + SHORTENED, b - SHORTENED
+
+
+def _settle_pauses(folder: Path, edit: dict) -> None:
+    """Put the inner bounds of every shortened pause whose bounds changed on word boundaries."""
+    stale = [x for x in edit.get("items", []) if x["kind"] == "pause" and x["end"] is not None
+             and x["params"].get("mode") == "shorten" and x["params"].get("inner_for") != [x["start"], x["end"]]]
+    if not stale:
+        return
+    words = sorted(files.read_json(folder / "transcript.json").get("words", []), key=lambda w: w["start"])
+    for x in stale:
+        a, b = x["start"], x["end"]
+        x["params"]["inner"] = [snap(a + SHORTENED, words), snap(b - SHORTENED, words)]
+        x["params"]["inner_for"] = [a, b]
 
 
 MARKING = {"mute", "freeze", "blur"}      # kinds that hide something without taking time out

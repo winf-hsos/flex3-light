@@ -1896,7 +1896,10 @@
     for (const x of cutItems) {
       if (x.state !== "accepted" || x.end == null) continue;
       let a = x.start, b = x.end;
-      if (x.kind === "pause" && x.params.mode === "shorten") { a += 1; b -= 1; }
+      if (x.kind === "pause" && x.params.mode === "shorten") {
+        const p = x.params, fresh = p.inner && p.inner_for && p.inner_for[0] === x.start && p.inner_for[1] === x.end;
+        [a, b] = fresh ? p.inner : [a + 1, b - 1];
+      }
       if ((x.kind === "cut" || x.kind === "pause") && t >= a && t < b - 0.05) {
         out.skipTo = b;
         if (x.kind === "pause" && (x.params.mode || "card") === "card") out.card = "Pause entfernt";

@@ -135,3 +135,22 @@ def test_a_fix_pass_counts_what_is_gone_by_place_not_by_junction_number():
     assert not cut_review._same(a, {"kind": "clipped_word", "at": 140.0, "junction": 3})
     assert cut_review._same({"kind": "lock_visible", "at": 5.0, "lock": "S1"},
                             {"kind": "lock_visible", "at": 9.0, "lock": "S1"})
+
+
+def test_a_shortened_pause_keeps_whole_words_at_its_ends(tmp_path):
+    folder = _session(tmp_path)                  # "mich?" 6.5-6.9 among the words
+    e = edit.new(60.0)
+    edit.add(e, edit.item("pause", 5.7, 20.0, "Pause", "agent", 0.8, "accepted", "pause", mode="shorten"))
+    edit.add(e, edit.item("pause", 30.0, 40.0, "Pause", "agent", 0.8, "accepted", "pause", mode="shorten"))
+    plain = timeline.plan(e)
+    assert plain["kept"][0][1] == 6.7                                         # one second in: inside "mich?"
+    edit.save(folder, e)
+    p = timeline.plan(e)
+    words = files.read_json(folder / "transcript.json")["words"]
+    starts = sorted(w["start"] for w in words)
+    words = sorted(words, key=lambda w: w["start"])
+    assert all(not cut_review.clipped(words, starts, j) for j in cut_review.junctions(p))
+    assert (30.0 + 1.0, 40.0 - 1.0) in [tuple(r) for r in p["removed"]]        # in silence: one second as before
+    first = e["items"][0]
+    first["start"] = 5.0                                                    # moved by hand: the old ends no longer hold
+    assert edit.pause_inner(first) == (6.0, 19.0)
