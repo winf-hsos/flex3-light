@@ -1358,7 +1358,10 @@
           + "Gerendert wird erst, wenn du freigibst.";
       box.appendChild(p);
       if (st === "open" || st === "failed")
-        box.appendChild(button("btn primary", st === "failed" ? "Erneut versuchen" : "Schnitt vorschlagen lassen", startCut));
+        box.appendChild(button("btn primary", st === "failed" ? "Erneut versuchen" : "Schnitt vorschlagen lassen", () => startCut()));
+      if (st === "open" || st === "failed")
+        box.appendChild(button("link", "Gestuft vorschlagen lassen (Fassung 2)", () => startCut(2),
+                               "Der neue Agent: Feinschnitt Abschnitt für Abschnitt entlang der Gliederung"));
       return;
     }
     // first the finished proposal in a few lines, then play and approve; the single items wait folded below
@@ -1399,7 +1402,9 @@
       go.disabled = open > 0 || exposed > 0;
       foot.append(note, go);
     }
-    foot.appendChild(button("link", "Neu vorschlagen lassen", redoCut));
+    foot.appendChild(button("link", "Neu vorschlagen lassen", () => redoCut()));
+    foot.appendChild(button("link", "Gestuft neu vorschlagen (Fassung 2)", () => redoCut(2),
+                            "Der neue Agent: Feinschnitt Abschnitt für Abschnitt entlang der Gliederung"));
     box.appendChild(foot);
 
     const det = el("details", "cut-details");
@@ -1601,6 +1606,8 @@
   function summaryBlock(e) {
     const sum = e.summary || {}, g = el("div", "cut-sum");
     if (e.title) g.appendChild(el("h3", "cut-title", e.title));
+    if (e.agent && e.agent.version === 2)
+      g.appendChild(el("p", "hint", `Gestufter Vorschlag (Fassung 2): ${(e.agent.sections || []).length} Abschnitte mit frischem Kontext.`));
     const len = el("p", "cut-len");
     len.innerHTML = `Aus <b>${fmtLength(sum.duration ?? e.duration)}</b> werden <b>${fmtLength(sum.kept ?? e.kept_seconds)}</b>.`;
     g.appendChild(len);
@@ -1826,13 +1833,14 @@
     cutResult("");
   }
   async function approve(on) { cutResult(await api().approve_cut(selectedId, on)); }
-  async function startCut() { cutResult(await api().redo_cut(selectedId)); }
+  async function startCut(version) { cutResult(await api().redo_cut(selectedId, version || null)); }
   async function rerender() { cutResult(await api().rerender(selectedId)); }
-  async function redoCut() {
-    if (!await ask({title: "Schnitt neu vorschlagen lassen?", confirm: "Neu vorschlagen", danger: true,
+  async function redoCut(version) {
+    if (!await ask({title: version === 2 ? "Schnitt gestuft neu vorschlagen lassen?" : "Schnitt neu vorschlagen lassen?",
+                    confirm: "Neu vorschlagen", danger: true,
                     text: "Der Schnitt-Agent sieht sich die Aufnahme noch einmal an und schlägt alles neu vor. Deine "
                           + "Entscheidungen in diesem Vorschlag gelten dann nicht mehr; er bleibt als edit.previous.json im Ordner."})) return;
-    cutResult(await api().redo_cut(selectedId));
+    cutResult(await api().redo_cut(selectedId, version || null));
   }
 
   // playing with the cut: accepted removals are skipped, a removed pause can show its card,

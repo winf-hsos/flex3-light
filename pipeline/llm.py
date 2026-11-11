@@ -28,6 +28,9 @@ from typing import Callable
 DEFAULTS = {
     "cut": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "high"},
     "outline": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "high"},
+    "section": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "high"},     # version 2 of the cut
+    "section_light": {"adapter": "openai-responses", "model": "gpt-5.4-mini", "effort": "medium"},
+    "closing": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},
     "summary": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},
 }
 

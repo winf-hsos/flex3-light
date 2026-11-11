@@ -26,7 +26,7 @@ try:
     import services          # the app's keys in the Windows Credential Manager
 except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
     services = None
-from pipeline import cut_agent, edit, files, llm, outline, render, screening, sounds, subtitles, summary, transcribe
+from pipeline import cut_agent, cut_stages, edit, files, llm, outline, render, screening, sounds, subtitles, summary, transcribe
 
 STEPS = ("transcribe", "subtitles", "cut", "render", "summary")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
@@ -105,8 +105,9 @@ class PipelineRunner:
             self._drop(Path(folder))
         return True
 
-    def redo_cut(self, folder: Path) -> bool:
-        """Let the agent propose the cut again; the old edit list is kept as edit.previous.json."""
+    def redo_cut(self, folder: Path, version: int | None = None) -> bool:
+        """Let the agent propose the cut again; the old edit list is kept as edit.previous.json. version:
+        1 (one conversation) or 2 (sections), for this proposal; None: what the server is set to."""
         folder = Path(folder)
         with self.lock:
             if self.active == str(folder):
@@ -116,6 +117,10 @@ class PipelineRunner:
             data = read_state(folder)
             data["steps"].pop("cut", None)
             data["cut_requested"] = True                  # also when the lecturer switched the agent off
+            if version in (1, 2):
+                data["cut_version"] = version
+            else:
+                data.pop("cut_version", None)
             self._write_state(folder, data)
             self.failed.discard(str(folder))
         self.enqueue(folder)
@@ -267,8 +272,14 @@ class PipelineRunner:
                     outline.run(folder, self.key, settings, progress=lambda text: self._set(
                         folder, "cut", "running", text), config=llm.stage_config("outline", self.models()))
                 self._set(folder, "cut", "running", "Der Schnitt-Agent sieht sich die Aufnahme an …")
-                result = cut_agent.run(folder, self.key, listener, settings, progress=lambda text: self._set(
-                    folder, "cut", "running", text), config=llm.stage_config("cut", self.models()))
+                models = self.models()
+                version = read_state(folder).get("cut_version") or models.get("cut_version") or 1
+                say = lambda text: self._set(folder, "cut", "running", text)          # noqa: E731
+                if version == 2:                             # sections with fresh contexts (cut_stages.py)
+                    result = cut_stages.run(folder, self.key, listener, settings, progress=say, models=models)
+                else:
+                    result = cut_agent.run(folder, self.key, listener, settings, progress=say,
+                                           config=llm.stage_config("cut", models))
                 self._set(folder, "cut", "done", model=(result.get("agent") or {}).get("model", ""))
                 return True
             e = edit.load(folder)

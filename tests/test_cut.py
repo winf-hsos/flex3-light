@@ -222,6 +222,18 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
     assert pipeline_runner.read_state(folder)["steps"]["cut"]["state"] == "done"
     assert r.describe(folder) == "Schnitt vorgeschlagen, wartet auf deine Freigabe"
     assert r.redo_cut(folder) and (folder / "edit.previous.json").exists() and not (folder / "edit.json").exists()
+    staged = []
+
+    def fake_stages(f, key, listener, settings, progress, models):
+        staged.append(f)
+        e = edit.new(60)
+        e["agent"] = {"model": "fake", "version": 2}
+        edit.save(f, e)
+        return e
+    monkeypatch.setattr(pipeline_runner.cut_stages, "run", fake_stages)
+    assert r.redo_cut(folder, 2) and pipeline_runner.read_state(folder)["cut_version"] == 2   # the lecturer's wish
+    assert r._process(folder) and staged == [folder] and len(calls) == 1                     # version 2, not 1
+    assert r.redo_cut(folder) and "cut_version" not in pipeline_runner.read_state(folder)    # back to the default
 
 
 def test_the_lecturer_approves_moves_and_remembers_programs(tmp_path):

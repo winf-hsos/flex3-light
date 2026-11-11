@@ -201,13 +201,14 @@ class Recordings:
             self._save_edit(folder, e)
         return ""
 
-    def redo_cut(self, sid: str) -> str:
+    def redo_cut(self, sid: str, version: int | None = None) -> str:
+        """Propose the cut (again); version 1 or 2 of the agent for this proposal, None: the server's choice."""
         folder = getattr(self, "_library", {}).get(sid)
         if folder is None or not folder.exists():
             return "Die Aufnahme ist nicht mehr in der Ablage."
         if library.stations(folder)["transcript"] != "done":
             return "Der Schnitt braucht zuerst die Transkription."
-        if not self.pipeline.redo_cut(folder):
+        if not self.pipeline.redo_cut(folder, version if version in (1, 2) else None):
             return "An dieser Aufnahme wird gerade gearbeitet."
         return ""
 

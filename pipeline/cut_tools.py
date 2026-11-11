@@ -17,6 +17,7 @@ import json
 import re
 import subprocess
 import tempfile
+import uuid
 import wave
 from pathlib import Path
 
@@ -220,7 +221,7 @@ class Workbench:
             raise ValueError("listening needs the AssemblyAI key")
         if end - start > 600:
             raise ValueError("listen to at most 10 minutes at a time")
-        mp3 = self._work / "listen.mp3"
+        mp3 = self._work / f"listen-{uuid.uuid4().hex[:8]}.mp3"      # several sections may listen at once
         _ffmpeg_bytes("-y", "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(self._audio()),
                       "-af", "dynaudnorm=f=150:g=15", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "64k", str(mp3))
         r = self.listener.transcribe_file(mp3, self.transcript.get("language") or "de", [], speakers=True)

@@ -306,29 +306,30 @@ class CutAgent:
             return "done", None
         raise ValueError(f"unknown tool {name}")
 
-    def run(self) -> str:
-        started = time.monotonic()
-        self._log(event="start", model=getattr(self.client, "model", ""), adapter=type(self.client).__name__,
-                  folder=str(self.bench.folder))
-        off = self.bench.kinds_off
-        tools = [llm.Tool(t["name"], t["description"], t["parameters"]) for t in tools_for(off)]
-        instructions = instructions_for(off, self.bench.settings.get("ui_language", "de"))
-        messages = [llm.Message("user", [llm.Text(self._first_message())])]
-        last_calls, same, stopped = None, 0, ""
+    def converse(self, instructions: str, first: str, tools: list[dict], client=None, stage: str = "cut",
+                 ends: tuple[str, ...] = ("finish",)) -> tuple[str, str]:
+        """One conversation with fresh context, until a tool in ends is called or the model stops calling
+        tools; returns the text of that end and why it was stopped, if it was. Rounds, pictures and tokens
+        add up on this agent, so several conversations (the stages of version 2) count as one run."""
+        client = client or self.client
+        tools_ = [llm.Tool(t["name"], t["description"], t["parameters"]) for t in tools]
+        messages = [llm.Message("user", [llm.Text(first)])]
+        last_calls, same, stopped, ended, rounds = None, 0, "", "", 0
         while True:
             if self.rounds >= self.safety_rounds:
                 stopped = f"Notstopp nach {self.rounds} Runden; die Liste ist unvollständig."
                 break
             self.rounds += 1
+            rounds += 1
             t0 = time.monotonic()
-            reply = self.client.complete(instructions, messages, tools)
+            reply = client.complete(instructions, messages, tools_)
             self.usage.add(reply.usage)
-            self._log(event="round", round=self.rounds, seconds=round(time.monotonic() - t0, 1),
-                      usage=reply.usage.as_dict(), calls=len(reply.calls))
+            self._log(event="round", stage=stage, round=self.rounds, seconds=round(time.monotonic() - t0, 1),
+                      usage=reply.usage.as_dict(), calls=len(reply.calls), model=getattr(client, "model", ""))
             if reply.text:
-                self._log(event="message", text=reply.text[:2000])
+                self._log(event="message", stage=stage, text=reply.text[:2000])
             if not reply.calls:
-                self.summary = self.summary or reply.text
+                ended = ended or reply.text
                 break
             messages.append(reply.message())
             results = []
@@ -337,13 +338,14 @@ class CutAgent:
                     out, picture = self._call(c.name, c.arguments)
                 except Exception as e:                     # the model gets the error and can correct itself
                     out, picture = f"error: {e}", None
-                self._log(event="tool", round=self.rounds, name=c.name, args=c.arguments, result=out[:600])
+                if c.name in ends and not out.startswith("error"):
+                    ended = str(c.arguments.get("summary") or c.arguments.get("note") or "")
+                self._log(event="tool", stage=stage, round=self.rounds, name=c.name, args=c.arguments, result=out[:600])
                 found = sum(1 for x in self.bench.edit["items"] if x["source"] == "agent")
-                self.progress(f"Der Schnitt-Agent {DOING.get(c.name, 'arbeitet')}"
-                              + (f", {found} Vorschläge bisher" if found else ""))
+                self.progress(self.doing(c.name) + (f", {found} Vorschläge bisher" if found else ""))
                 results.append(llm.ToolResult(c.id, out[:60000], [picture] if picture else []))
             messages.append(llm.Message("user", results))
-            if self.summary and any(c.name == "finish" for c in reply.calls):
+            if any(c.name in ends and not r.output.startswith("error") for c, r in zip(reply.calls, results)):
                 break
             signature = json.dumps([(c.name, c.arguments) for c in reply.calls], sort_keys=True, default=str)
             same = same + 1 if signature == last_calls else 1
@@ -352,8 +354,25 @@ class CutAgent:
                 stopped = f"Notstopp: {SAME_ROUNDS} Runden mit denselben Aufrufen; die Liste ist unvollständig."
                 break
         if stopped:
-            self.summary = self.summary or stopped
-            self._log(event="stopped", reason=stopped)
+            self._log(event="stopped", stage=stage, reason=stopped)
+        return ended, stopped
+
+    def doing(self, tool: str) -> str:
+        """What the window says the agent is doing."""
+        return f"Der Schnitt-Agent {DOING.get(tool, 'arbeitet')}"
+
+    def run(self) -> str:
+        started = time.monotonic()
+        self._log(event="start", model=getattr(self.client, "model", ""), adapter=type(self.client).__name__,
+                  folder=str(self.bench.folder))
+        off = self.bench.kinds_off
+        ended, stopped = self.converse(instructions_for(off, self.bench.settings.get("ui_language", "de")),
+                                       self._first_message(), tools_for(off))
+        self.summary = self.summary or ended or stopped
+        return self.finish(started, extra={"version": 1})
+
+    def finish(self, started: float, extra: dict | None = None) -> str:
+        """Decide what is left, add the cards, record the run and keep the agent's list for the comparison."""
         seconds = round(time.monotonic() - started, 1)
         decided_here = self.bench.decide_rest()            # nothing stays open for the lecturer
         if "cards" not in self.bench.edit:                  # the texts of the added cards, to change before approving
@@ -361,14 +380,13 @@ class CutAgent:
         self.bench.edit["agent"] = {"model": getattr(self.client, "model", ""), "adapter": type(self.client).__name__,
                                     "summary": self.summary, "decided_by_fallback": decided_here,
                                     "rounds": self.rounds, "images": self.images, "seconds": seconds,
-                                    "usage": self.usage.as_dict(),
+                                    "usage": self.usage.as_dict(), **(extra or {}),
                                     "finished": dt.datetime.now().astimezone().isoformat(timespec="seconds")}
         self.bench.save()
         shutil.copyfile(self.bench.folder / "edit.json", self.bench.folder / AGENT_COPY)   # to compare with the approval
         self._log(event="finish", summary=self.summary, usage=self.usage.as_dict(), images=self.images,
                   rounds=self.rounds, seconds=seconds)
         return self.summary
-
 
 def run(folder: Path, key, listener=None, settings: dict | None = None,
         progress: Callable[[str], None] | None = None, config: dict | None = None) -> dict:
