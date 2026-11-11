@@ -212,6 +212,17 @@ class Recordings:
             return "An dieser Aufnahme wird gerade gearbeitet."
         return ""
 
+    def recheck(self, sid: str) -> str:
+        """Check the cut on its rendered result again (after changes at the approval); returns an error or ''."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        if not (folder / "edit.json").exists():
+            return "Es gibt noch keinen Schnitt zum Prüfen."
+        if not self.pipeline.redo_check(folder):
+            return "An dieser Aufnahme wird gerade gearbeitet."
+        return ""
+
     def rerender(self, sid: str) -> str:
         """Render the approved cut again, e.g. after its videos were deleted; returns an error or ''."""
         folder = getattr(self, "_library", {}).get(sid)

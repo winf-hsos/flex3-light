@@ -318,6 +318,10 @@
   .lock.hidden { border-left-color: var(--green); }
   .lock.lifted { border-left-color: var(--amber); }
   .lock.candidate { border-left-color: var(--line); }
+  .lock.warn { border-left-color: var(--amber); }
+  .review-fixed summary { cursor: pointer; }
+  .review-fixed p { margin: 4px 0 0 16px; }
+  .review-heard { font-size: 12px; color: var(--slate); }
   .lock .cut-text p { overflow-wrap: anywhere; }
   .lock-state { font-size: 11.5px; color: var(--slate); }
   .lock.open .lock-state { color: #b3261e; font-weight: 600; }
@@ -1315,7 +1319,7 @@
   function renderCut(d) {
     const box = $("cut"), st = d.stations.cut, view = d.cut || {}, e = view.edit;
     const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
-    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.render, cutTab, markIn, markOut, selectedItem,
+    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.review, view.render, cutTab, markIn, markOut, selectedItem,
                                 cutPreview, cutSettings, playing]);
     if (box.dataset.sig === sig || typing) return;
     box.dataset.sig = sig;
@@ -1379,6 +1383,7 @@
     const exposed = locks.filter(x => x.status === "open").length;
     if (view.outline) box.appendChild(outlineBlock(view.outline));
     if (view.privacy) box.appendChild(privacyBlock(view.privacy, !!e.approved));
+    if (view.review) box.appendChild(reviewBlock(view.review, !!e.approved));
     const foot = el("div", "cut-foot");
     const note = el("span", "hint");
     if (e.approved) {
@@ -1546,7 +1551,8 @@
       const t = el("div", "cut-text");
       const line = el("div", "cut-line");
       line.append(el("b", "", x.label), el("span", "tabular", `${fmtClock(x.start)}–${fmtClock(x.end)}`));
-      if (isLock) line.appendChild(el("span", "lock-state", LOCK_STATUS[x.status] || x.status));
+      if (isLock) line.appendChild(el("span", "lock-state", x.seen ? "im geschnittenen Ergebnis noch erkennbar"
+                                                                  : LOCK_STATUS[x.status] || x.status));
       t.appendChild(line);
       if (x.text) t.appendChild(el("p", "", x.kind === "room_voice" ? `„${x.text}“` : x.text));
       if (x.kind === "room_voice" && x.quieter != null) t.appendChild(el("small", "", `${Math.round(x.quieter)} dB leiser als du`));
@@ -1570,6 +1576,46 @@
     return g;
   }
   const coverLock = async id => cutResult(await api().cover_lock(selectedId, id));
+
+  // stage E: what the check on the rendered result found (cut_review.py)
+  function reviewBlock(r, approved) {
+    const g = el("div", "privacy");
+    const head = el("div", "privacy-head");
+    head.appendChild(el("h3", "", "Prüfung am Ergebnis"));
+    const found = r.findings || [];
+    const blocking = found.filter(f => f.severity === "block").length;
+    head.appendChild(el("span", "hint", r.error ? r.error
+      : !found.length ? `${r.junctions} Übergänge und ${r.locks} Sperren im geschnittenen Ergebnis geprüft, nichts gefunden.`
+      : `${found.length} ${found.length === 1 ? "Befund" : "Befunde"} an ${r.junctions} Übergängen und ${r.locks} Sperren`
+        + (blocking ? `, davon ${blocking} beim Datenschutz.` : ", nur Hinweise; die Freigabe geht trotzdem.")));
+    if (!approved) head.appendChild(button("link", "Erneut prüfen", recheck));
+    g.appendChild(head);
+    if (r.current === false && !r.error)
+      g.appendChild(el("p", "hint", "Die Liste hat sich seit der Prüfung geändert; die Befunde gelten für den vorigen Stand."));
+    const fixed = (r.passes || []).reduce((n, x) => n + (x.fixed || 0), 0);
+    if (fixed) {
+      const d = el("details", "review-fixed");
+      d.appendChild(el("summary", "hint", `Der Schnitt-Agent hat nach der ersten Prüfung ${fixed} ${fixed === 1 ? "Befund" : "Befunde"} selbst behoben.`));
+      for (const f of (r.passes || []).flatMap(x => x.found || []).filter(f => f.fixed))
+        d.appendChild(el("p", "hint", `${f.clock} ${f.label}: ${f.text}`));
+      g.appendChild(d);
+    }
+    for (const s of r.skipped || []) g.appendChild(el("p", "hint error", s));
+    for (const f of found) {
+      const row = el("div", "lock " + (f.severity === "block" ? "open" : "warn"));
+      const play = button("round", "", () => listen(Math.max(0, f.at - 4), f.at + 4), "Die Stelle ansehen und anhören");
+      play.innerHTML = '<svg class="i"><use href="#i-play"/></svg>';
+      const t = el("div", "cut-text");
+      const line = el("div", "cut-line");
+      line.append(el("b", "", f.label), el("span", "tabular", fmtClock(f.at)));
+      t.append(line, el("p", "", f.text));
+      if (f.heard != null) t.appendChild(el("p", "review-heard", `Erwartet: „${f.expected}“, gehört: „${f.heard}“`));
+      row.append(play, t, el("div", "lock-actions"));
+      g.appendChild(row);
+    }
+    return g;
+  }
+  async function recheck() { cutResult(await api().recheck(selectedId)); }
   async function liftLock(x, lifted) {
     if (lifted && !await ask({title: "Sperre aufheben?", confirm: "Aufheben", danger: true,
                               text: `${x.label} (${fmtClock(x.start)}–${fmtClock(x.end)}) bleibt dann so im Video, wie es ist. `

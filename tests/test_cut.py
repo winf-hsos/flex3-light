@@ -211,6 +211,11 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
         outlined.append(config["model"])
         (f / "outline.json").write_text('{"phases": [], "topics": [], "inputs": []}', encoding="utf-8")
     monkeypatch.setattr(pipeline_runner.outline, "run", fake_outline)
+    reviewed = []
+    monkeypatch.setattr(pipeline_runner.cut_review, "check_and_fix",
+                        lambda f, key, listener, settings, progress, models: reviewed.append(f))
+    monkeypatch.setattr(pipeline_runner.cut_review, "run",
+                        lambda f, key, listener, settings, progress, models: reviewed.append(("again", f)))
     monkeypatch.setattr(pipeline_runner.services, "key", lambda s: "sk" if s == "openai" else None)
     settings = {"auto": False, **cut_rules.policy(None)}
     r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda f: settings)
@@ -219,8 +224,10 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
     settings["auto"] = True
     r.enqueue(folder)
     assert r._process(folder) and calls == [("sk", "card")] and screened == [folder] and outlined == ["gpt-6.1-sol"]   # screening first, once
-    assert pipeline_runner.read_state(folder)["steps"]["cut"]["state"] == "done"
+    assert pipeline_runner.read_state(folder)["steps"]["cut"]["state"] == "done" and reviewed == [folder]
     assert r.describe(folder) == "Schnitt vorgeschlagen, wartet auf deine Freigabe"
+    assert r.redo_check(folder) and r._process(folder) and reviewed[-1] == ("again", folder)   # after the lecturer's changes
+    assert "check_requested" not in pipeline_runner.read_state(folder)
     assert r.redo_cut(folder) and (folder / "edit.previous.json").exists() and not (folder / "edit.json").exists()
     staged = []
 

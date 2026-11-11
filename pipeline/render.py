@@ -108,17 +108,39 @@ def _between(spans) -> str:
     return "+".join(f"between(t,{a:.4f},{b:.4f})" for a, b in spans) or "0"
 
 
-def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list[str]]:
-    """(input arguments, filter graph, plan, warnings) for the long version."""
+def window(e: dict, a: float, length: float) -> dict:
+    """The edit list for the span a..a+length only, in times from a: the items that reach into it,
+    clipped. A held picture keeps the time it holds (source_start)."""
+    b, items = a + length, []
+    for x in e["items"]:
+        end = x["end"] if x["end"] is not None else x["start"]
+        if end < a or x["start"] > b or (x["end"] is not None and end == a):
+            continue
+        y = {**x, "start": round(max(0.0, x["start"] - a), 4), "source_start": x["start"]}
+        if x["end"] is not None:
+            y["end"] = round(min(length, x["end"] - a), 4)
+        items.append(y)
+    return {**e, "duration": round(length, 4), "items": items}
+
+
+def build(folder: Path, e: dict, work: Path, offset: float = 0.0,
+          length: float | None = None) -> tuple[list[str], str, dict, list[str]]:
+    """(input arguments, filter graph, plan, warnings) for the long version; with length, for the span
+    offset..offset+length of the recording only, through the same graph (the check in cut_review.py)."""
     folder = Path(folder)
     source = folder / "recording.mp4"
     if not source.exists():
         source = folder / "screen.mp4"
     info = probe(source)
     W, H, fps = info["width"], info["height"], info["fps"]
+    if length is None:
+        offset = 0.0
+    else:
+        e = window(e, offset, length)
     p = timeline.plan(e, fps)
     accepted = [x for x in e["items"] if x["state"] == "accepted" and x["end"] is not None]
-    inputs, graph, warnings = [*binaries.hwaccel(), "-i", str(source)], [], []
+    seek = ["-ss", f"{offset:.4f}", "-t", f"{length:.4f}"] if length is not None else []
+    inputs, graph, warnings = [*binaries.hwaccel(), *seek, "-i", str(source)], [], []
     n = 1
     cur = "v0"
     graph.append(f"[0:v]setpts=PTS-STARTPTS,format=yuv420p[{cur}]")
@@ -163,7 +185,7 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
         """The program picture from a to b as the steps before have made it: a reading of the recording
         for this span only, with the held pictures and, if asked, the pixelated boxes laid over it."""
         label = unique("r")
-        span_input([*binaries.hwaccel(), "-ss", f"{a:.4f}", "-i", str(source)], a, b, label, "format=yuv420p")
+        span_input([*binaries.hwaccel(), "-ss", f"{a + offset:.4f}", "-i", str(source)], a, b, label, "format=yuv420p")
         for still, fa, fb in stills:
             if fa < b and a < fb:
                 lo, hi = max(a, fa), min(b, fb)
@@ -180,7 +202,8 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
     # 1. held pictures: the frame just before the span stays on screen
     for i, x in enumerate(x for x in accepted if x["kind"] == "freeze"):
         still = work / f"still-{i}.png"
-        r = subprocess.run([binaries.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, x['start'] - 0.05):.3f}", "-i", str(source),
+        held = x.get("source_start", x["start"])
+        r = subprocess.run([binaries.ffmpeg(), "-y", "-v", "error", "-ss", f"{max(0.0, held - 0.05):.3f}", "-i", str(source),
                             "-frames:v", "1", str(still)], stdin=subprocess.DEVNULL, capture_output=True,
                            creationflags=binaries.flags())
         if r.returncode == 0 and still.exists():
@@ -222,7 +245,7 @@ def build(folder: Path, e: dict, work: Path) -> tuple[list[str], str, dict, list
         spans = _without(x["start"], x["end"], blurs) if mode == "hidden" else [(x["start"], x["end"])]
         for a, b in spans:
             label = unique("l")
-            span_input([*binaries.hwaccel(), "-ss", f"{a:.4f}", "-i", str(folder / track)], a, b, label,
+            span_input([*binaries.hwaccel(), "-ss", f"{a + offset:.4f}", "-i", str(folder / track)], a, b, label,
                        f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,format=yuv420p")
             overlay(label, 0, 0, a, b)
     # 5. cards over removed pauses

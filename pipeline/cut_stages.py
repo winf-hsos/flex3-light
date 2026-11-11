@@ -339,11 +339,13 @@ class StagedCut(CutAgent):
             found = sum(1 for x in self.bench.edit["items"] if x["source"] == "agent")
             self.progress(f"Feinschnitt: {self.done} von {n} Abschnitten fertig, {found} Vorschläge bisher")
 
-    def _section(self, sec: dict, n: int, instructions: str, tools: list[dict]) -> SectionAgent:
+    def _section(self, sec: dict, n: int, instructions: str, tools: list[dict], extra: str = "") -> SectionAgent:
+        """One section in a conversation of its own; extra goes at the end of its first message (the findings
+        of the check on the rendered result, cut_review.py)."""
         client = self.clients("section_light" if sec["light"] else "section")
         agent = SectionAgent(self.bench, client, sec, self.lock, lambda text: self._report(n))
         with self.lock:
-            first = self._section_message(sec, n)
+            first = self._section_message(sec, n) + ("\n\n" + extra if extra else "")
         t0 = time.monotonic()
         _, stopped = agent.converse(instructions, first, tools, stage=f"section {sec['no']}", ends=("section_done",))
         with self.lock:

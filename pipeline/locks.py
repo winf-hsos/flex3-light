@@ -17,6 +17,8 @@ Removing the span hides both.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 from . import edit, files, timeline
@@ -112,19 +114,34 @@ def visible(lock: dict, e: dict) -> list[tuple[float, float]]:
     return [] if total <= SLACK else [(x, y) for x, y in merged]
 
 
+def fingerprint(lock: dict, e: dict) -> str:
+    """The accepted items around a lock: when they change, what the check on the rendered result saw of
+    it no longer holds."""
+    near = sorted((x["kind"], x["start"], x["end"], json.dumps(x.get("params") or {}, sort_keys=True))
+                  for x in e["items"] if x["state"] == "accepted" and x["end"] is not None
+                  and x["end"] > lock["start"] - 1 and x["start"] < lock["end"] + 1)
+    return hashlib.sha1(json.dumps(near).encode()).hexdigest()[:12]
+
+
 def state(folder: Path, e: dict | None = None) -> list[dict]:
-    """Every lock with its state: "hidden", "lifted" (by the lecturer) or "open"."""
+    """Every lock with its state: "hidden", "lifted" (by the lecturer) or "open". A lock the list hides but
+    the check on the rendered result (cut_review.py, review.json) still saw or heard stays open, with
+    "seen": True, until the items around it change."""
     e = e if e is not None else edit.load(folder)
     lifted = (e or {}).get("lifted", {})
+    seen = files.read_json(Path(folder) / "review.json").get("seen") or {}
     out = []
     for lock in load(folder).get("locks", []):
+        extra = {}
         if lock["id"] in lifted:
             status = "lifted"
         elif e is not None and not visible(lock, e):
             status = "hidden"
+            if lock["id"] in seen and seen[lock["id"]] == fingerprint(lock, e):
+                status, extra = "open", {"seen": True}
         else:
             status = "open"
-        out.append({**lock, "label": KINDS.get(lock["kind"], lock["kind"]), "status": status})
+        out.append({**lock, "label": KINDS.get(lock["kind"], lock["kind"]), "status": status, **extra})
     return out
 
 

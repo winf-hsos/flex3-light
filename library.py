@@ -13,7 +13,7 @@ import datetime as dt
 import re
 from pathlib import Path
 
-from pipeline import cut_rules, edit, files, locks, outline, publish, render, review
+from pipeline import cut_review, cut_rules, edit, files, locks, outline, publish, render, review
 from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
@@ -161,6 +161,9 @@ def cut_view(folder: Path) -> dict:
         view["privacy"] = {"locks": locks.state(folder, e), "checked": safety.get("checked"),
                            "candidates": [{**x, "label": locks.KINDS.get(x["kind"], x["kind"])}
                                           for x in safety.get("candidates", [])]}
+        checked = cut_review.view(folder, e)
+        if checked:
+            view["review"] = checked
         made = _read(folder / "render.json")
         if made:
             view["render"] = {**made, "current": made.get("signature") == render.signature(e),

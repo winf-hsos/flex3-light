@@ -26,7 +26,7 @@ try:
     import services          # the app's keys in the Windows Credential Manager
 except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
     services = None
-from pipeline import cut_agent, cut_stages, edit, files, llm, outline, render, screening, sounds, subtitles, summary, transcribe
+from pipeline import cut_agent, cut_review, cut_stages, edit, files, llm, outline, render, screening, sounds, subtitles, summary, transcribe
 
 STEPS = ("transcribe", "subtitles", "cut", "render", "summary")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
@@ -135,6 +135,20 @@ class PipelineRunner:
             data = read_state(folder)
             data["steps"].pop("summary", None)
             data["summary_requested"] = True
+            self._write_state(folder, data)
+            self.failed.discard(str(folder))
+        self.enqueue(folder)
+        return True
+
+    def redo_check(self, folder: Path) -> bool:
+        """Check the edit list on its rendered result again, e.g. after the lecturer changed it; only reports,
+        changes nothing. False while the recording is being worked on."""
+        folder = Path(folder)
+        with self.lock:
+            if self.active == str(folder):
+                return False
+            data = read_state(folder)
+            data["check_requested"] = True
             self._write_state(folder, data)
             self.failed.discard(str(folder))
         self.enqueue(folder)
@@ -280,7 +294,24 @@ class PipelineRunner:
                 else:
                     result = cut_agent.run(folder, self.key, listener, settings, progress=say,
                                            config=llm.stage_config("cut", models))
+                if models.get("cut_review", True):              # stage E: checked on the rendered result, fixed
+                    self._set(folder, "cut", "running", "Prüfung am geschnittenen Ergebnis …")
+                    cut_review.check_and_fix(folder, self.key, listener, settings, progress=say, models=models)
                 self._set(folder, "cut", "done", model=(result.get("agent") or {}).get("model", ""))
+                return True
+            if read_state(folder).get("check_requested") and (folder / "edit.json").exists():
+                self._set(folder, "cut", "running", "Prüfung am geschnittenen Ergebnis …")
+                aai = self.key("assemblyai")
+                base = aai and transcribe.assemblyai_base(aai)
+                try:
+                    cut_review.run(folder, self.key, transcribe.AssemblyAI(aai, base) if base else None,
+                                   self.cut_settings(folder), progress=lambda text: self._set(folder, "cut", "running", text),
+                                   models=self.models())
+                finally:
+                    data = read_state(folder)
+                    data.pop("check_requested", None)
+                    self._write_state(folder, data)
+                    self._set(folder, "cut", "done")
                 return True
             e = edit.load(folder)
             if e and e.get("approved") and (read_state(folder).get("render_requested") or

@@ -35,7 +35,7 @@ SESSION_SECONDS = 12 * 3600
 CALLS = ("data", "recordings", "recording", "start_transcription", "redo_transcription", "review_word",
          "redo_cut", "change_cut_item", "add_cut_item", "remove_cut_item", "cover_lock", "lift_lock", "set_program_rule",
          "set_cut_metadata",
-         "set_cut_cards", "set_cut_settings", "approve_cut", "rerender", "make_summary", "publish_plan", "publish",
+         "set_cut_cards", "set_cut_settings", "approve_cut", "recheck", "rerender", "make_summary", "publish_plan", "publish",
          "delete_recording")
 
 
