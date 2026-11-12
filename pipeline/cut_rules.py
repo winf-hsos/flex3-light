@@ -31,7 +31,8 @@ MERGE_GAP = 2.0                      # spans of the same rule closer than this b
 
 
 CARD_DEFAULTS = {"title_card": True, "closing_card": True, "chapter_display": "card", "chapter_sound": True,
-                 "music": True}
+                 "music": True,
+                 "topic_videos": "propose"}   # off, propose or auto: the videos of the slide inputs (products.py)
 AFTER_RECORDING = ("nothing", "transcribe", "cut")   # what starts by itself once a recording is filed
 
 
@@ -49,7 +50,7 @@ def settings_from(preferences: dict) -> dict:
 
 
 CUT_FIELDS = ("pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off",
-              "title_card", "closing_card", "chapter_display", "chapter_sound", "music")
+              "title_card", "closing_card", "chapter_display", "chapter_sound", "music", "topic_videos")
 
 
 def cut_preferences(current: dict, values: dict) -> dict:
@@ -71,6 +72,8 @@ def cut_preferences(current: dict, values: dict) -> dict:
         current["chapter_display"] = "card"
     for k in ("title_card", "closing_card", "chapter_sound", "music"):
         current[k] = bool(current.get(k, True))
+    if current.get("topic_videos") not in ("off", "propose", "auto"):
+        current["topic_videos"] = CARD_DEFAULTS["topic_videos"]
     return {f"cut.{k}": v for k, v in current.items()}
 
 

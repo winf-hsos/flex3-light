@@ -5,6 +5,8 @@ which the lecturer uploads them, named the way Opencast uploads are named (decis
   <root>\\<term>\\<module>\\<date> - <module> - <title>.mp4                the long version
   <root>\\<term>\\<module>\\<date> - <module> - <title>.<language>.vtt     its subtitles
   <root>\\<term>\\<module>\\<date> - <module> - <title> - <clip>.mp4       each clip, with its .vtt
+  <root>\\<term>\\<module>\\<date> - <module> - <title> - <topic>.mp4      each topic video (products.py),
+                                                                     with its .vtt, .jpg and .txt
   <root>\\<term>\\<module>\\<date> - <module> - <title> - Zusammenfassung.pdf
 
 The files are moved, not copied. publish.json in the session folder records where each one
@@ -82,6 +84,15 @@ def plan(folder: Path, root: Path) -> list[tuple[str, Path]]:
             vtt = f"{Path(clip['file']).stem}.{lang}.vtt"
             if locate(folder, vtt):
                 moves.append((vtt, out_dir / f"{base} - {name}.{lang}.vtt"))
+    from . import products                                # it needs render, which needs this module
+    for video in products.finished(folder):              # the approved topic videos of this render
+        title = clean(video.get("title", "")) or video["name"]
+        name, k = title, 2
+        while name.lower() in used:
+            name, k = f"{title} ({k})", k + 1
+        used.add(name.lower())
+        for file in video.get("files", []):
+            moves.append((file, out_dir / f"{base} - {name}{file[len(video['name']):]}"))
     s = files.read_json(folder / "summary.json")
     if s.get("signature") and s.get("signature") == made.get("signature") and locate(folder, "summary.pdf"):
         moves.append(("summary.pdf", out_dir / f"{base} - {SUMMARY_NAME}.pdf"))
@@ -104,15 +115,16 @@ def locate(folder: Path, name: str) -> Path | None:
 
 
 def current(folder: Path) -> bool:
-    """True if the video rendered last is published with everything that belongs to it (a summary
-    finished after publishing makes it open again) and all files are where publish.json says."""
+    """True if the video rendered last is published with everything that belongs to it and nothing
+    else (a summary finished after publishing, a topic video approved or dropped since, makes it open
+    again) and all files are where publish.json says."""
     p = published(folder)
     done = p.get("files", {})
     names = [name for name, _ in plan(Path(folder), Path(p.get("folder") or "."))]
     if p.get("package"):                               # downloaded from the server: the same files, nothing moved
-        return p.get("signature") == _render_signature(Path(folder)) and all(name in done for name in names)
+        return p.get("signature") == _render_signature(Path(folder)) and set(names) == set(done)
     return bool(p) and p.get("signature") == _render_signature(Path(folder)) and \
-        all(Path(t).exists() for t in done.values()) and all(name in done for name in names) and \
+        all(Path(t).exists() for t in done.values()) and set(names) == set(done) and \
         not any((Path(folder) / name).exists() for name in names)    # rendered again into the folder
 
 

@@ -26,9 +26,9 @@ try:
     import services          # the app's keys in the Windows Credential Manager
 except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
     services = None
-from pipeline import cut_agent, cut_review, cut_stages, edit, files, llm, outline, render, screening, sounds, subtitles, summary, transcribe
+from pipeline import cut_agent, cut_review, cut_stages, edit, files, llm, outline, products, render, screening, sounds, subtitles, summary, transcribe
 
-STEPS = ("transcribe", "subtitles", "cut", "render", "summary")
+STEPS = ("transcribe", "subtitles", "cut", "render", "topics", "summary")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
 WAIT = 30                    # seconds between checks while waiting for a key or for the recording to end
 WHISPER_END = dt.date(2027, 2, 26)   # OpenAI shuts whisper-1 down
@@ -177,9 +177,11 @@ class PipelineRunner:
             return ""
         steps = read_state(folder)["steps"]
         t, s, c = steps.get("transcribe", {}), steps.get("subtitles", {}), steps.get("cut", {})
-        r = steps.get("render", {})
+        r, g = steps.get("render", {}), steps.get("topics", {})
         if r.get("state") in ("running", "failed"):
             return r.get("message", "")
+        if g.get("state") in ("running", "failed"):
+            return g.get("message", "")
         if c.get("state") in ("running", "waiting", "failed"):
             return c.get("message", "")
         if c.get("state") == "done":
@@ -327,6 +329,19 @@ class PipelineRunner:
                 if data.pop("render_requested", None):
                     self._write_state(folder, data)
                 return True
+            if e and e.get("approved") and files.read_json(folder / "render.json").get("signature") == render.signature(e):
+                # stage G: the topic videos, proposed once after the first render, rendered once approved
+                if not (folder / products.FILE).exists() and products.mode(settings) != "off" and outline.current(folder):
+                    data = products.propose(folder, settings)
+                    self._set(folder, "topics", "done", f"{len(data['products'])} Themenvideos vorgeschlagen")
+                    return True
+                if (products.accepted(products.load(folder)) or products.made(folder).get("videos")) and \
+                        products.due(folder):
+                    self._set(folder, "topics", "running", "Die Themenvideos werden gerendert …")
+                    products.render(folder, self.video_args, progress=lambda text: self._set(
+                        folder, "topics", "running", text), sound_dir=self.sound_dir, style_dir=self.style_dir)
+                    self._set(folder, "topics", "done")
+                    return True
             if (folder / "render.json").exists() and \
                     (not summary.current(folder) or read_state(folder).get("summary_requested")):
                 key = self.key("openai")
@@ -349,7 +364,7 @@ class PipelineRunner:
             step = next((k for k in STEPS if now.get(k, {}).get("state") == "running"), None) or \
                 next((k for k in STEPS if now.get(k, {}).get("state") != "done"), STEPS[-1])
             name = {"transcribe": "Transkription", "subtitles": "Untertitel", "cut": "Schnitt-Vorschlag",
-                    "render": "Rendern", "summary": "Zusammenfassung"}[step]
+                    "render": "Rendern", "topics": "Themenvideos", "summary": "Zusammenfassung"}[step]
             self._set(folder, step, "failed", f"{name} fehlgeschlagen: {e}"[:300])
             self.failed.add(str(folder))
             return True

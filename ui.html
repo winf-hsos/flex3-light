@@ -241,6 +241,22 @@
   .result-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; font-size: 13px; }
   .result-row.on span:first-child { font-weight: 600; }
   .results .link { justify-self: start; }
+  .topics { display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); }
+  .topics h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .topics > .hint { margin: 0; }
+  .tv { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start;
+          padding-top: 8px; border-top: 1px solid var(--line); }
+  .tv > input[type=checkbox] { margin-top: 6px; }
+  .tv.off .tv-body { opacity: .5; }
+  .tv-body { display: grid; gap: 3px; min-width: 0; }
+  .tv-title, .tv-desc { font: inherit; color: var(--ink); background: transparent; border: 1px solid transparent;
+                      border-radius: 6px; padding: 2px 6px; width: 100%; }
+  .tv-title { font-size: 13px; font-weight: 600; }
+  .tv-desc { font-size: 12.5px; color: var(--slate); resize: vertical; }
+  .tv-title:hover, .tv-desc:hover, .tv-title:focus, .tv-desc:focus { border-color: var(--line); background: var(--surface); outline: none; }
+  .tv-body > .hint { padding: 0 7px; }
+  .topics-foot, .topics-add { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .topics-foot .hint { flex: 1 1 260px; }
   .cut-sum { display: grid; gap: 8px; }
   .cut-title { margin: 0; font-family: var(--display); font-size: 15px; font-weight: 600; }
   .cut-len { margin: 0; font-size: 13px; color: var(--slate); }
@@ -641,6 +657,8 @@
             <label class="toggle"><input type="checkbox" id="cut_title_card" onchange="saveCutSettings()"><span class="knob"></span><span><b>Titeltafel und Abspann</b><small>Am Anfang Titel, Modul, Datum und Name, am Ende ein kurzer Abspann. Die Texte änderst du vor der Freigabe.</small></span></label>
             <div class="setting-row"><span>Kapitel</span><select id="cut_chapter_display" onchange="saveCutSettings()"><option value="card">als Tafel</option><option value="lower_third">als Bauchbinde</option><option value="none">ohne Einblendung</option></select></div>
             <label class="toggle"><input type="checkbox" id="cut_chapter_sound" onchange="saveCutSettings()"><span class="knob"></span><span><b>Wisch-Geräusch bei Kapiteln</b><small>Ein kurzer, leiser Klang zur Kapiteltafel.</small></span></label>
+            <div class="setting-row"><span>Themenvideos</span><select id="cut_topic_videos" onchange="saveCutSettings()"><option value="propose">vorschlagen, ich gebe frei</option><option value="auto">vorschlagen und gleich rendern</option><option value="off">nicht vorschlagen</option></select></div>
+            <div class="section-note">Aus jedem Folien-Input einer Vorlesung kann ein eigenes kurzes Video werden, mit eigener Titeltafel und allem, was in der Langfassung geschnitten, stumm oder verpixelt ist.</div>
             <label class="toggle"><input type="checkbox" id="cut_music" onchange="saveCutSettings()"><span class="knob"></span><span><b>Musik zu Titel und Abspann</b><small id="soundState">Kurze Klänge, einmal mit ElevenLabs erzeugt.</small></span></label>
             <div class="setting-row"><span>Lange Pausen</span><select id="cut_pause_mode" onchange="saveCutSettings()"><option value="card">mit Tafel „Pause entfernt“ schneiden</option><option value="shorten">auf zwei Sekunden kürzen</option><option value="cut">ohne Hinweis schneiden</option></select></div>
             <div class="cut-group"><h3>Was der Schnitt-Agent vorschlagen darf</h3><div class="kinds" id="cutKinds"></div>
@@ -1319,7 +1337,7 @@
   function renderCut(d) {
     const box = $("cut"), st = d.stations.cut, view = d.cut || {}, e = view.edit;
     const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
-    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.review, view.render, cutTab, markIn, markOut, selectedItem,
+    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.review, view.render, view.topics, cutTab, markIn, markOut, selectedItem,
                                 cutPreview, cutSettings, playing]);
     if (box.dataset.sig === sig || typing) return;
     box.dataset.sig = sig;
@@ -1402,6 +1420,7 @@
         foot.appendChild(button(st === "missing" ? "btn primary" : "btn", "Neu rendern", rerender));
       foot.appendChild(button("btn", "Freigabe zurücknehmen", () => approve(false)));
       if (st === "done") box.appendChild(results(made));   // above the foot, which follows
+      if (st === "done" && made && made.current && view.topics) box.appendChild(topicsBlock(view.topics, e));
     } else {
       note.textContent = [open ? `Noch ${open} Vorschläge offen.` : "",
                           exposed ? `${exposed === 1 ? "Eine Datenschutz-Sperre ist" : exposed + " Datenschutz-Sperren sind"} noch offen.` : ""]
@@ -1643,6 +1662,82 @@
     for (const w of made.warnings || []) g.appendChild(el("div", "hint error", w));
     return g;
   }
+  // stage G: the topic videos of the slide inputs, approved in a second, short step after the long version
+  function topicsBlock(t, e) {
+    const g = el("div", "topics");
+    g.appendChild(el("h3", "", "Themenvideos"));
+    const off = (cutSettings.topic_videos || "propose") === "off";
+    if (!t.proposed) {
+      g.appendChild(el("p", "hint", off
+        ? "Aus den Folien-Inputs dieser Vorlesung können eigene kurze Videos werden. In deinen Einstellungen schlägt FLEX3 Light sie nicht von selbst vor."
+        : "Die Themenvideos werden gleich vorgeschlagen."));
+      g.appendChild(button("btn", "Themenvideos vorschlagen", proposeTopics));
+      return g;
+    }
+    for (const n of t.notes || []) g.appendChild(el("p", "hint", n));
+    const done = Object.fromEntries((t.videos || []).map(v => [v.id, v]));
+    for (const x of t.products) {
+      const row = el("div", "tv" + (x.state === "rejected" ? " off" : ""));
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = x.state !== "rejected";
+      cb.title = "Dieses Themenvideo machen";
+      cb.onchange = () => changeTopic(x.id, {state: cb.checked ? "accepted" : "rejected"});
+      const body = el("div", "tv-body");
+      const title = el("input", "tv-title"); title.value = x.title; title.setAttribute("aria-label", "Titel");
+      title.onchange = () => changeTopic(x.id, {title: title.value});
+      const desc = el("textarea", "tv-desc"); desc.rows = 2; desc.value = x.description || "";
+      desc.placeholder = "Beschreibung"; desc.setAttribute("aria-label", "Beschreibung");
+      desc.onchange = () => changeTopic(x.id, {description: desc.value});
+      body.append(title, el("span", "hint tabular", `${fmtClock(x.start)}–${fmtClock(x.end)} der Aufnahme, `
+        + `nach dem Schnitt ${fmtLength(x.kept)}` + (x.source === "lecturer" ? ", von dir hinzugefügt" : "")), desc);
+      const v = done[x.id];
+      const look = v ? button("btn", playing === v.file ? "Läuft im Player" : "Ansehen", () => play(v.file))
+                     : button("link", "Anfang ansehen", async () => {
+                         if (playing !== "original") { playing = "original"; $("cut").dataset.sig = ""; await refreshDetail(); }
+                         listen(x.start, x.start + 30);
+                       });
+      row.append(cb, body, look);
+      g.appendChild(row);
+    }
+    const chapters = (e.items || []).filter(x => x.kind === "chapter" && x.state === "accepted").sort((a, b) => a.start - b.start);
+    if (chapters.length && !t.approved) {
+      const add = el("div", "topics-add");
+      const sel = el("select");
+      sel.appendChild(Object.assign(el("option", "", "Ein Kapitel als Themenvideo hinzufügen …"), {value: ""}));
+      chapters.forEach((c, i) => {
+        const o = el("option", "", `${fmtClock(c.start)} ${c.params.title || "Kapitel"}`); o.value = i; sel.appendChild(o);
+      });
+      sel.onchange = async () => {
+        if (sel.value === "") return;
+        const c = chapters[+sel.value], next = chapters[+sel.value + 1];
+        cutResult(await api().add_topic(selectedId, c.start, next ? next.start : e.duration, c.params.title || "Kapitel"));
+      };
+      add.appendChild(sel);
+      g.appendChild(add);
+    }
+    const foot = el("div", "topics-foot");
+    const n = t.products.filter(x => x.state !== "rejected").length;
+    if (t.approved) {
+      foot.append(el("span", "hint", t.due ? "Freigegeben, die Themenvideos werden gerendert."
+                                          : `Freigegeben am ${fmtDate(t.approved)}, ${t.videos.length} gerendert.`),
+                  button("btn", "Freigabe zurücknehmen", () => approveTopics(false)));
+    } else {
+      const go = button("btn primary", n === 1 ? "Ein Themenvideo freigeben" : `${n} Themenvideos freigeben`, () => approveTopics(true));
+      go.disabled = !n;
+      foot.append(el("span", "hint", "Gerendert wird erst nach dieser Freigabe. Was in der Langfassung geschnitten, stumm oder verpixelt ist, gilt auch hier."), go);
+    }
+    foot.appendChild(button("link", "Neu vorschlagen", async () => {
+      if (await ask({title: "Themenvideos neu vorschlagen?", confirm: "Neu vorschlagen",
+                     text: "Die Vorschläge entstehen neu aus den Folien-Inputs der Gliederung; deine Titel, Beschreibungen und hinzugefügten Kapitel gehen dabei verloren."}))
+        proposeTopics();
+    }));
+    g.appendChild(foot);
+    for (const w of t.warnings || []) g.appendChild(el("div", "hint error", w));
+    return g;
+  }
+  const proposeTopics = async () => cutResult(await api().propose_topics(selectedId));
+  const changeTopic = async (id, changes) => cutResult(await api().change_topic(selectedId, id, changes));
+  const approveTopics = async approved => cutResult(await api().approve_topics(selectedId, approved));
+
   function play(file) {
     playing = file;
     if (file !== "original") cutPreview = false;            // the edited video is already cut
@@ -1951,6 +2046,7 @@
     $("cut_chapter_display").value = cutSettings.chapter_display || "card";
     $("cut_chapter_sound").checked = cutSettings.chapter_sound !== false;
     $("cut_music").checked = cutSettings.music !== false;
+    $("cut_topic_videos").value = cutSettings.topic_videos || "propose";
     const made = cutSettings.sounds || [];
     $("soundState").textContent = made.length >= 3 ? "Kurze Klänge, mit ElevenLabs erzeugt und bereit."
       : "Die Klänge entstehen einmalig mit dem ElevenLabs-Schlüssel (KI-Dienste), beim ersten Rendern.";
@@ -1986,7 +2082,8 @@
                                   pause_min: +$("cut_pause_min").value || 30,
                                   title_card: $("cut_title_card").checked, closing_card: $("cut_title_card").checked,
                                   chapter_display: $("cut_chapter_display").value,
-                                  chapter_sound: $("cut_chapter_sound").checked, music: $("cut_music").checked});
+                                  chapter_sound: $("cut_chapter_sound").checked, music: $("cut_music").checked,
+                                  topic_videos: $("cut_topic_videos").value});
     cutSettings = (await api().data()).cut; fillCutSettings();
   }
   const MODELS = {"assemblyai/universal-3-pro": "AssemblyAI Universal-3 Pro", "openai/whisper-1": "OpenAI whisper-1"};

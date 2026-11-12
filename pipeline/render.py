@@ -396,8 +396,9 @@ def measured(s: dict) -> dict:
 
 def compose(cut: Path, ins: list[dict], p: dict, out: Path, work: Path, sound_dir: Path | None,
             video_args: list[str], say: Callable[[str], None], warnings: list[str],
-            style: dict | None = None) -> float:
-    """The cut video with the cards between its pieces; returns the final length."""
+            style: dict | None = None, offset: float = 0.0) -> float:
+    """The cut video with the cards between its pieces; returns the final length. With offset, the
+    cut video is the span offset..offset+duration of the file cut (a topic video, products.py)."""
     s = style or styles.load(None)
     W, H, fps = p["width"], p["height"], p["fps"]
     fade, volume = s["cards"]["fade"], s["sounds"]["volume"]
@@ -414,7 +415,7 @@ def compose(cut: Path, ins: list[dict], p: dict, out: Path, work: Path, sound_di
     for k, piece in enumerate(pieces):
         if piece[0] == "video":
             _, a, b = piece
-            inputs += ["-ss", f"{a:.4f}", "-t", f"{b - a:.4f}", "-i", str(cut)]
+            inputs += ["-ss", f"{a + offset:.4f}", "-t", f"{b - a:.4f}", "-i", str(cut)]
             chains.append(f"[{n}:v]setpts=PTS-STARTPTS,format=yuv420p,setsar=1[v{k}]")
             chains.append(f"[{n}:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{k}]")
             n += 1

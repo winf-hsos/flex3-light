@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 
 import library
-from pipeline import cut_rules, edit, locks, publish, review
+from pipeline import cut_rules, edit, locks, products, publish, review
 from pipeline import style as styles
 
 
@@ -206,6 +206,49 @@ class Recordings:
             self.pipeline.enqueue(folder)            # render it
         else:
             self._save_edit(folder, e)
+        return ""
+
+    # ------------------------------------------------ topic videos (stage G, pipeline/products.py)
+
+    def _topics_of(self, sid: str):
+        """The folder of a recording whose topic videos may change now, or an error message."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return None, "Die Aufnahme ist nicht mehr in der Ablage."
+        if self.pipeline.active == str(folder):
+            return None, "An dieser Aufnahme wird gerade gearbeitet."
+        e = edit.load(folder)
+        if not (e and e.get("approved")):
+            return None, "Themenvideos entstehen aus der freigegebenen Langfassung."
+        return folder, ""
+
+    def propose_topics(self, sid: str) -> str:
+        """Propose the topic videos (again) from the slide inputs of the outline; replaces earlier proposals."""
+        folder, error = self._topics_of(sid)
+        if error:
+            return error
+        settings = {**self.cut_settings(), "topic_videos": "propose"}    # asked for by hand: the lecturer approves
+        products.propose(folder, settings)
+        return ""
+
+    def change_topic(self, sid: str, pid: str, changes: dict) -> str:
+        folder, error = self._topics_of(sid)
+        return error or products.change(folder, pid, changes or {})
+
+    def add_topic(self, sid: str, start: float, end: float, title: str) -> str:
+        folder, error = self._topics_of(sid)
+        return error or products.add(folder, start, end, title)
+
+    def approve_topics(self, sid: str, approved: bool = True) -> str:
+        """The second approval: the accepted topic videos are rendered."""
+        folder, error = self._topics_of(sid)
+        if error:
+            return error
+        error = products.approve(folder, approved)
+        if error:
+            return error
+        self.pipeline.failed.discard(str(folder))
+        self.pipeline.enqueue(folder)
         return ""
 
     def redo_cut(self, sid: str, version: int | None = None) -> str:

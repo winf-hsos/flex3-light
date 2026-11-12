@@ -13,12 +13,12 @@ import datetime as dt
 import re
 from pathlib import Path
 
-from pipeline import cut_review, cut_rules, edit, files, locks, outline, publish, render, review
+from pipeline import cut_review, cut_rules, edit, files, locks, outline, products, publish, render, review
 from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
-MEDIA = re.compile(r"^(recording|screen|camera|edited|clip-\d{2})\.mp4$|^(subtitles|edited|clip-\d{2})\.[a-z]{2}\.vtt$"
-                   r"|^thumbnail\.jpg$")
+MEDIA = re.compile(r"^(recording|screen|camera|edited|clip-\d{2}|topic-\d{2})\.mp4$"
+                   r"|^(subtitles|edited|clip-\d{2}|topic-\d{2})\.[a-z]{2}\.vtt$|^(thumbnail|topic-\d{2})\.jpg$")
 
 
 TERM = re.compile(r"^\d{4}(-\d{2})? - (SS|WS)$")
@@ -170,4 +170,5 @@ def cut_view(folder: Path) -> dict:
                               "missing": render.missing(folder),
                               "clips": _read(folder / "clips.json").get("clips", []),
                               "chapters": _read(folder / "chapters.json").get("chapters", [])}
+            view["topics"] = products.view(folder)
     return view
