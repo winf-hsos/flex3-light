@@ -82,3 +82,13 @@ def test_the_eight_steps_follow_the_cut_the_render_and_the_topic_videos(tmp_path
     assert steps()["topics"] == "review"
     (folder / "outline.json").unlink()
     assert steps()["outline"] == "open"                    # cut before the outline existed: made anew later
+
+
+def test_the_outline_is_open_together_with_the_cut_it_starts(tmp_path):
+    folder = tmp_path / "2026-11-11_quarto_1000"
+    folder.mkdir()
+    (folder / "session.json").write_text(json.dumps({"session_id": folder.name}), encoding="utf-8")
+    (folder / "pipeline.json").write_text(json.dumps({"steps": {s: {"state": "done"} for s in ("transcribe", "subtitles")}}),
+                                          encoding="utf-8")
+    s = library.stations(folder)
+    assert (s["transcript"], s["outline"], s["edit"]) == ("done", "open", "open")

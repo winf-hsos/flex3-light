@@ -1199,6 +1199,13 @@
         + "werden später die Themenvideos."));
       return;
     }
+    if (st === "open" && !view.edit) {
+      box.appendChild(el("p", "step-intro", "Die Gliederung ist die erste Stufe des Schnitt-Vorschlags: Bevor der Schnitt-Agent "
+        + "schneidet, teilt ein Sprachmodell die Aufnahme in Phasen, Kapitel, Foliensätze und Themenstücke, und der Schnitt "
+        + "folgt dieser Gliederung. Sie entsteht also, sobald du den Schnitt vorschlagen lässt."));
+      box.appendChild(button("btn primary", "Zum Schnitt", () => goStep("edit")));
+      return;
+    }
     if (st === "open") {
       box.appendChild(el("p", "step-intro", "Diese Aufnahme wurde geschnitten, bevor es die Gliederung gab. "
         + (anew ? "Du kannst sie jetzt erstellen lassen; dein Schnitt bleibt, wie er ist, und die Themenvideos werden danach neu vorgeschlagen."

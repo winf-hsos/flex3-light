@@ -90,7 +90,7 @@ def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
     g = steps.get("topics", {}).get("state")
     plan = _read(folder / "outline.json")
     asked = _read(folder / "pipeline.json")
-    # the outline: made with the cut proposal, or anew from the topic videos
+    # the outline: the first stage of the cut proposal, or made anew for a recording cut before it existed
     if g == "running" and asked.get("outline_requested"):
         outlined = "running"
     elif plan and not plan.get("error"):
@@ -102,7 +102,7 @@ def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
     elif edit_list:
         outlined = "open"                  # cut before the outline existed: made anew from the topic videos
     else:
-        outlined = "soon"
+        outlined = "open" if transcript == "done" else "soon"   # starts with the cut proposal
     # the proposal and its approval
     if c == "running":
         proposal = "running"
