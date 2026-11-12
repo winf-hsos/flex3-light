@@ -32,10 +32,11 @@ import json
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable
 
-from . import binaries, edit, files, outline, publish, timeline
+from . import binaries, edit, files, llm, outline, publish, timeline
 from . import render as rendering      # render() below is the topic videos'
 from . import style as styles
 
@@ -44,6 +45,7 @@ MADE = "topics.json"
 MODES = ("off", "propose", "auto")
 DEFAULT_MODE = "propose"
 SHORTEST = 60.0          # seconds a topic video keeps after the cut at least
+SAME_AS_BLOCK = 0.8      # a part that fills this much of its block is not proposed a second time
 STATES = ("proposed", "accepted", "rejected")
 TITLE_MAX = 120
 DESCRIPTION_MAX = 2000
@@ -108,7 +110,10 @@ def propose(folder: Path, settings: dict | None = None) -> dict:
             notes.append(f"„{x.get('title', '')}“ bleibt nach dem Schnitt nur {left:.0f} s lang und wird nicht vorgeschlagen.")
             continue
         pid = f"t{len(products) + 1}"
-        parent = next((i for blk, i in parents if outline.inside(x, blk)), None) if x["kind"] != "block" else None
+        home = next(((blk, i) for blk, i in parents if outline.inside(x, blk)), None) if x["kind"] != "block" else None
+        parent = home[1] if home else None
+        if home and b - a >= SAME_AS_BLOCK * (home[0]["end"] - home[0]["start"]):
+            continue                                   # the block's video is this one already
         products.append({"id": pid, "title": (x.get("title") or "")[:TITLE_MAX],
                          "description": (x.get("summary") or "")[:DESCRIPTION_MAX], "spans": [[a, b]],
                          "state": "accepted" if auto else "proposed",
@@ -116,7 +121,7 @@ def propose(folder: Path, settings: dict | None = None) -> dict:
                          **({"parent": parent} if parent else {})})
         if x["kind"] == "block":
             parents.append((x, pid))
-    if outline.current(folder) and not pieces:
+    if outline.current(folder) and not pieces and not blocks:
         notes.append("Die Gliederung hat keine Themenstücke; du kannst ein Kapitel als Themenvideo hinzufügen.")
     data = {"version": 1, "created": _now(), "mode": mode(settings), "approved": _now() if auto and products else None,
             "products": products, "notes": notes}
@@ -345,6 +350,7 @@ def view(folder: Path, settings: dict | None = None) -> dict:
     data, e = load(folder), edit.load(folder)
     out = {"mode": mode(settings), "proposed": bool(data), "approved": data.get("approved"),
            "notes": data.get("notes", []), "products": [], "videos": finished(folder),
+           "feedback": (data.get("feedback") or [])[-3:],
            "due": bool(data.get("approved")) and due(folder), "warnings": made(folder).get("warnings", [])}
     if e:
         p = timeline.plan(e, 30.0)
@@ -352,3 +358,267 @@ def view(folder: Path, settings: dict | None = None) -> dict:
             a, b = x["spans"][0]
             out["products"].append({**x, "start": a, "end": b, "kept": kept_seconds(p, a, b)})
     return out
+
+
+# ---------------------------------------------------------------- the lecturer's feedback in words
+
+REVISE_ROUNDS = 8
+FEEDBACK_KEPT = 20             # entries of the feedback log kept in products.json
+
+REVISE_INSTRUCTIONS = """You change the proposed topic videos of a lecture recording as the lecturer asks. A topic
+video is a span of the recording cut from the approved long version (it keeps every cut made there); the videos form a
+tree of two levels: a block (a whole slide deck) and, indented below it, the videos of its parts. The lecturer sees
+them numbered by their id (video 3 is t3) and wrote what they want changed, in their own words.
+
+Use the tools to make exactly the changes asked for, nothing else: merge videos into one, split one at a moment,
+move a start or an end, change title or description, select or deselect a video, add a video for a span, put a video
+under a block or take it out. Times are seconds of the recording. Where a bound has to sit at a particular sentence,
+read the transcript around it first (read_transcript) and put the bound at the start or end of that sentence. Titles
+and descriptions stay in the language of the lecture unless the lecturer asks otherwise.
+
+End with finish: a short reply to the lecturer in {ui_language}, saying what you changed, or why you could not do
+something. Ask nothing back; if a wish is unclear, do the likely thing and say so in the reply."""
+
+_ID = {"type": "string", "description": "id of a video, e.g. t3"}
+_T = {"type": "number", "description": "seconds of the recording"}
+_STR = {"type": "string"}
+REVISE_TOOLS = [
+    llm.Tool("merge_videos", "Merge two or more videos into one that spans them all; it keeps the first id.", {
+        "type": "object", "required": ["ids", "title"], "properties": {
+            "ids": {"type": "array", "items": _ID}, "title": _STR, "description": _STR}}),
+    llm.Tool("split_video", "Split a video in two at a moment; the second part gets a new id.", {
+        "type": "object", "required": ["id", "at", "titles"], "properties": {
+            "id": _ID, "at": _T, "titles": {"type": "array", "items": _STR, "minItems": 2, "maxItems": 2},
+            "descriptions": {"type": "array", "items": _STR, "maxItems": 2}}}),
+    llm.Tool("set_bounds", "Move the start and/or the end of a video.", {
+        "type": "object", "required": ["id"], "properties": {"id": _ID, "start": _T, "end": _T}}),
+    llm.Tool("set_texts", "Change the title and/or the description of a video.", {
+        "type": "object", "required": ["id"], "properties": {"id": _ID, "title": _STR, "description": _STR}}),
+    llm.Tool("set_selected", "Select a video (it will be made) or deselect it (it will not).", {
+        "type": "object", "required": ["id", "selected"], "properties": {"id": _ID, "selected": {"type": "boolean"}}}),
+    llm.Tool("add_video", "Add a video for a span of the recording.", {
+        "type": "object", "required": ["start", "end", "title"], "properties": {
+            "start": _T, "end": _T, "title": _STR, "description": _STR,
+            "parent": {"type": "string", "description": "id of the block to put it under, or empty"}}}),
+    llm.Tool("set_parent", "Put a video under a block, or take it out (parent empty).", {
+        "type": "object", "required": ["id", "parent"], "properties": {"id": _ID, "parent": _STR}}),
+    llm.Tool("read_transcript", "The sentences said between two moments, with their times.", {
+        "type": "object", "required": ["start", "end"], "properties": {"start": _T, "end": _T}}),
+    llm.Tool("finish", "End with a short reply to the lecturer.", {
+        "type": "object", "required": ["reply"], "properties": {"reply": _STR}}),
+]
+
+
+def _clock(t: float) -> str:
+    return outline._clock(t)
+
+
+def _order(data: dict) -> None:
+    """Blocks before their parts, everything by start."""
+    parents = {x.get("parent") for x in data["products"]}
+    data["products"].sort(key=lambda x: (x["spans"][0][0], 0 if x["id"] in parents or x.get("kind") == "block" else 1))
+
+
+def _next_id(data: dict) -> str:
+    used = {x["id"] for x in data["products"]} | set(data.get("retired", []))
+    return next(f"t{k}" for k in range(1, len(used) + 2) if f"t{k}" not in used)
+
+
+def listing(data: dict, p: dict) -> str:
+    """The videos as the model reads them, as a tree."""
+    rows = []
+    for x in data.get("products", []):
+        a, b = x["spans"][0]
+        rows.append(("    " if x.get("parent") else "") + f"{x['id']} ({x.get('kind') or x.get('source', '')}) "
+                    f"{_clock(a)}–{_clock(b)} ({a:.0f}–{b:.0f} s), {kept_seconds(p, a, b) / 60:.1f} min after the cut, "
+                    f"{'selected' if x['state'] != 'rejected' else 'not selected'}: {x['title']}"
+                    + (f" | {x['description']}" if x.get("description") else ""))
+    return "\n".join(rows) or "(no videos)"
+
+
+def _outline_text(o: dict) -> str:
+    if not o or o.get("error"):
+        return "No outline."
+    rows = ["Phases:"] + [f"  {_clock(x['start'])}–{_clock(x['end'])} ({x['start']:.0f}–{x['end']:.0f} s) {x['kind']}: "
+                          f"{x['title']}" for x in o.get("phases", [])]
+    rows += ["Topics (chapters of the long version):"] + [
+        f"  {x['start']:.0f}–{x['end']:.0f} s {x['title']}: {x.get('summary', '')}" for x in o.get("topics", [])]
+    rows += ["Slide decks (blocks):"] + [f"  {x['start']:.0f}–{x['end']:.0f} s {x['title']}" for x in outline.blocks(o)]
+    rows += ["Topic pieces:"] + [f"  {x['start']:.0f}–{x['end']:.0f} s {x['kind']}: {x['title']}" for x in outline.pieces(o)]
+    return "\n".join(rows)
+
+
+class _Editor:
+    """The tools of the feedback round on products.json in memory."""
+
+    def __init__(self, data: dict, e: dict, transcript: dict):
+        self.data, self.e, self.transcript = data, e, transcript
+        self.changes: list[str] = []
+
+    def _get(self, pid: str) -> dict:
+        x = next((x for x in self.data["products"] if x["id"] == pid), None)
+        if x is None:
+            raise ValueError(f"there is no video {pid}")
+        return x
+
+    def _parent_ok(self, x: dict, parent: str) -> str:
+        if not parent:
+            return ""
+        blk = self._get(parent)
+        if blk is x or blk.get("parent"):
+            raise ValueError(f"{parent} cannot hold other videos (only a video at the top can)")
+        if any(y.get("parent") == x["id"] for y in self.data["products"]):
+            raise ValueError(f"{x['id']} holds videos of its own and cannot go under another")
+        return parent
+
+    def call(self, name: str, args: dict) -> str:
+        if name == "read_transcript":
+            a, b = float(args["start"]), float(args["end"])
+            if b - a > 900:
+                raise ValueError("read at most 15 minutes at a time")
+            said = [s for s in self.transcript.get("segments", []) if s["end"] > a and s["start"] < b]
+            return "\n".join(f"{s['start']:.1f}–{s['end']:.1f} {s['text'].strip()}" for s in said) or "(nothing said)"
+        before = json.dumps(self.data["products"], sort_keys=True)
+        if name == "merge_videos":
+            ids = list(dict.fromkeys(args.get("ids") or []))
+            if len(ids) < 2:
+                raise ValueError("merge needs two videos or more")
+            xs = [self._get(i) for i in ids]
+            first = xs[0]
+            parents = {x.get("parent") for x in xs}
+            a, b = min(x["spans"][0][0] for x in xs), max(x["spans"][0][1] for x in xs)
+            first.update(spans=[[a, b]], state="accepted", source="feedback",
+                         kind="block" if any(x.get("kind") == "block" for x in xs) else first.get("kind"))
+            err = _clean(first, {"title": args.get("title", ""), "description": args.get("description", first.get("description", ""))},
+                         self.e["duration"])
+            if err:
+                raise ValueError(err)
+            gone = set(ids[1:])
+            self.data["products"] = [x for x in self.data["products"] if x["id"] not in gone]
+            self.data.setdefault("retired", []).extend(sorted(gone))
+            for y in self.data["products"]:
+                if y.get("parent") in gone or (y.get("parent") and y is first):
+                    y.pop("parent", None)
+                    if y is not first:
+                        y["parent"] = first["id"]
+            if len(parents) == 1 and None not in parents and not any(y.get("parent") == first["id"] for y in self.data["products"]):
+                first["parent"] = parents.pop()
+            self.changes.append(f"{', '.join(ids)} zu {first['id']} zusammengelegt")
+        elif name == "split_video":
+            x = self._get(args["id"])
+            a, b = x["spans"][0]
+            at = float(args["at"])
+            if not a + 10 <= at <= b - 10:
+                raise ValueError(f"split {x['id']} inside its span, {a + 10:.0f} to {b - 10:.0f} s")
+            titles = args.get("titles") or []
+            descs = (args.get("descriptions") or []) + ["", ""]
+            if len(titles) != 2 or not all(str(t).strip() for t in titles):
+                raise ValueError("split needs two titles")
+            y = {**x, "id": _next_id(self.data), "spans": [[round(at, 2), b]], "source": "feedback",
+                 "title": str(titles[1]).strip()[:TITLE_MAX], "description": str(descs[1]).strip()[:DESCRIPTION_MAX]}
+            x.update(spans=[[a, round(at, 2)]], title=str(titles[0]).strip()[:TITLE_MAX], source="feedback",
+                     description=str(descs[0] or x.get("description", "")).strip()[:DESCRIPTION_MAX])
+            self.data["products"].append(y)
+            for z in self.data["products"]:
+                if z.get("parent") == x["id"] and outline.inside({"start": z["spans"][0][0], "end": z["spans"][0][1]},
+                                                                  {"start": at, "end": b}):
+                    z["parent"] = y["id"]
+            self.changes.append(f"{x['id']} bei {_clock(at)} geteilt, der zweite Teil ist {y['id']}")
+        elif name == "set_bounds":
+            x = self._get(args["id"])
+            err = _clean(x, {k: args[k] for k in ("start", "end") if k in args}, self.e["duration"])
+            if err:
+                raise ValueError(err)
+            self.changes.append(f"{x['id']} beginnt bei {_clock(x['spans'][0][0])} und endet bei {_clock(x['spans'][0][1])}")
+        elif name == "set_texts":
+            x = self._get(args["id"])
+            err = _clean(x, {k: args[k] for k in ("title", "description") if k in args}, self.e["duration"])
+            if err:
+                raise ValueError(err)
+            self.changes.append(f"Texte von {x['id']} geändert")
+        elif name == "set_selected":
+            x = self._get(args["id"])
+            x["state"] = "accepted" if args.get("selected") else "rejected"
+            self.changes.append(f"{x['id']} {'angewählt' if args.get('selected') else 'abgewählt'}")
+        elif name == "add_video":
+            x = {"id": _next_id(self.data), "title": "", "description": "", "spans": [[0.0, 0.0]], "state": "accepted",
+                 "source": "feedback", "kind": "piece"}
+            err = _clean(x, {"title": args.get("title", ""), "description": args.get("description", ""),
+                             "start": args["start"], "end": args["end"]}, self.e["duration"])
+            if err:
+                raise ValueError(err)
+            parent = self._parent_ok(x, str(args.get("parent") or ""))
+            if parent:
+                x["parent"] = parent
+            self.data["products"].append(x)
+            self.changes.append(f"{x['id']} hinzugefügt")
+        elif name == "set_parent":
+            x = self._get(args["id"])
+            parent = self._parent_ok(x, str(args.get("parent") or ""))
+            x.pop("parent", None)
+            if parent:
+                x["parent"] = parent
+            self.changes.append(f"{x['id']} " + (f"unter {parent}" if parent else "steht jetzt für sich"))
+        else:
+            raise ValueError(f"unknown tool {name}")
+        _order(self.data)
+        return "done" if json.dumps(self.data["products"], sort_keys=True) != before else "nothing changed"
+
+
+def revise(folder: Path, text: str, key, config: dict | None = None, settings: dict | None = None,
+           client=None, progress: Callable[[str], None] | None = None) -> dict:
+    """Apply the lecturer's feedback in words to the proposed topic videos with a language model;
+    every change asks for a new approval. Returns the entry of the feedback log."""
+    folder = Path(folder)
+    say = progress or (lambda t: None)
+    data, e = load(folder), edit.load(folder)
+    if not data or not e:
+        raise ValueError("Es gibt noch keine Themenvideos.")
+    text = str(text or "").strip()[:4000]
+    if not text:
+        raise ValueError("Die Rückmeldung ist leer.")
+    p = timeline.plan(e, 30.0)
+    work = json.loads(json.dumps(data))
+    editor = _Editor(work, e, files.read_json(folder / "transcript.json"))
+    config = config or llm.stage_config("topics")
+    if client is None:
+        keys = key if callable(key) else (lambda service: key if service == "openai" else None)
+        client = llm.make(config, keys)
+    ui = (settings or {}).get("ui_language", "de")
+    instructions = REVISE_INSTRUCTIONS.replace("{ui_language}", outline.LANGUAGES.get(ui, ui))
+    first = (f"Outline of the recording:\n{_outline_text(outline.load(folder))}\n\n"
+             f"The topic videos now (a tree; indented: the parts of the block above):\n{listing(work, p)}\n\n"
+             f"What the lecturer wants:\n{text}")
+    messages = [llm.Message("user", [llm.Text(first)])]
+    reply, usage, started = "", llm.Usage(), time.monotonic()
+    for rnd in range(REVISE_ROUNDS):
+        say("Deine Rückmeldung wird umgesetzt …")
+        answer = client.complete(instructions, messages, REVISE_TOOLS)
+        usage.add(answer.usage)
+        if not answer.calls:
+            reply = answer.text.strip()
+            break
+        results, done = [], False
+        for c in answer.calls:
+            if c.name == "finish":
+                reply, done = str(c.arguments.get("reply") or "").strip(), True
+                results.append(llm.ToolResult(c.id, "ok"))
+                continue
+            try:
+                out = editor.call(c.name, c.arguments)
+                if c.name != "read_transcript":
+                    out += "\n\nThe videos now:\n" + listing(work, p)
+            except (ValueError, KeyError, TypeError) as err:
+                out = f"error: {err}"
+            results.append(llm.ToolResult(c.id, out))
+        if done:
+            break
+        messages += [answer.message(), llm.Message("user", results)]
+    entry = {"at": _now(), "text": text, "reply": reply or "Ich habe die Rückmeldung nicht ganz umsetzen können.",
+             "changes": editor.changes, "model": getattr(client, "model", config.get("model", "")),
+             "seconds": round(time.monotonic() - started, 1), "usage": usage.as_dict()}
+    if editor.changes:
+        work["approved"] = None
+    work["feedback"] = (work.get("feedback") or [])[-(FEEDBACK_KEPT - 1):] + [entry]
+    files.write_json(folder / FILE, work)
+    return entry

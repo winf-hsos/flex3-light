@@ -58,9 +58,10 @@ def test_check_snaps_to_sentences_and_covers_the_recording():
 
 
 def test_a_piece_needs_a_known_kind_and_old_slide_inputs_are_talks():
-    raw = {**GOOD, "pieces": [{**GOOD["pieces"][0], "kind": "quiz"}]}
+    raw = {**GOOD, "pieces": [{**GOOD["pieces"][0], "kind": "talkshow"}]}
     result, errors = outline.check(raw, DURATION, SEGMENTS)
-    assert result["pieces"] == [] and "unknown kind 'quiz'" in errors[0]
+    assert result["pieces"] == [] and "unknown kind 'talkshow'" in errors[0]
+    assert outline.check({**GOOD, "pieces": [{**GOOD["pieces"][0], "kind": "quiz"}]}, DURATION, SEGMENTS)[1] == []
     old = {"inputs": [{"start": 1.0, "end": 100.0, "title": "Alt", "summary": ""}]}
     assert outline.pieces(old) == [{"start": 1.0, "end": 100.0, "title": "Alt", "summary": "", "kind": "lecture"}]
     assert outline.pieces({"pieces": [], "inputs": old["inputs"]}) == []
@@ -170,17 +171,18 @@ def test_agent_and_approval_see_the_outline(tmp_path):
     assert view["outline"]["phases"][0]["label"] == "Input" and view["outline"]["topics"][0]["title"] == "Einstieg"
 
 
-def test_a_block_holds_two_pieces_or_more_and_grows_to_hold_them_whole():
+def test_a_block_is_a_whole_deck_with_any_number_of_pieces_grown_to_hold_them():
     two = [{"start": 295, "end": 600, "kind": "lecture", "title": "Was ist digital?", "summary": ""},
            {"start": 600, "end": 896, "kind": "lecture", "title": "Analog und digital", "summary": ""},
            {"start": 1495, "end": 1790, "kind": "demo", "title": "Das Werkzeug", "summary": ""}]
     raw = {**GOOD, "pieces": two, "blocks": [
         {"start": 300, "end": 880, "title": "Foliensatz Digitalisierung", "summary": "Der ganze Vortrag."},
-        {"start": 1400, "end": 1795, "title": "Nur eins", "summary": ""}]}
+        {"start": 1400, "end": 1795, "title": "Nur eins", "summary": ""},
+        {"start": 1000, "end": 1300, "title": "Quiz zur letzten Sitzung", "summary": ""}]}
     result, errors = outline.check(raw, DURATION, SEGMENTS)
-    assert [b["title"] for b in result["blocks"]] == ["Foliensatz Digitalisierung"]
+    assert errors == []
+    assert [b["title"] for b in result["blocks"]] == ["Foliensatz Digitalisierung", "Quiz zur letzten Sitzung", "Nur eins"]
     block = result["blocks"][0]
     assert block["start"] == result["pieces"][0]["start"] and block["end"] == result["pieces"][1]["end"]
-    assert len(errors) == 1 and "Nur eins" in errors[0] and "holds 1 piece" in errors[0]
     assert outline.blocks({"pieces": two}) == [] and outline.inside(two[1], block)
     assert not outline.inside(two[2], block)

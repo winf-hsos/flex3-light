@@ -128,6 +128,27 @@ class PipelineRunner:
         self.enqueue(folder)
         return True
 
+    def redo_outline(self, folder: Path) -> bool:
+        """Make the outline anew (and the overview, if there is none) for a recording whose cut is approved,
+        and propose its topic videos again; the cut stays as it is. False while the recording is worked on."""
+        return self._request(folder, "outline_requested", True)
+
+    def revise_topics(self, folder: Path, text: str) -> bool:
+        """Apply the lecturer's feedback in words to the topic videos; False while the recording is worked on."""
+        return self._request(folder, "topics_feedback", str(text))
+
+    def _request(self, folder: Path, name: str, value) -> bool:
+        folder = Path(folder)
+        with self.lock:
+            if self.active == str(folder):
+                return False
+            data = read_state(folder)
+            data[name] = value
+            self._write_state(folder, data)
+            self.failed.discard(str(folder))
+        self.enqueue(folder)
+        return True
+
     def redo_summary(self, folder: Path) -> bool:
         """Write the summary again, e.g. after the prompt changed; False while the recording is worked on."""
         folder = Path(folder)
@@ -331,6 +352,39 @@ class PipelineRunner:
                 return True
             if e and e.get("approved") and files.read_json(folder / "render.json").get("signature") == render.signature(e):
                 # stage G: the topic videos, proposed once after the first render, rendered once approved
+                asked = read_state(folder)
+                if asked.get("outline_requested"):             # the outline anew, the cut stays
+                    try:
+                        self._set(folder, "topics", "running", "Die Gliederung wird neu erstellt …")
+                        say = lambda text: self._set(folder, "topics", "running", text)      # noqa: E731
+                        if not (folder / "overview.json").exists():
+                            aai = self.key("assemblyai")
+                            base = aai and transcribe.assemblyai_base(aai)
+                            screening.run(folder, transcribe.AssemblyAI(aai, base) if base else None, settings,
+                                          progress=say, privacy=False)
+                        result = outline.run(folder, self.key, settings, progress=say,
+                                             config=llm.stage_config("outline", self.models()))
+                        if result.get("error"):
+                            raise RuntimeError(result["error"])
+                        data = products.propose(folder, {**settings, "topic_videos": "propose"})
+                        self._set(folder, "topics", "done", f"Gliederung neu, {len(data['products'])} Themenvideos vorgeschlagen")
+                    finally:
+                        state = read_state(folder)
+                        state.pop("outline_requested", None)
+                        self._write_state(folder, state)
+                    return True
+                if asked.get("topics_feedback"):                # the lecturer's feedback in words
+                    try:
+                        self._set(folder, "topics", "running", "Deine Rückmeldung wird umgesetzt …")
+                        entry = products.revise(folder, asked["topics_feedback"], self.key,
+                                                llm.stage_config("topics", self.models()), settings,
+                                                progress=lambda text: self._set(folder, "topics", "running", text))
+                        self._set(folder, "topics", "done", entry["reply"][:300])
+                    finally:
+                        state = read_state(folder)
+                        state.pop("topics_feedback", None)
+                        self._write_state(folder, state)
+                    return True
                 if not (folder / products.FILE).exists() and products.mode(settings) != "off" and outline.current(folder):
                     data = products.propose(folder, settings)
                     self._set(folder, "topics", "done", f"{len(data['products'])} Themenvideos vorgeschlagen")

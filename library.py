@@ -3,9 +3,10 @@
 A recording is a session folder <archive>\\<term>\\<module>\\<date> - <topic>\\ with a
 session.json; older recordings filed as two loose videos are not listed. On the server a
 session folder is named by its session id, so topic and term come from session.json. For
-each recording the page shows its way through the pipeline as five stations, in order:
-recorded, transcript, cut, content, publish. The cut station shows the edit list of the
-cut agent until the lecturer approved it.
+each recording the page shows its way through the pipeline as eight steps, in order (STEPS):
+recorded, transcript, outline, edit (the proposal and its approval), longversion (the
+rendered long version), topics (the topic videos), content, publish. The station "cut" spans
+edit and longversion, as before 2026-11-12, for the badge and older callers.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from pipeline import cut_review, cut_rules, edit, files, locks, outline, product
 from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
+STEPS = ("recorded", "transcript", "outline", "edit", "longversion", "topics", "content", "publish")
 MEDIA = re.compile(r"^(recording|screen|camera|edited|clip-\d{2}|topic-\d{2})\.mp4$"
                    r"|^(subtitles|edited|clip-\d{2}|topic-\d{2})\.[a-z]{2}\.vtt$|^(thumbnail|topic-\d{2})\.jpg$")
 
@@ -38,9 +40,9 @@ def _read(path: Path) -> dict:
 
 
 def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
-    """State per station: done, running, waiting, failed, queued, review (waits for the lecturer),
-    open (can be started) or soon (not built yet). queued says whether the recording waits in the
-    pipeline's queue; False makes an untouched transcript "open", None leaves it "queued"."""
+    """State per station and step: done, running, waiting, failed, queued, review (waits for the lecturer),
+    open (can be started), missing (files gone) or soon (not yet). queued says whether the recording waits
+    in the pipeline's queue; False makes an untouched transcript "open", None leaves it "queued"."""
     steps = _read(folder / "pipeline.json").get("steps", {})
     t, s = steps.get("transcribe", {}).get("state"), steps.get("subtitles", {}).get("state")
     if s == "done":
@@ -85,7 +87,56 @@ def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
         out = "done"
     else:
         out = "open"                       # moving the files is the lecturer's step, never automatic
-    return {"recorded": "done", "transcript": transcript, "cut": cut, "content": content, "publish": out}
+    g = steps.get("topics", {}).get("state")
+    plan = _read(folder / "outline.json")
+    asked = _read(folder / "pipeline.json")
+    # the outline: made with the cut proposal, or anew from the topic videos
+    if g == "running" and asked.get("outline_requested"):
+        outlined = "running"
+    elif plan and not plan.get("error"):
+        outlined = "done"
+    elif c == "running":
+        outlined = "running"
+    elif plan:
+        outlined = "failed"
+    elif edit_list:
+        outlined = "open"                  # cut before the outline existed: made anew from the topic videos
+    else:
+        outlined = "soon"
+    # the proposal and its approval
+    if c == "running":
+        proposal = "running"
+    elif edit_list and edit_list.get("approved"):
+        proposal = "done"
+    elif edit_list:
+        proposal = "review"
+    elif c in ("waiting", "failed"):
+        proposal = c
+    else:
+        proposal = "open" if transcript == "done" else "soon"
+    # the long version: rendered after the approval
+    if not (edit_list and edit_list.get("approved")):
+        longversion = "soon"
+    elif r == "running":
+        longversion = "running"
+    else:
+        longversion = cut if cut in ("failed", "queued", "missing", "done") else "queued"
+    # the topic videos: proposed after the render, rendered after the second approval
+    data = products.load(folder)
+    if longversion != "done":
+        topics = "soon"
+    elif g in ("running", "failed"):
+        topics = g
+    elif not data:
+        topics = "open"
+    elif not data.get("approved"):
+        topics = "review"
+    elif products.due(folder):
+        topics = "queued"
+    else:
+        topics = "done"
+    return {"recorded": "done", "transcript": transcript, "cut": cut, "content": content, "publish": out,
+            "outline": outlined, "edit": proposal, "longversion": longversion, "topics": topics}
 
 
 def scan(archive: Path) -> dict[str, Path]:

@@ -295,8 +295,9 @@ def overview(duration: float, words: list[dict], segments: list[dict], samples: 
 
 
 def run(folder: Path, listener=None, settings: dict | None = None,
-        progress: Callable[[str], None] | None = None) -> dict:
-    """Write overview.json and privacy.json for a session folder; returns privacy.json."""
+        progress: Callable[[str], None] | None = None, privacy: bool = True) -> dict:
+    """Write overview.json and privacy.json for a session folder; returns privacy.json. privacy=False
+    leaves privacy.json alone, for an outline made anew after the cut was approved."""
     folder = Path(folder)
     say = progress or (lambda text: None)
     pol = cut_rules.policy(settings)
@@ -371,7 +372,8 @@ def run(folder: Path, listener=None, settings: dict | None = None,
             target.append(entry)
         files.write_json(folder / "overview.json", overview(duration, words, segments, samples, titles, activity,
                                                              private, level, room))
-        files.write_json(folder / "privacy.json", result)
+        if privacy:
+            files.write_json(folder / "privacy.json", result)
         return result
     finally:
         shutil.rmtree(work, ignore_errors=True)

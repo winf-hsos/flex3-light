@@ -186,7 +186,7 @@
   .rec-item b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rec-item small { color: var(--slate); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
   .rec-item small span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mini-way { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+  .mini-way { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
   .mini-way i { height: 4px; border-radius: 2px; background: #e6ebf0; }
   .mini-way i.done { background: var(--green); } .mini-way i.running, .mini-way i.queued { background: var(--blue); }
   .mini-way i.waiting, .mini-way i.failed, .mini-way i.missing { background: var(--amber); }
@@ -197,7 +197,21 @@
   .player { width: min(100%, calc((100vh - 260px) * 16 / 9)); justify-self: center; aspect-ratio: 16 / 9; border-radius: 14px; background: var(--stage); display: block; }
   .player::cue { font-family: var(--text); font-size: 18px; background: rgba(16, 24, 32, .72); }
   /* the way of a recording: a real sequence, so the stations are numbered */
-  .way { display: grid; grid-template-columns: repeat(5, 1fr); padding: 16px 12px 14px; }
+  .way { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); padding: 12px 8px 10px; }
+  button.station { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 4px 2px 6px;
+                   border-radius: 10px; }
+  button.station:hover { background: var(--hover); }
+  button.station:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+  button.station.active { background: var(--sky); }
+  button.station.active b { color: var(--deep); }
+  .station b { hyphens: manual; }
+  .step-panel.off { display: none !important; }
+  .step-panel > .topics { border: none; padding: 0; }   /* the panel is the frame already */
+  .player-wrap.off { display: none; }
+  .step-intro { margin: 0; color: var(--slate); font-size: 13px; max-width: 72ch; }
+  .step-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; margin: 0; }
+  .step-facts dt { color: var(--slate); } .step-facts dd { margin: 0; }
+  .step-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .station { position: relative; display: grid; justify-items: center; gap: 5px; text-align: center; }
   /* the connector runs from the previous circle's center to this one's; the circles sit above it */
   .station::before { content: ""; position: absolute; z-index: 0; top: 13px; left: -50%; right: 50%; height: 2px; background: var(--line); }
@@ -362,8 +376,18 @@
   .topic-tag { font-size: 11px; font-weight: 600; color: var(--deep); background: var(--sky); border-radius: 4px; padding: 1px 6px; }
   .outline-inputs summary { cursor: pointer; font-size: 12.5px; color: var(--slate); padding: 4px 0; }
   .outline-inputs .topic.nested { margin-left: 22px; }
-  .tv.child { margin-left: 26px; }
+  .tv-kids { margin-left: 9px; padding-left: 16px; border-left: 2px solid var(--line); display: grid; gap: 0; }
+  .tv-kids > .tv:first-child { border-top: none; }
   .tv.block .tv-title { font-size: 13.5px; }
+  .tv-num { font-size: 11px; font-weight: 600; color: var(--slate); padding: 0 7px; }
+  .tv-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 0 7px; }
+  .tv-meta .link { padding: 0; font-size: 12px; }
+  .topics-feedback { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .topics-feedback textarea { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line);
+                              border-radius: 8px; background: var(--surface); color: var(--ink); resize: vertical; }
+  .topics-feedback .said { margin: 0; font-size: 12.5px; color: var(--slate); }
+  .topics-feedback .said b { color: var(--ink); font-weight: 600; }
+  .topics-feedback .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .cut-foot .hint { flex: 1; }
   .station.review .no { border-color: var(--amber); color: #8a6200; background: var(--amber-soft); }
   .station.review small { color: #8a6200; font-weight: 600; }
@@ -661,7 +685,7 @@
             <div class="setting-row"><span>Kapitel</span><select id="cut_chapter_display" onchange="saveCutSettings()"><option value="card">als Tafel</option><option value="lower_third">als Bauchbinde</option><option value="none">ohne Einblendung</option></select></div>
             <label class="toggle"><input type="checkbox" id="cut_chapter_sound" onchange="saveCutSettings()"><span class="knob"></span><span><b>Wisch-Geräusch bei Kapiteln</b><small>Ein kurzer, leiser Klang zur Kapiteltafel.</small></span></label>
             <div class="setting-row"><span>Themenvideos</span><select id="cut_topic_videos" onchange="saveCutSettings()"><option value="propose">vorschlagen, ich gebe frei</option><option value="auto">vorschlagen und gleich rendern</option><option value="off">nicht vorschlagen</option></select></div>
-            <div class="section-note">Aus jedem Themenstück einer Vorlesung (ein Vortrag, die Vorführung einer Software, ein durchgerechnetes Beispiel) kann ein eigenes kurzes Video werden, und ein Vortrag über mehrere Stücke zum selben Foliensatz bleibt zusätzlich als ein Video erhalten, mit eigener Titeltafel und allem, was in der Langfassung geschnitten, stumm oder verpixelt ist.</div>
+            <div class="section-note">Aus jedem Themenstück einer Vorlesung (ein Vortrag, die Vorführung einer Software, ein durchgerechnetes Beispiel) kann ein eigenes kurzes Video werden, und jeder Foliensatz bleibt mit allem, was dazu gehört, zusätzlich als ein Video erhalten, mit eigener Titeltafel und allem, was in der Langfassung geschnitten, stumm oder verpixelt ist.</div>
             <label class="toggle"><input type="checkbox" id="cut_music" onchange="saveCutSettings()"><span class="knob"></span><span><b>Musik zu Titel und Abspann</b><small id="soundState">Kurze Klänge, einmal mit ElevenLabs erzeugt.</small></span></label>
             <div class="setting-row"><span>Lange Pausen</span><select id="cut_pause_mode" onchange="saveCutSettings()"><option value="card">mit Tafel „Pause entfernt“ schneiden</option><option value="shorten">auf zwei Sekunden kürzen</option><option value="cut">ohne Hinweis schneiden</option></select></div>
             <div class="cut-group"><h3>Was der Schnitt-Agent vorschlagen darf</h3><div class="kinds" id="cutKinds"></div>
@@ -911,7 +935,19 @@
 
   // ---------------------------------------------------------------- my recordings
   let recordings = [], selectedId = null, shownMedia = "";
-  const STATIONS = [["recorded", "Aufgenommen"], ["transcript", "Transkription"], ["cut", "Schnitt"], ["content", "Inhalte"], ["publish", "Veröffentlichen"]];
+  // the way of a recording in eight steps (library.STEPS); each step shows only what belongs to it
+  const STATIONS = [["recorded", "Aufnahme"], ["transcript", "Transkrip­tion"], ["outline", "Gliede­rung"], ["edit", "Schnitt"],
+                    ["longversion", "Lang­fassung"], ["topics", "Themen­videos"], ["content", "Inhalte"],
+                    ["publish", "Veröffent­lichen"]];         // soft hyphens: a narrow window breaks the names there
+  let activeStep = null;                       // the step clicked; null: the one that needs the lecturer
+  const NEEDS_YOU = ["review", "failed", "missing", "waiting"];
+  function currentStep(st) {
+    const keys = STATIONS.map(s => s[0]);
+    return keys.find(k => NEEDS_YOU.includes(st[k])) || keys.find(k => st[k] === "running")
+      || [...keys].reverse().find(k => st[k] && st[k] !== "soon") || "recorded";
+  }
+  const goStep = k => { activeStep = k; resetSteps(); refreshDetail(); };
+  const resetSteps = () => { for (const id of ["cut", "outlineStep", "longStep", "topicsStep", "recordedStep"]) if ($(id)) $(id).dataset.sig = ""; };
   const STATE_TEXT = {done: "erledigt", running: "läuft", waiting: "wartet", failed: "gestoppt", queued: "folgt", soon: "kommt bald",
                       review: "zur Freigabe", open: "offen", missing: "Dateien fehlen"};
   const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "numeric", month: "long", year: "numeric"}) : "";
@@ -967,7 +1003,7 @@
     return mediaBase + encodeURIComponent(id) + "/" + file + (q.some(Boolean) ? "?" + q.filter(Boolean).join("&") : "");
   }
   async function selectRecording(id) {
-    selectedId = id; shownMedia = ""; allSpots = false; stopAt = null; markIn = markOut = null; selectedItem = null;
+    selectedId = id; shownMedia = ""; allSpots = false; stopAt = null; markIn = markOut = null; selectedItem = null; activeStep = null;
     playing = "original";
     renderRecordings();
     await refreshDetail();
@@ -990,17 +1026,21 @@
         <div class="detail-head"><div style="flex:1"><h2 id="dTitle"></h2><p id="dMeta"></p></div>
           <button class="btn app-only" onclick="api().open_recording(selectedId)"><svg class="i"><use href="#i-folder"/></svg>Ordner öffnen</button>
           <button class="btn danger" onclick="deleteRecording()"><svg class="i"><use href="#i-trash"/></svg>Löschen</button></div>
+        <nav class="panel way" id="way" aria-label="Schritte dieser Aufnahme"></nav>
         <div class="player-wrap" id="playerWrap"><video class="player" id="player" controls preload="metadata" crossorigin="anonymous"></video>
           <div class="card-overlay" id="cardOverlay"></div><div id="regions"></div></div>
-        <div class="panel way" id="way"></div>
-        <div class="panel cutpanel" id="cut"></div>
-        <div class="panel cutpanel" id="content"></div>
-        <div class="panel cutpanel" id="publish"></div>
-        <div class="panel transcript"><div class="panel-head"><h2>Transkription</h2><span class="hint" id="dStatus"></span>
+        <div class="panel cutpanel step-panel" data-step="recorded" id="recordedStep"></div>
+        <div class="panel spots step-panel" data-step="transcript" id="spots"></div>
+        <div class="panel transcript step-panel" data-step="transcript"><div class="panel-head"><h2>Transkription</h2><span class="hint" id="dStatus"></span>
           <button class="link" id="redoButton" onclick="redoTranscription()">Erneut transkribieren</button>
           <button class="link" id="startTranscription" onclick="startTranscription()">Transkription starten</button></div>
           <div class="hint" id="dTerms"></div><div class="lines" id="lines"></div></div>
-        <div class="panel spots" id="spots"></div>`;
+        <div class="panel cutpanel step-panel" data-step="outline" id="outlineStep"></div>
+        <div class="panel cutpanel step-panel" data-step="edit" id="cut"></div>
+        <div class="panel cutpanel step-panel" data-step="longversion" id="longStep"></div>
+        <div class="panel cutpanel step-panel" data-step="topics" id="topicsStep"></div>
+        <div class="panel cutpanel step-panel" data-step="content" id="content"></div>
+        <div class="panel cutpanel step-panel" data-step="publish" id="publish"></div>`;
       $("dTitle").textContent = d.title;
       $("dMeta").textContent = `${d.module}, ${fmtDate(d.recorded_at)}, ${fmtLength(d.duration)}`;
       const v = $("player");
@@ -1027,8 +1067,21 @@
         v.appendChild(t);
       }
     }
-    $("way").innerHTML = STATIONS.map(([k, name], i) =>
-      `<div class="station ${d.stations[k]}"><span class="no">${d.stations[k] === "done" ? '<svg class="i"><use href="#i-check"/></svg>' : i + 1}</span><b>${name}</b><small>${STATE_TEXT[d.stations[k]]}</small></div>`).join("");
+    const step = activeStep || currentStep(d.stations);
+    $("way").innerHTML = "";
+    STATIONS.forEach(([k, name], i) => {
+      const b = el("button", `station ${d.stations[k] || "soon"}` + (k === step ? " active" : ""));
+      b.type = "button";
+      if (k === step) b.setAttribute("aria-current", "step");
+      b.innerHTML = `<span class="no">${d.stations[k] === "done" ? '<svg class="i"><use href="#i-check"/></svg>' : i + 1}</span>`;
+      b.append(el("b", "", name), el("small", "", STATE_TEXT[d.stations[k]] || ""));
+      b.onclick = () => goStep(k);
+      $("way").appendChild(b);
+    });
+    for (const p of document.querySelectorAll("#detail .step-panel")) p.classList.toggle("off", p.dataset.step !== step);
+    const noPlayer = ["content", "publish"].includes(step);
+    if (noPlayer && !$("playerWrap").classList.contains("off")) $("player").pause();
+    $("playerWrap").classList.toggle("off", noPlayer);
     // the progress stands next to the heading; without text and without work the line below explains
     const working = ["running", "queued"].includes(d.stations.transcript);
     $("dStatus").textContent = d.stations.transcript === "done" || (!d.segments.length && !working) ? "" : (d.status || "");
@@ -1076,9 +1129,154 @@
       }
     }
     renderSpots(d);
+    renderRecorded(d);
+    renderOutlineStep(d);
     renderCut(d);
+    renderLongStep(d);
+    renderTopicsStep(d);
     renderContent(d);
     renderPublish(d);
+  }
+
+  // a step panel is built anew only when what it shows changed, and never while the lecturer types in it
+  function stepBox(id, sig) {
+    const box = $(id);
+    const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
+    if (box.dataset.sig === sig || typing) return null;
+    box.dataset.sig = sig;
+    box.innerHTML = "";
+    return box;
+  }
+  function stepHead(box, title, hintText) {
+    const head = el("div", "panel-head");
+    head.appendChild(el("h2", "", title));
+    const hint = el("span", "hint", hintText || "");
+    head.appendChild(hint);
+    box.appendChild(head);
+    return hint;
+  }
+  const skeleton = box => { for (const w of [88, 72, 80]) { const b = el("div", "skeleton"); b.style.width = `calc(${w}% - 74px)`; box.appendChild(b); } };
+
+  // step 1: the recording itself
+  function renderRecorded(d) {
+    const box = stepBox("recordedStep", JSON.stringify([d.id, d.duration, d.module, playing]));
+    if (!box) return;
+    stepHead(box, "Aufnahme");
+    const facts = el("dl", "step-facts");
+    for (const [k, v] of [["Modul", d.module], ["Aufgenommen", fmtDate(d.recorded_at)], ["Länge", fmtLength(d.duration)],
+                          ["Sprache", d.language === "en" ? "Englisch" : "Deutsch"]])
+      facts.append(el("dt", "", k), el("dd", "", v));
+    box.appendChild(facts);
+    box.appendChild(el("p", "step-intro", "Darauf folgen Transkription, Gliederung und Schnitt-Vorschlag; danach entstehen "
+      + "nach deinen Freigaben die Langfassung und die Themenvideos. Klick oben auf einen Schritt, um ihn anzusehen."));
+    if (playing !== "original") box.appendChild(button("link", "Wieder das Original abspielen", () => play("original")));
+  }
+
+  // step 3: the outline (stage C), made with the cut proposal or anew for a recording cut before it existed
+  function renderOutlineStep(d) {
+    const st = d.stations.outline, view = d.cut || {};
+    const box = stepBox("outlineStep", JSON.stringify([st, view.outline, d.stations.longversion, st === "running" && d.status]));
+    if (!box) return;
+    const hint = stepHead(box, "Gliederung");
+    const anew = d.stations.longversion === "done";
+    const redo = () => button(st === "done" ? "link" : "btn primary", st === "done" ? "Gliederung neu erstellen" : "Gliederung erstellen",
+      async () => {
+        if (st === "done" && !await ask({title: "Gliederung neu erstellen?", confirm: "Neu erstellen",
+            text: "Die Gliederung entsteht neu, und aus ihr die Vorschläge für die Themenvideos. Dein Schnitt bleibt, wie er ist; "
+                + "deine Titel, Beschreibungen und Rückmeldungen zu den Themenvideos gehen verloren."})) return;
+        cutResult(await api().redo_outline(selectedId));
+      });
+    if (st === "running") {
+      hint.className = "cut-status"; hint.textContent = d.status || "Die Gliederung entsteht …";
+      box.appendChild(el("p", "step-intro", "Ein Sprachmodell liest die Übersicht der Aufnahme, Minute für Minute, und teilt sie in "
+        + "Phasen, Kapitel, Foliensätze und Themenstücke."));
+      skeleton(box);
+      return;
+    }
+    if (st === "soon") {
+      box.appendChild(el("p", "step-intro", "Die Gliederung entsteht mit dem Schnitt-Vorschlag: Ein Sprachmodell liest die Übersicht "
+        + "der Aufnahme und teilt sie in Phasen, Kapitel, Foliensätze und Themenstücke. Aus den Foliensätzen und Themenstücken "
+        + "werden später die Themenvideos."));
+      return;
+    }
+    if (st === "open") {
+      box.appendChild(el("p", "step-intro", "Diese Aufnahme wurde geschnitten, bevor es die Gliederung gab. "
+        + (anew ? "Du kannst sie jetzt erstellen lassen; dein Schnitt bleibt, wie er ist, und die Themenvideos werden danach neu vorgeschlagen."
+                : "Sie lässt sich erstellen, sobald die Langfassung gerendert ist.")));
+      if (anew) box.appendChild(redo());
+      return;
+    }
+    if (st === "failed" || (view.outline && view.outline.error)) {
+      box.appendChild(el("p", "hint error", "Die Gliederung ist nicht entstanden: " + ((view.outline || {}).error || d.status || "")));
+      if (anew) box.appendChild(redo());
+      return;
+    }
+    box.appendChild(outlineBlock(view.outline, hint));
+    if (anew) { const foot = el("div", "step-actions"); foot.appendChild(redo()); box.appendChild(foot); }
+  }
+
+  // step 5: the long version, rendered after the approval of the cut
+  function renderLongStep(d) {
+    const st = d.stations.longversion, view = d.cut || {}, e = view.edit, made = view.render;
+    const box = stepBox("longStep", JSON.stringify([st, made, e && e.approved, st === "running" && d.status, playing]));
+    if (!box) return;
+    const hint = stepHead(box, "Langfassung");
+    if (st === "soon") {
+      box.appendChild(el("p", "step-intro", "Die Langfassung wird gerendert, sobald du den Schnitt freigibst: alles, was du übernommen "
+        + "hast, mit Titel- und Kapiteltafeln, Untertiteln und Kapiteln."));
+      box.appendChild(button("btn", "Zum Schnitt", () => goStep("edit")));
+      return;
+    }
+    if (st === "running") {
+      hint.className = "cut-status"; hint.textContent = d.status || "Das Video wird gerendert …";
+      box.appendChild(el("p", "step-intro", "Die Langfassung entsteht mit Untertiteln und Kapiteln. Das dauert etwa so lange wie ein "
+        + "Fünftel der Aufnahme; bis dahin kannst du alles andere weiter nutzen."));
+      const pct = /(\d+) %/.exec(d.status || "");
+      const track = el("div", "track"); const bar = el("div"); bar.style.width = (pct ? pct[1] : 3) + "%";
+      track.appendChild(bar); box.appendChild(track);
+      return;
+    }
+    const note = el("p", "step-intro");
+    const foot = el("div", "step-actions");
+    if (st === "queued") note.textContent = `Freigegeben am ${fmtDate(e.approved)}. Das Video wird gleich gerendert.`;
+    else if (st === "failed") {
+      note.className = "hint error"; note.textContent = d.status || "Das Rendern ist gescheitert.";
+      foot.appendChild(button("btn primary", "Erneut rendern", () => approve(true)));
+    } else if (st === "missing") {
+      note.className = "hint error";
+      note.textContent = `Seit dem Rendern fehlen ${made.missing.length === 1 ? "eine Datei" : made.missing.length + " Dateien"}: `
+        + made.missing.join(", ") + ". Neu rendern stellt sie aus derselben Freigabe wieder her, ohne neuen Vorschlag und ohne KI.";
+      foot.appendChild(button("btn primary", "Neu rendern", rerender));
+    } else if (made && made.style_current === false) {
+      note.textContent = `Freigegeben am ${fmtDate(e.approved)}, gerendert im vorigen Stil des Servers. Neu rendern übernimmt den Stil `
+        + `„${made.style_now}“, ohne neuen Vorschlag und ohne KI.`;
+      foot.appendChild(button("btn", "Neu rendern", rerender));
+    } else note.textContent = `Freigegeben am ${fmtDate(e.approved)}, gerendert.`;
+    box.appendChild(note);
+    if (st === "done" && made) box.appendChild(results(made));
+    if (foot.children.length) box.appendChild(foot);
+  }
+
+  // step 6: the topic videos (stage G), proposed after the long version, rendered after the second approval
+  function renderTopicsStep(d) {
+    const st = d.stations.topics, view = d.cut || {}, e = view.edit;
+    const box = stepBox("topicsStep", JSON.stringify([st, view.topics, ["running", "failed"].includes(st) && d.status, playing,
+                                                      cutSettings.topic_videos, [...openTopics]]));
+    if (!box) return;
+    const hint = stepHead(box, "Themenvideos");
+    if (st === "soon") {
+      box.appendChild(el("p", "step-intro", "Nach der Langfassung schlägt FLEX3 Light aus den Foliensätzen und Themenstücken der "
+        + "Gliederung eigene kurze Videos vor. Du wählst sie im Baum aus, gibst Rückmeldungen in Worten und gibst sie frei; "
+        + "gerendert werden sie aus der Langfassung."));
+      return;
+    }
+    if (st === "running") {
+      hint.className = "cut-status"; hint.textContent = d.status || "Die Themenvideos entstehen …";
+      skeleton(box);
+      return;
+    }
+    if (st === "failed") box.appendChild(el("p", "hint error", d.status || "Der letzte Schritt ist gescheitert."));
+    if (view.topics) box.appendChild(topicsBlock(view.topics, e));
   }
 
   // ---------------------------------------------------------------- publishing: the files leave for the upload folder
@@ -1338,7 +1536,7 @@
   const span = x => fine(x.start) + (x.end != null ? "–" + fine(x.end) : "");
 
   function renderCut(d) {
-    const box = $("cut"), st = d.stations.cut, view = d.cut || {}, e = view.edit;
+    const box = $("cut"), st = d.stations.edit, view = d.cut || {}, e = view.edit;
     const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
     const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.review, view.render, view.topics, cutTab, markIn, markOut, selectedItem,
                                 cutPreview, cutSettings, playing]);
@@ -1353,16 +1551,6 @@
     const hint = el("span", "hint"); hint.id = "cutHint";
     head.appendChild(hint);
     box.appendChild(head);
-    if (st === "running" && e && e.approved) {     // approved: the videos are being rendered
-      hint.className = "cut-status"; hint.textContent = d.status || "Das Video wird gerendert …";
-      box.appendChild(summaryBlock(e));
-      box.appendChild(el("p", "cut-summary", "Das geschnittene Video entsteht: Langfassung, Teilvideos, Untertitel und Kapitel. "
-                                             + "Das dauert etwa so lange wie ein Fünftel der Aufnahme; bis dahin kannst du alles andere weiter nutzen."));
-      const pct = /(\d+) %/.exec(d.status || "");
-      const track = el("div", "track"); const bar = el("div"); bar.style.width = (pct ? pct[1] : 3) + "%";
-      track.appendChild(bar); box.appendChild(track);
-      return;
-    }
     if (st === "running") {                        // like the transcription: what it does now, and placeholders
       hint.className = "cut-status"; hint.textContent = d.status || "Der Schnitt-Agent arbeitet …";
       box.appendChild(el("p", "cut-summary", "Der Schnitt-Agent sieht sich die Aufnahme an. Seine Vorschläge erscheinen hier, "
@@ -1396,34 +1584,20 @@
     const stats = el("div", "cut-stats");
     const toggle = el("label", "check");
     const box2 = el("input"); box2.type = "checkbox"; box2.checked = cutPreview;
-    box2.onchange = () => { cutPreview = box2.checked; $("cut").dataset.sig = ""; };
+    box2.onchange = () => { cutPreview = box2.checked; resetSteps(); };
     toggle.append(box2, " Mit Schnitt abspielen");
     stats.appendChild(toggle);
     box.appendChild(stats);
     const locks = (view.privacy || {}).locks || [];
     const exposed = locks.filter(x => x.status === "open").length;
-    if (view.outline) box.appendChild(outlineBlock(view.outline));
     if (view.privacy) box.appendChild(privacyBlock(view.privacy, !!e.approved));
     if (view.review) box.appendChild(reviewBlock(view.review, !!e.approved));
     const foot = el("div", "cut-foot");
     const note = el("span", "hint");
     if (e.approved) {
-      const made = view.render;
-      note.textContent = st === "missing"
-        ? `Seit dem Rendern fehlen ${made.missing.length === 1 ? "eine Datei" : made.missing.length + " Dateien"}: `
-          + made.missing.join(", ") + ". Neu rendern stellt sie aus derselben Freigabe wieder her, ohne neuen Vorschlag und ohne KI."
-        : made && made.current && made.style_current === false
-          ? `Freigegeben am ${fmtDate(e.approved)}, gerendert im vorigen Stil des Servers. Neu rendern übernimmt den Stil „${made.style_now}“, ohne neuen Vorschlag und ohne KI.`
-        : made && made.current ? `Freigegeben am ${fmtDate(e.approved)}, gerendert.`
-        : st === "failed" ? (d.status || "Das Rendern ist gescheitert.") : `Freigegeben am ${fmtDate(e.approved)}. Das Video wird gleich gerendert.`;
-      if (st === "failed" || st === "missing") note.className = "hint error";
-      foot.append(note);
-      if (st === "failed") foot.appendChild(button("btn primary", "Erneut rendern", () => approve(true)));
-      if (st === "missing" || (st === "done" && made && made.style_current === false))
-        foot.appendChild(button(st === "missing" ? "btn primary" : "btn", "Neu rendern", rerender));
-      foot.appendChild(button("btn", "Freigabe zurücknehmen", () => approve(false)));
-      if (st === "done") box.appendChild(results(made));   // above the foot, which follows
-      if (st === "done" && made && made.current && view.topics) box.appendChild(topicsBlock(view.topics, e));
+      note.textContent = `Freigegeben am ${fmtDate(e.approved)}. Was daraus gerendert wird, steht unter Langfassung.`;
+      foot.append(note, button("btn", "Zur Langfassung", () => goStep("longversion")),
+                  button("btn", "Freigabe zurücknehmen", () => approve(false)));
     } else {
       note.textContent = [open ? `Noch ${open} Vorschläge offen.` : "",
                           exposed ? `${exposed === 1 ? "Eine Datenschutz-Sperre ist" : exposed + " Datenschutz-Sperren sind"} noch offen.` : ""]
@@ -1488,20 +1662,18 @@
 
   // the outline of stage C: the course of the session as phases, the topics (chapters) and the topic pieces
   const PHASE_ORDER = ["input", "demo", "exercise", "discussion", "organisation", "break", "technical", "idle"];
-  function outlineBlock(o) {
+  function outlineBlock(o, hint) {
     const g = el("div", "outline");
-    const head = el("div", "privacy-head");
-    head.appendChild(el("h3", "", "Gliederung"));
-    g.appendChild(head);
+    const head = hint || el("span", "hint");
     if (o.error) {
       g.appendChild(el("p", "hint error", "Die Gliederung ist nicht entstanden: " + o.error
                                           + " Der nächste Vorschlag versucht es erneut."));
       return g;
     }
     const phases = o.phases || [], topics = o.topics || [], pieces = o.pieces || [], blocks = o.blocks || [];
-    head.appendChild(el("span", "hint", [`${phases.length} Phasen`, `${topics.length} Themen`,
+    head.textContent = ([`${phases.length} Phasen`, `${topics.length} Themen`,
       pieces.length ? `${pieces.length} ${pieces.length === 1 ? "Themenstück" : "Themenstücke"}` : "keine Themenstücke",
-      ...(blocks.length ? [`${blocks.length} ${blocks.length === 1 ? "Themenblock" : "Themenblöcke"}`] : [])].join(", ")));
+      ...(blocks.length ? [`${blocks.length} ${blocks.length === 1 ? "Foliensatz" : "Foliensätze"}`] : [])].join(", "));
     if (o.summary) g.appendChild(el("p", "outline-sum", o.summary));
     const dur = o.duration || (phases.length ? phases[phases.length - 1].end : 1) || 1;
     const bar = el("div", "phasebar");
@@ -1541,9 +1713,9 @@
       const piece = pieces.find(i => overlap(i, x) > 0.5 * (x.end - x.start));
       g.appendChild(row(x, piece ? "Themenstück: " + piece.label : ""));
     }
-    if (pieces.length) {
+    if (pieces.length || blocks.length) {
       const det = el("details", "outline-inputs");
-      det.appendChild(el("summary", "", (blocks.length ? `Themenblöcke (${blocks.length}) und ` : "")
+      det.appendChild(el("summary", "", (blocks.length ? `Foliensätze (${blocks.length}) und ` : "")
         + `Themenstücke (${pieces.length}), daraus werden nach der Freigabe eigene Videos`));
       const slides = x => { const n = new Set((x.slides || []).map(s => s.title)).size;
                             return n ? `${n} ${n === 1 ? "Folie" : "Folien"}` : ""; };
@@ -1553,7 +1725,7 @@
       for (const x of items) {
         if (x.block) {
           const n = pieces.filter(p => within(p, x)).length;
-          det.appendChild(row(x, ["Themenblock", `${n} Stücke`, slides(x)].filter(Boolean).join(", ")));
+          det.appendChild(row(x, ["Foliensatz", n ? `${n} ${n === 1 ? "Stück" : "Stücke"}` : "", slides(x)].filter(Boolean).join(", ")));
         } else {
           det.appendChild(row(x, [x.label, slides(x)].filter(Boolean).join(", "), blocks.some(b => within(x, b))));
         }
@@ -1679,7 +1851,6 @@
   // stage G: the topic videos of the topic pieces, approved in a second, short step after the long version
   function topicsBlock(t, e) {
     const g = el("div", "topics");
-    g.appendChild(el("h3", "", "Themenvideos"));
     const off = (cutSettings.topic_videos || "propose") === "off";
     if (!t.proposed) {
       g.appendChild(el("p", "hint", off
@@ -1689,10 +1860,12 @@
       return g;
     }
     for (const n of t.notes || []) g.appendChild(el("p", "hint", n));
+    if (t.products.length) g.appendChild(el("p", "hint", "Jedes angehakte Video wird gerendert, die Teile eines Blocks "
+      + "unabhängig vom Block. Die Nummern kannst du in deiner Rückmeldung unten verwenden."));
     const done = Object.fromEntries((t.videos || []).map(v => [v.id, v]));
-    for (const x of t.products) {
-      const row = el("div", "tv" + (x.state === "rejected" ? " off" : "") + (x.parent ? " child" : "")
-                            + (x.kind === "block" ? " block" : ""));
+    const kids = id => t.products.filter(y => y.parent === id);
+    const node = x => {
+      const row = el("div", "tv" + (x.state === "rejected" ? " off" : "") + (x.kind === "block" ? " block" : ""));
       const cb = el("input"); cb.type = "checkbox"; cb.checked = x.state !== "rejected";
       cb.title = "Dieses Themenvideo machen";
       cb.onchange = () => changeTopic(x.id, {state: cb.checked ? "accepted" : "rejected"});
@@ -1702,19 +1875,52 @@
       const desc = el("textarea", "tv-desc"); desc.rows = 2; desc.value = x.description || "";
       desc.placeholder = "Beschreibung"; desc.setAttribute("aria-label", "Beschreibung");
       desc.onchange = () => changeTopic(x.id, {description: desc.value});
-      const parts = t.products.filter(y => y.parent === x.id).length;
-      const origin = x.source === "lecturer" ? "von dir hinzugefügt"
-        : x.kind === "block" ? `Themenblock mit ${parts} ${parts === 1 ? "Teil" : "Teilen"}` : PIECE_LABELS[x.kind] || "";
-      body.append(title, el("span", "hint tabular", (origin ? origin + ", " : "") + `${fmtClock(x.start)}–${fmtClock(x.end)} der Aufnahme, `
-        + `nach dem Schnitt ${fmtLength(x.kept)}`), desc);
+      const parts = kids(x.id).length;
+      const origin = x.source === "lecturer" ? "von dir hinzugefügt" : x.source === "feedback" ? "nach deiner Rückmeldung"
+        : x.kind === "block" ? "Foliensatz" : PIECE_LABELS[x.kind] || "";
+      const meta = el("div", "tv-meta");
+      meta.append(el("span", "tv-num", `Nr. ${x.id.replace(/^t/, "")}`),
+                  el("span", "hint tabular", (origin ? origin + ", " : "") + `${fmtClock(x.start)}–${fmtClock(x.end)} der Aufnahme, `
+                    + `nach dem Schnitt ${fmtLength(x.kept)}`));
+      if (parts) meta.appendChild(button("link", (openTopics.has(x.id) ? "▾ " : "▸ ") + `${parts} ${parts === 1 ? "Teil" : "Teile"}`,
+        () => { openTopics.has(x.id) ? openTopics.delete(x.id) : openTopics.add(x.id); resetSteps(); refreshDetail(); }));
+      body.append(title, meta, desc);
       const v = done[x.id];
       const look = v ? button("btn", playing === v.file ? "Läuft im Player" : "Ansehen", () => play(v.file))
                      : button("link", "Anfang ansehen", async () => {
-                         if (playing !== "original") { playing = "original"; $("cut").dataset.sig = ""; await refreshDetail(); }
+                         if (playing !== "original") { playing = "original"; resetSteps(); await refreshDetail(); }
                          listen(x.start, x.start + 30);
                        });
       row.append(cb, body, look);
-      g.appendChild(row);
+      return row;
+    };
+    for (const x of t.products.filter(x => !x.parent || !t.products.some(y => y.id === x.parent))) {
+      g.appendChild(node(x));
+      const below = kids(x.id);
+      if (below.length && openTopics.has(x.id)) {
+        const box = el("div", "tv-kids");
+        for (const y of below) box.appendChild(node(y));
+        g.appendChild(box);
+      }
+    }
+    if (t.products.length) {
+      const fb = el("div", "topics-feedback");
+      for (const f of t.feedback || []) {
+        const you = el("p", "said"); you.append(el("b", "", "Du: "), f.text); fb.appendChild(you);
+        const it = el("p", "said"); it.append(el("b", "", "FLEX3 Light: "), f.reply); fb.appendChild(it);
+      }
+      const box = el("textarea"); box.rows = 2; box.setAttribute("aria-label", "Rückmeldung zu den Themenvideos");
+      box.placeholder = "Was soll sich ändern? Zum Beispiel: Lege Nr. 2 und Nr. 3 zu einem Video zusammen.";
+      const go = button("btn", "Rückmeldung umsetzen", async () => {
+        if (!box.value.trim()) return;
+        go.disabled = true;
+        cutResult(await api().revise_topics(selectedId, box.value));
+      });
+      const line = el("div", "row");
+      line.append(go, el("span", "hint", "Ein Sprachmodell setzt sie um; es bekommt nur Titel, Zeiten und das Gesagte, "
+                                       + "und danach gibst du wieder frei."));
+      fb.append(box, line);
+      g.appendChild(fb);
     }
     const chapters = (e.items || []).filter(x => x.kind === "chapter" && x.state === "accepted").sort((a, b) => a.start - b.start);
     if (chapters.length && !t.approved) {
@@ -1743,6 +1949,7 @@
       go.disabled = !n;
       foot.append(el("span", "hint", "Gerendert wird erst nach dieser Freigabe. Was in der Langfassung geschnitten, stumm oder verpixelt ist, gilt auch hier."), go);
     }
+    foot.appendChild(button("link", "Zur Gliederung", () => goStep("outline")));
     foot.appendChild(button("link", "Neu vorschlagen", async () => {
       if (await ask({title: "Themenvideos neu vorschlagen?", confirm: "Neu vorschlagen",
                      text: "Die Vorschläge entstehen neu aus den Themenstücken der Gliederung; deine Titel, Beschreibungen und hinzugefügten Kapitel gehen dabei verloren."}))
@@ -1752,7 +1959,8 @@
     for (const w of t.warnings || []) g.appendChild(el("div", "hint error", w));
     return g;
   }
-  const PIECE_LABELS = {lecture: "Vortrag", demo: "Demo", example: "Beispiel", clip: "Clip des Schnitt-Agenten"};
+  const PIECE_LABELS = {lecture: "Vortrag", demo: "Demo", example: "Beispiel", quiz: "Quiz", clip: "Clip des Schnitt-Agenten"};
+  const openTopics = new Set();          // the blocks whose parts are unfolded
   const proposeTopics = async () => cutResult(await api().propose_topics(selectedId));
   const changeTopic = async (id, changes) => cutResult(await api().change_topic(selectedId, id, changes));
   const approveTopics = async approved => cutResult(await api().approve_topics(selectedId, approved));
@@ -1760,7 +1968,7 @@
   function play(file) {
     playing = file;
     if (file !== "original") cutPreview = false;            // the edited video is already cut
-    $("cut").dataset.sig = "";
+    resetSteps();
     refreshDetail().then(() => { const v = $("player"); v.currentTime = 0; if (file !== "original") v.play(); });
   }
 
@@ -1838,7 +2046,7 @@
     detailsOpen = true;
     cutTab = CUT_TABS.find(t => t[2].includes(x.kind))[0];
     $("player").currentTime = Math.max(0, x.start - 2);
-    $("cut").dataset.sig = "";
+    resetSteps();
     refreshDetail();
   }
 
@@ -1975,7 +2183,7 @@
 
   async function cutResult(error) {
     if (error) { $("cutHint").textContent = error; $("cutHint").className = "hint error"; return false; }
-    $("cut").dataset.sig = "";
+    resetSteps();
     await refreshDetail();
     return true;
   }
@@ -1986,7 +2194,7 @@
     if (markIn == null || markOut == null || markOut <= markIn) {
       $("cutHint").textContent = "Setz zuerst Anfang und Ende an der Abspielposition."; $("cutHint").className = "hint error"; return;
     }
-    if (await addOwn("cut", markIn, markOut)) { markIn = markOut = null; $("cut").dataset.sig = ""; }
+    if (await addOwn("cut", markIn, markOut)) { markIn = markOut = null; resetSteps(); }
   }
   async function decideAll(items, state) {
     for (const x of items.filter(i => i.state === "proposed")) {

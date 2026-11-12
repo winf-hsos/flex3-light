@@ -212,3 +212,111 @@ def test_a_block_is_a_video_of_its_own_above_the_videos_of_its_pieces(tmp_path, 
     assert [(x["id"], x["title"], x["source"], x.get("parent")) for x in data["products"]] == [
         ("t1", "Der ganze Foliensatz", "block", None), ("t2", "Teil eins", "piece", "t1"),
         ("t3", "Teil zwei", "piece", "t1"), ("t4", "Für sich", "piece", None)]
+
+
+def test_a_part_that_fills_its_block_is_not_proposed_twice(tmp_path, monkeypatch):
+    monkeypatch.setattr(products, "SHORTEST", 5.0)
+    folder = _folder(tmp_path, inputs=[])
+    (folder / "outline.json").write_text(json.dumps({
+        "pieces": [{"start": 3.0, "end": 20.0, "kind": "quiz", "title": "Quiz", "summary": ""},
+                   {"start": 24.0, "end": 30.0, "kind": "lecture", "title": "Ein Teil", "summary": ""}],
+        "blocks": [{"start": 2.0, "end": 21.0, "title": "Wiederholung", "summary": ""},
+                   {"start": 22.0, "end": 38.0, "title": "A Map of Meaning", "summary": "Mit Experiment."}]}),
+        encoding="utf-8")
+    data = products.propose(folder, {})
+    assert [(x["title"], x.get("parent")) for x in data["products"]] == [
+        ("Wiederholung", None), ("A Map of Meaning", None), ("Ein Teil", "t2")]
+
+
+class _Model:
+    """Answers like the Responses API with the tool calls given, one list per round."""
+    model = "fake"
+
+    def __init__(self, rounds):
+        self.rounds, self.bodies = rounds, []
+
+    def create(self, body):
+        self.bodies.append(body)
+        calls = self.rounds[min(len(self.bodies), len(self.rounds)) - 1]
+        return {"id": f"r{len(self.bodies)}", "usage": {"input_tokens": 100, "output_tokens": 10},
+                "output": [{"type": "function_call", "call_id": f"c{len(self.bodies)}{k}", "name": n,
+                            "arguments": json.dumps(a)} for k, (n, a) in enumerate(calls)]}
+
+
+def _tree(tmp_path, monkeypatch):
+    monkeypatch.setattr(products, "SHORTEST", 5.0)
+    folder = _folder(tmp_path, inputs=[])
+    (folder / "outline.json").write_text(json.dumps({
+        "pieces": [{"start": 2.0, "end": 12.0, "kind": "lecture", "title": "Teil eins", "summary": ""},
+                   {"start": 12.0, "end": 24.0, "kind": "lecture", "title": "Teil zwei", "summary": ""},
+                   {"start": 28.0, "end": 38.0, "kind": "demo", "title": "Für sich", "summary": ""}],
+        "blocks": [{"start": 2.0, "end": 26.0, "title": "Der ganze Foliensatz", "summary": ""}]}), encoding="utf-8")
+    (folder / "transcript.json").write_text(json.dumps({"language": "de", "words": [], "segments": [
+        {"start": 11.5, "end": 13.0, "text": "Jetzt zum Zweiten."}]}), encoding="utf-8")
+    products.propose(folder, {})
+    products.approve(folder)
+    return folder
+
+
+def test_feedback_in_words_merges_splits_and_asks_for_a_new_approval(tmp_path, monkeypatch):
+    from pipeline import llm
+    folder = _tree(tmp_path, monkeypatch)
+    model = _Model([
+        [("read_transcript", {"start": 8, "end": 16})],
+        [("merge_videos", {"ids": ["t2", "t3"], "title": "Beide Teile"}), ("set_selected", {"id": "t4", "selected": False}),
+         ("split_video", {"id": "t1", "at": 3, "titles": ["a", "b"]})],
+        [("split_video", {"id": "t2", "at": 13.0, "titles": ["Erster", "Zweiter"]}),
+         ("finish", {"reply": "Zusammengelegt und beim Zweiten wieder geteilt."})]])
+    client = llm.OpenAIResponses("k", "fake", post=lambda url, body, headers, timeout: model.create(body))
+    entry = products.revise(folder, "Lege Nr. 2 und 3 zusammen, teile bei 'Jetzt zum Zweiten', Nr. 4 brauche ich nicht",
+                            None, client=client)
+    data = products.load(folder)
+    assert [(x["id"], x["title"], x["spans"][0], x.get("parent"), x["state"]) for x in data["products"]] == [
+        ("t1", "Der ganze Foliensatz", [2.0, 26.0], None, "accepted"),
+        ("t2", "Erster", [2.0, 13.0], "t1", "accepted"), ("t5", "Zweiter", [13.0, 24.0], "t1", "accepted"),
+        ("t4", "Für sich", [28.0, 38.0], None, "rejected")]
+    assert data["approved"] is None and data["retired"] == ["t3"] and data["feedback"][-1] == entry
+    assert entry["reply"].startswith("Zusammengelegt") and len(entry["changes"]) == 3
+    sent = json.dumps(model.bodies, ensure_ascii=False)
+    assert "11.5–13.0 Jetzt zum Zweiten." in sent and "split t1 inside its span" in sent
+    assert "Der ganze Foliensatz" in model.bodies[0]["input"][0]["content"][0]["text"]
+
+
+def test_the_window_asks_for_the_outline_anew_and_for_feedback(tmp_path, monkeypatch):
+    from shelf import shelf
+    import pipeline_runner
+    folder = _tree(tmp_path, monkeypatch)
+    r = shelf(tmp_path, {"x": folder})
+    assert r.revise_topics("x", "  ") == "Schreib zuerst, was sich ändern soll."
+    assert r.revise_topics("x", "Nr. 4 weg") == "" and r.redo_outline("x") == ""
+    state = pipeline_runner.read_state(folder)
+    assert state["topics_feedback"] == "Nr. 4 weg" and state["outline_requested"] is True
+    from flex3_light_server import my_recordings
+    assert {"redo_outline", "revise_topics"} <= set(my_recordings.CALLS)
+
+
+def test_the_runner_makes_the_outline_anew_without_touching_the_cut(tmp_path, monkeypatch):
+    import pipeline_runner
+    folder = _tree(tmp_path, monkeypatch)
+    (folder / "pipeline.json").write_text(json.dumps({"steps": {"transcribe": {"state": "done"}, "subtitles": {
+        "state": "done"}, "cut": {"state": "done"}}, "outline_requested": True}), encoding="utf-8")
+    render.run(folder)
+    before = (folder / "edit.json").read_text(encoding="utf-8")
+    screened, outlined = [], []
+    monkeypatch.setattr(pipeline_runner.screening, "run", lambda f, *a, **k: screened.append(k.get("privacy")) or
+                        (f / "overview.json").write_text("{}", encoding="utf-8"))
+
+    def outline_run(f, *a, **k):
+        outlined.append(f)
+        o = json.loads((f / "outline.json").read_text(encoding="utf-8"))
+        o["blocks"] = []
+        (f / "outline.json").write_text(json.dumps(o), encoding="utf-8")
+        return o
+    monkeypatch.setattr(pipeline_runner.outline, "run", outline_run)
+    r = pipeline_runner.PipelineRunner(tmp_path / "q.json", lambda: True, lambda m: [], lambda f: {})
+    assert r._process(folder)
+    assert screened == [False] and outlined == [folder] and not (folder / "privacy.json").exists()
+    assert [x["title"] for x in products.load(folder)["products"]] == ["Teil eins", "Teil zwei", "Für sich"]
+    assert (folder / "edit.json").read_text(encoding="utf-8") == before
+    assert "outline_requested" not in pipeline_runner.read_state(folder)
+    assert pipeline_runner.read_state(folder)["steps"]["topics"]["message"].startswith("Gliederung neu, 3")

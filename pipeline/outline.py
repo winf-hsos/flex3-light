@@ -11,9 +11,10 @@ tool call, three things in seconds of the recording:
   talk, a demo of software or a worked example, so that each can become a topic video of its own
   (stage G, products.py). Until 2026-11-12 these were "slide inputs" (talks with slides only); an
   outline.json from before is read with its inputs as pieces of the kind lecture (pieces());
-- topic blocks: the larger units above the pieces, a talk through one slide deck or a demo of one
-  program over several pieces, so that the whole stays one video next to its pieces (since
-  2026-11-12, Nicolas: a hierarchy of topic videos).
+- topic blocks: the larger units above the pieces, a whole slide deck (or one program shown at
+  length) with everything done on it, an experiment it starts with and quiz questions on its slides
+  included, so that it stays one video next to the videos of its pieces (since 2026-11-12,
+  Nicolas: a hierarchy of topic videos; a block needs no pieces, a quiz deck is one too).
 
 The program checks what comes back (order, bounds, at least three topics of at least ten seconds)
 and gives the model its mistakes to correct; boundaries snap to the start or end of the nearest
@@ -30,17 +31,17 @@ from typing import Callable
 
 from . import files, llm
 
-VERSION = 3                  # 2: topic pieces of any kind instead of slide inputs, 3: topic blocks (2026-11-12)
+VERSION = 4                  # 2: topic pieces of any kind, 3: topic blocks, 4: a block is a whole deck (2026-11-12)
 SNAP = 15.0                  # seconds a boundary may move to the start or end of a sentence
 SHORTEST_PHASE = 5.0         # shorter phases go into the one before
 SHORTEST_TOPIC = 10.0
 SHORTEST_PIECE = 90.0       # a topic piece is a video of its own later, not a single slide
-SHORTEST_BLOCK = 180.0      # a block holds at least two pieces
+SHORTEST_BLOCK = 180.0      # a slide deck worth a video of its own
 ROUNDS = 4                   # tries to get a valid outline before taking what is valid of the last
 
 KINDS = {"input": "Input", "demo": "Demo", "exercise": "Übung", "discussion": "Diskussion",
          "organisation": "Organisatorisches", "break": "Pause", "technical": "Technik", "idle": "Leerlauf"}
-PIECE_KINDS = {"lecture": "Vortrag", "demo": "Demo", "example": "Beispiel"}
+PIECE_KINDS = {"lecture": "Vortrag", "demo": "Demo", "example": "Beispiel", "quiz": "Quiz"}
 LANGUAGES = {"de": "German", "en": "English"}
 
 INSTRUCTIONS = """You outline a lecture recording at a university of applied sciences, before it is cut. You get an
@@ -66,21 +67,24 @@ summary in one or two sentences, both in the language of the lecture ({language}
 pieces: every topic piece, that is a continuous stretch in which the lecturer treats one subject so that it can be
 understood without the rest of the session, whatever is on screen: a talk with slides or at the board (kind lecture),
 introducing or showing software, a tool or a website, or coding live (kind demo), working through an example or a task
-in front of the room (kind example). From the sentence that opens the subject to the sentence that closes it. Each
+in front of the room (kind example), going through a quiz with the room and explaining the answers, for instance a
+quiz on the last session at the start (kind quiz; a single quiz question on the slides of a talk belongs to the talk).
+From the sentence that opens the subject to the sentence that closes it. Each
 piece may become a short video of its own, so it must make sense alone and is several minutes long as a rule, at least
 90 seconds: neighbouring passages on the same subject form one piece, not one per slide or step; a talk that leads
 straight into a demo of the same subject, where neither makes sense without the other, is one piece of the kind that
 takes most of its time. No pieces: organisation, waiting, breaks, technical trouble, stretches where the students work
-by themselves, going through a quiz or collecting answers from the room. Pieces do not overlap and need not cover the
+by themselves. Pieces do not overlap and need not cover the
 recording. Title and summary in the language of the lecture. No pieces if there are none.
 
-blocks: the larger units above the pieces, so that a whole talk stays one video next to its pieces: a stretch in
-which the lecturer goes through the same slide deck, or shows the same program step by step, over two or more topic
-pieces, from the sentence that opens the first of them to the one that closes the last. A block contains its pieces
-completely; a short round of questions, a short exercise or a break in between belongs to it if the same deck or
-program goes on after it (the cut removes what is not worth keeping). Blocks do not overlap; a piece that belongs to
-no larger unit has no block. Title and summary in the language of the lecture; the title of the slide deck is a good
-title. No blocks if no deck or program carries several pieces.
+blocks: every slide deck the lecturer teaches with, as a whole, so that everything on it becomes one video next to
+the videos of its pieces; likewise one program shown at length without slides. A block runs from the sentence that
+opens the deck (or the task it starts with) to the one that closes it and holds everything done on it: an experiment or
+exercise it starts with or contains, quiz questions on its slides, questions from the room and short breaks in between
+(the cut removes what is not worth keeping). A block holds the pieces in it completely; it may hold several pieces,
+one or none (a quiz deck on the last session is a block too). A different deck starts a new block; slides only on
+organisation are no block. Blocks do not overlap and need not cover the recording. Title: the title of the deck, in
+the language of the lecture; summary in that language too.
 
 summary: two or three sentences in {ui_language} for the lecturer on how the session went, as phases and topics.
 
@@ -132,15 +136,12 @@ def inside(x: dict, block: dict) -> bool:
 
 def _blocks(raw: list, found: list[dict], duration: float, starts: list[float], ends: list[float],
             errors: list[str]) -> list[dict]:
-    """The blocks, each grown to hold its pieces whole; a block needs two pieces and must not overlap another."""
+    """The blocks, each grown to hold its pieces whole; a block must not overlap another."""
     out = []
     for x in _spans(raw, "block", SHORTEST_BLOCK, duration, starts, ends, errors):
         held = [p for p in found if inside(p, x)]
-        if len(held) < 2:
-            errors.append(f"block ({x['title']}, {_clock(x['start'])}–{_clock(x['end'])}): holds {len(held)} piece(s), "
-                          "a block needs two or more; leave it out or give it the pieces it holds")
-            continue
-        x["start"], x["end"] = min(x["start"], held[0]["start"]), max(x["end"], held[-1]["end"])
+        if held:
+            x["start"], x["end"] = min(x["start"], held[0]["start"]), max(x["end"], held[-1]["end"])
         if out and x["start"] < out[-1]["end"]:
             errors.append(f"block ({x['title']}) overlaps the block before ({out[-1]['title']}) once it holds its pieces")
             continue
@@ -339,7 +340,7 @@ def lines(folder: Path) -> str:
                     "apart where it can be avoided):")
         rows += [f"  {x['start']:.0f}-{x['end']:.0f} {x['kind']}: {x['title']}" for x in pieces(o)]
     if blocks(o):
-        rows.append("Topic blocks (a talk through one slide deck or a demo of one program over several pieces; each "
-                    "becomes a topic video of its own as well):")
+        rows.append("Topic blocks (a whole slide deck, or one program shown at length, with everything done on it; "
+                    "each becomes a topic video of its own as well):")
         rows += [f"  {x['start']:.0f}-{x['end']:.0f} {x['title']}" for x in blocks(o)]
     return "\n".join(rows)

@@ -28,7 +28,9 @@ def test_scan_summary_and_stations(tmp_path):
     assert library.scan(tmp_path) == {"s1": a, "s2": b, "s3": c}
     s = library.summary(a)
     assert s["title"] == "Mikrocontroller und LiFi" and s["camera"] and s["term"] == "2026-27 - WS"
-    assert s["stations"] == {"recorded": "done", "transcript": "queued", "cut": "soon", "content": "soon", "publish": "soon"}
+    assert s["stations"] == {"recorded": "done", "transcript": "queued", "cut": "soon", "content": "soon", "publish": "soon",
+                             "outline": "soon", "edit": "soon", "longversion": "soon", "topics": "soon"}
+    assert set(library.STEPS) <= set(s["stations"])
     assert library.stations(b)["transcript"] == "waiting"
     assert library.stations(c)["transcript"] == "done"
     assert library.stations(a, queued=False)["transcript"] == "open"           # only filed: started by hand
@@ -59,3 +61,24 @@ def test_delete_moves_the_folder_away_and_leaves_the_queue(tmp_path):
     assert [f.name.startswith(folder.name) for f in (c.data_dir / "trash").iterdir()] == [True]   # into the trash
     assert c.pipeline.queue == [] and "s1" not in c._library
     assert c.delete_recording("s1") == "Die Aufnahme ist nicht mehr in der Ablage."
+
+
+def test_the_eight_steps_follow_the_cut_the_render_and_the_topic_videos(tmp_path):
+    from test_products import _folder
+    from pipeline import edit, products, render
+    folder = _folder(tmp_path, inputs=[])
+    (folder / "pipeline.json").write_text(json.dumps({"steps": {s: {"state": "done"} for s in ("transcribe", "subtitles", "cut")}}),
+                                          encoding="utf-8")
+    steps = lambda: {k: library.stations(folder)[k] for k in ("outline", "edit", "longversion", "topics")}   # noqa: E731
+    assert steps() == {"outline": "done", "edit": "done", "longversion": "queued", "topics": "soon"}
+    e = edit.load(folder)
+    e.pop("approved")
+    edit.save(folder, e)
+    assert steps() == {"outline": "done", "edit": "review", "longversion": "soon", "topics": "soon"}
+    edit.approve(folder)
+    render.run(folder)
+    assert steps()["longversion"] == "done" and steps()["topics"] == "open"
+    products.propose(folder, {})
+    assert steps()["topics"] == "review"
+    (folder / "outline.json").unlink()
+    assert steps()["outline"] == "open"                    # cut before the outline existed: made anew later

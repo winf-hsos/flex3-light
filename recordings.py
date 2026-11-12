@@ -231,6 +231,24 @@ class Recordings:
         products.propose(folder, settings)
         return ""
 
+    def redo_outline(self, sid: str) -> str:
+        """Make the outline anew and propose the topic videos again; the cut stays."""
+        folder, error = self._topics_of(sid)
+        if error:
+            return error
+        return "" if self.pipeline.redo_outline(folder) else "An dieser Aufnahme wird gerade gearbeitet."
+
+    def revise_topics(self, sid: str, text: str) -> str:
+        """The lecturer's feedback on the topic videos in words, applied by a language model."""
+        folder, error = self._topics_of(sid)
+        if error:
+            return error
+        if not str(text or "").strip():
+            return "Schreib zuerst, was sich ändern soll."
+        if not products.load(folder):
+            return "Es gibt noch keine Themenvideos."
+        return "" if self.pipeline.revise_topics(folder, text) else "An dieser Aufnahme wird gerade gearbeitet."
+
     def change_topic(self, sid: str, pid: str, changes: dict) -> str:
         folder, error = self._topics_of(sid)
         return error or products.change(folder, pid, changes or {})
