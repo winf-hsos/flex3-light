@@ -93,7 +93,7 @@ def test_runner_renders_after_the_approval_and_again_after_changes(tmp_path, mon
     edit.save(folder, e)
     calls = []
 
-    def fake(f, video_args, progress, sound_dir=None):
+    def fake(f, video_args, progress, sound_dir=None, style_dir=None):
         calls.append(video_args)
         progress("Langfassung wird gerendert, 50 %")
         report = {"signature": render.signature(edit.load(f)), "files": ["edited.mp4"]}

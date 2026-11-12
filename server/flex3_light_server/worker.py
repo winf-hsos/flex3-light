@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import shutil
 import sys
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -26,12 +27,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import pipeline_runner  # noqa: E402
-from pipeline import binaries, cut_rules, edit, files  # noqa: E402
+from pipeline import binaries, cut_rules, edit, files, publish  # noqa: E402
+from pipeline import style as styles  # noqa: E402
 
 from .profiles import Store  # noqa: E402
 
 logger = logging.getLogger(__name__)
 ACTIONS = ("transcribe", "retranscribe", "cut", "approve", "render", "summary")
+STYLE_CHECK = 60                # seconds between looks at the style folder
 
 
 class Worker:
@@ -40,15 +43,55 @@ class Worker:
         self.profiles = profiles
         ffmpeg, typst = shutil.which("ffmpeg"), shutil.which("typst")
         binaries.configure(ffmpeg=ffmpeg, typst=typst)
+        self.style_dir = Path(data_dir) / "style"
+        self.style_applied = Path(data_dir) / "style-applied.json"
         self.runner = pipeline_runner.PipelineRunner(
             Path(data_dir) / "pipeline-queue.json", lambda: True, self._terms_for, self._cut_settings,
-            sound_dir=Path(data_dir) / "sounds", keys=keys or (lambda service: None), models=self._models)
+            sound_dir=Path(data_dir) / "sounds", keys=keys or (lambda service: None), models=self._models,
+            style_dir=self.style_dir)
         self.models_file = Path(data_dir) / "models.json"
 
     def start(self) -> "Worker":
         self.runner.video_args = binaries.video_args()      # NVENC with an NVIDIA card, x264 otherwise
         self.runner.start()
+        threading.Thread(target=self._watch_style, daemon=True, name="style").start()
         return self
+
+    # ---------------------------------------------------------- the style of all videos
+
+    def _watch_style(self) -> None:
+        while True:
+            try:
+                self.restyle()
+            except Exception:                     # noqa: BLE001 - the next look tries again
+                logger.exception("style")
+            threading.Event().wait(STYLE_CHECK)
+
+    def restyle(self) -> list[str]:
+        """After a change of the style (pipeline/style.py, the folder style/), render again every approved
+        recording that was rendered in another style and is not published; returns their names. Nothing on
+        the first look, so that taking a server into use does not render everything again. Published videos
+        keep their style: the window shows it, and the lecturer renders them again by hand."""
+        now = styles.load(self.style_dir)
+        fp = styles.fingerprint(now)
+        before = files.read_json(self.style_applied).get("fingerprint")
+        if before == fp:
+            return []
+        for problem in now["problems"]:
+            logger.warning("Stil: %s", problem)
+        again = []
+        if before is not None:
+            default = styles.fingerprint(styles.load(None))
+            for folder in sorted(self.sessions.iterdir()) if self.sessions.exists() else []:
+                e = edit.load(folder) if (folder / "edit.json").exists() else None
+                made = files.read_json(folder / "render.json")
+                if not (e and e.get("approved") and made) or publish.published(folder):
+                    continue
+                if (made.get("style") or default) != fp and self.runner.redo_render(folder):
+                    again.append(folder.name)
+            logger.info("Stil %s: %d Aufnahmen werden neu gerendert", now["name"], len(again))
+        files.write_json(self.style_applied, {"fingerprint": fp, "name": now["name"], "rerendered": again})
+        return again
 
     def _models(self) -> dict:
         """The model per stage, if the server's configuration sets one (models.json in the data folder,

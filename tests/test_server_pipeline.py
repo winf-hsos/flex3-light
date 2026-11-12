@@ -111,7 +111,7 @@ def test_the_pipeline_runs_on_the_server_for_its_lecturer(tmp_path, monkeypatch)
         edit.save(f, e)
         return {"agent": {"model": "fake"}}
 
-    def render_run(f, video_args, progress=None, sound_dir=None):
+    def render_run(f, video_args, progress=None, sound_dir=None, style_dir=None):
         seen["video_args"] = video_args
         report = {"signature": pipeline_runner.render.signature(edit.load(f)), "files": ["edited.mp4"]}
         (f / "edited.mp4").write_bytes(b"video")

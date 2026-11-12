@@ -152,6 +152,7 @@ WebVTT from the corrected transcript, cut at sentence and pause boundaries (`sub
 
 - **Long version** of the whole lecture, rendered from the edit list.
 - **Short clips** per chapter, for topics that stand on their own.
+- **One style for all of them** (`pipeline/style.py`, phase 6 of the cut agent's plan, built 2026-11-12): colors, fonts and logo of the cards and lower thirds, the length and fade of the cards, their sounds, an intro and outro video and a short fade of the sound at every cut are a setting of the server (the folder `style/` with `style.json`, server/README.md), not of a recording. Without it the videos look as before. A change of style renders again by itself what is approved and not yet published; a published video shows that it was rendered in the previous style and is rendered again by hand.
 - **YouTube: prepared, not uploaded** (2026-10-26). A folder per video with the video file, the title, and the description with chapter marks to copy. YouTube's rules for chapters apply: the first timestamp is 00:00, at least three chapters in ascending order, each at least 10 seconds long ([YouTube help](https://support.google.com/youtube/answer/9884579)).
 - **Opencast: prepared, and automated where possible** (2026-10-26) through Opencast's API into the module's series. That needs access from the computing centre.
 

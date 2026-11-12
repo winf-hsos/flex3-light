@@ -42,17 +42,19 @@ class PipelineRunner:
     def __init__(self, queue_file: Path, can_run: Callable[[], bool], terms_for: Callable[[dict], list[str]],
                  cut_settings: Callable[[Path], dict] = lambda folder: {"auto": False},
                  video_args: list[str] | None = None, sound_dir: Path | None = None,
-                 keys: Callable[[str], str | None] | None = None, models: Callable[[], dict] | None = None):
+                 keys: Callable[[str], str | None] | None = None, models: Callable[[], dict] | None = None,
+                 style_dir: Path | None = None):
         """cut_settings: the settings for the cut of the recording in a folder, with "auto" (propose
         by itself) and the rule policy of pipeline/cut_rules.py; in the app those of its one lecturer,
         on the server those of whoever recorded it. keys: the key of a service ("openai",
         "assemblyai", "elevenlabs") or None; the app's Credential Manager unless given. models: the
         server's choice of model per stage ({"cut": {"adapter", "model", "effort"}, ...}, see
-        pipeline/llm.py), read anew for every step so a change needs no restart."""
+        pipeline/llm.py), read anew for every step so a change needs no restart. style_dir: the folder
+        of the server's style (pipeline/style.py), read anew for every render."""
         self.queue_file = Path(queue_file)
         self.can_run, self.terms_for, self.cut_settings = can_run, terms_for, cut_settings
         self.key = keys or (lambda service: services.key(service))
-        self.video_args, self.sound_dir = video_args, sound_dir
+        self.video_args, self.sound_dir, self.style_dir = video_args, sound_dir, style_dir
         self.models = models or (lambda: {})
         self.lock = threading.RLock()
         self.wake = threading.Event()
@@ -319,7 +321,7 @@ class PipelineRunner:
                 self._set(folder, "render", "running", "Das Video wird gerendert …")
                 self._make_sounds(folder)
                 report = render.run(folder, self.video_args, progress=lambda text: self._set(
-                    folder, "render", "running", text), sound_dir=self.sound_dir)
+                    folder, "render", "running", text), sound_dir=self.sound_dir, style_dir=self.style_dir)
                 self._set(folder, "render", "done", signature=report["signature"])
                 data = read_state(folder)
                 if data.pop("render_requested", None):

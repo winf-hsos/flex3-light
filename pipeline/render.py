@@ -10,8 +10,10 @@ Into the session folder (names proposed for the FLEX3 contract, docs/pipeline.md
 
 Cards that add time (title, chapters, closing; timeline.inserts()) come in a second pass:
 the cut video is read piece by piece between them and joined with the cards and their
-sounds (sounds.py). Lower thirds, also for chapters if the lecturer prefers them to cards,
-are laid over the picture in the first pass.
+sounds (sounds.py), and with the intro and outro video if the style has them. Lower thirds,
+also for chapters if the lecturer prefers them to cards, are laid over the picture in the
+first pass. How all of that looks and sounds is the server's style (style.py), read anew for
+every render; render.json records which style it was.
 
 The pass works on the program picture (recording.mp4) in the times of the recording: held
 pictures, pixelated regions, zooms, the camera big (camera.mp4) or the screen alone
@@ -42,7 +44,10 @@ import wave
 from pathlib import Path
 from typing import Callable
 
-from . import binaries, cards, edit, files, locks, publish, sounds, timeline
+import numpy as np
+
+from . import binaries, cards, edit, files, locks, publish, timeline
+from . import style as styles
 
 X264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
 EPS = 0.0005                     # half a millisecond, so that a frame exactly on a bound is decided as intended
@@ -124,10 +129,11 @@ def window(e: dict, a: float, length: float) -> dict:
 
 
 def build(folder: Path, e: dict, work: Path, offset: float = 0.0,
-          length: float | None = None) -> tuple[list[str], str, dict, list[str]]:
+          length: float | None = None, style: dict | None = None) -> tuple[list[str], str, dict, list[str]]:
     """(input arguments, filter graph, plan, warnings) for the long version; with length, for the span
     offset..offset+length of the recording only, through the same graph (the check in cut_review.py)."""
     folder = Path(folder)
+    s = style or styles.load(None)
     source = folder / "recording.mp4"
     if not source.exists():
         source = folder / "screen.mp4"
@@ -250,7 +256,7 @@ def build(folder: Path, e: dict, work: Path, offset: float = 0.0,
             overlay(label, 0, 0, a, b)
     # 5. cards over removed pauses
     for i, (a, b, text) in enumerate(p["cards"]):
-        card = cards.card(work / f"card-{i}.png", W, H, text)
+        card = cards.card(work / f"card-{i}.png", W, H, text, style=s)
         still_input(card, a, b, f"c{i}")
         overlay(f"c{i}", 0, 0, a, b)
     # 6. lower thirds: proposed ones, and chapter titles when chapters are shown that way
@@ -261,9 +267,10 @@ def build(folder: Path, e: dict, work: Path, offset: float = 0.0,
                           key=lambda x: x["start"])
         for k, x in enumerate(chapters, 1):
             if x["params"].get("title"):
-                thirds.append((x["start"], min(x["start"] + 5.0, e["duration"]), x["params"]["title"], f"Kapitel {k}"))
+                thirds.append((x["start"], min(x["start"] + s["lower_third"]["seconds"], e["duration"]),
+                               x["params"]["title"], f"Kapitel {k}"))
     for i, (a, b, text, kicker) in enumerate(thirds):
-        png = cards.lower_third(work / f"third-{i}.png", W, H, text, kicker)
+        png = cards.lower_third(work / f"third-{i}.png", W, H, text, kicker, style=s)
         still_input(png, a, b, f"t{i}", "format=rgba")
         overlay(f"t{i}", 0, 0, a, b)
     # 7. the picture loses the removed spans; the sound is cut separately (sound())
@@ -301,8 +308,18 @@ def both_ears(levels: list[float]) -> str:
     return f"pan=stereo|c0=c{live}|c1=c{live},"
 
 
-def sound(p: dict, work: Path) -> Path:
-    """The sound of the edited video as WAV: silenced spans are silent, removed spans are gone, to the sample."""
+def _faded(data: bytes, channels: int, rising: bool) -> bytes:
+    """16-bit samples faded in (rising) or out over their whole length."""
+    x = np.frombuffer(data, dtype=np.int16).reshape(-1, channels).astype(np.float32)
+    ramp = np.linspace(0.0, 1.0, len(x), dtype=np.float32)
+    x *= (ramp if rising else ramp[::-1])[:, None]
+    return x.astype(np.int16).tobytes()
+
+
+def sound(p: dict, work: Path, fade_ms: float = 0.0) -> Path:
+    """The sound of the edited video as WAV: silenced spans are silent, removed spans are gone, to the sample.
+    With fade_ms, every kept span fades in and out that long where it meets a cut, so a junction does not
+    click; the start and the end of the recording stay as they are."""
     full, cut = work / "sound-full.wav", work / "sound.wav"
     silence = f",volume=0:enable='{_between(p['silent'])}'" if p["silent"] else ""
     pan = both_ears(channel_levels(p["source"]))
@@ -314,19 +331,28 @@ def sound(p: dict, work: Path) -> Path:
         raise RuntimeError("ffmpeg: " + r.stderr[-400:])
     with wave.open(str(full)) as src, wave.open(str(cut), "wb") as dst:
         dst.setparams(src.getparams())
-        frames, size = src.getnframes(), src.getsampwidth() * src.getnchannels()
+        frames, channels = src.getnframes(), src.getnchannels()
+        size = src.getsampwidth() * channels
+        fade = int(RATE * fade_ms / 1000)
         for a, b in p["kept"]:
             first, last = int(round(a * RATE)), min(frames, int(round(b * RATE)))
             if first >= last:
                 continue
+            n = min(fade, (last - first) // 2)
+            head = n if first > 0 else 0                   # no fade where the recording itself begins or ends
+            tail = n if last < frames else 0
             src.setpos(first)
-            left = last - first
+            if head:
+                dst.writeframes(_faded(src.readframes(head), channels, True))
+            left = last - first - head - tail
             while left > 0:
                 chunk = src.readframes(min(RATE * 10, left))
                 if not chunk:
                     break
                 dst.writeframes(chunk)
                 left -= len(chunk) // size
+            if tail:
+                dst.writeframes(_faded(src.readframes(tail), channels, False))
     full.unlink(missing_ok=True)
     return cut
 
@@ -352,10 +378,29 @@ def _run(args: list[str], total: float, progress: Callable[[float], None] | None
         raise RuntimeError("ffmpeg: " + "".join(errors)[:600])         # the first errors name the cause
 
 
+def has_audio(video: Path) -> bool:
+    err = subprocess.run([binaries.ffmpeg(), "-hide_banner", "-i", str(video)], stdin=subprocess.DEVNULL,
+                         capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         creationflags=binaries.flags()).stderr
+    return re.search(r"Stream #\S+.*?Audio:", err) is not None
+
+
+def measured(s: dict) -> dict:
+    """The style with the length of its intro and outro video, which timeline.inserts() needs."""
+    out = dict(s)
+    for which in ("intro", "outro"):
+        clip = styles.asset(s, which)
+        out[f"{which}_seconds"] = round(probe(clip)["duration"], 3) if clip else 0.0
+    return out
+
+
 def compose(cut: Path, ins: list[dict], p: dict, out: Path, work: Path, sound_dir: Path | None,
-            video_args: list[str], say: Callable[[str], None], warnings: list[str]) -> float:
+            video_args: list[str], say: Callable[[str], None], warnings: list[str],
+            style: dict | None = None) -> float:
     """The cut video with the cards between its pieces; returns the final length."""
+    s = style or styles.load(None)
     W, H, fps = p["width"], p["height"], p["fps"]
+    fade, volume = s["cards"]["fade"], s["sounds"]["volume"]
     inputs, chains, labels = [], [], []
     n, pos, missing = 0, 0.0, set()
     pieces = []                                  # ("video", a, b) and ("card", insert)
@@ -373,21 +418,38 @@ def compose(cut: Path, ins: list[dict], p: dict, out: Path, work: Path, sound_di
             chains.append(f"[{n}:v]setpts=PTS-STARTPTS,format=yuv420p,setsar=1[v{k}]")
             chains.append(f"[{n}:a]aformat=sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{k}]")
             n += 1
+        elif piece[1]["kind"] in ("intro", "outro"):
+            o = piece[1]
+            clip = styles.asset(s, o["kind"])
+            inputs += ["-t", f"{o['seconds']:.3f}", "-i", str(clip)]
+            chains.append(f"[{n}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                          f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color={s['colors']['background']},fps={fps},"
+                          f"format=yuv420p,setsar=1,setpts=PTS-STARTPTS[v{k}]")
+            if has_audio(clip):
+                chains.append(f"[{n}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+                              f"apad=whole_dur={o['seconds']:.3f},atrim=0:{o['seconds']:.3f},asetpts=PTS-STARTPTS[a{k}]")
+                n += 1
+            else:
+                n += 1
+                inputs += ["-f", "lavfi", "-t", f"{o['seconds']:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
+                chains.append(f"[{n}:a]asetpts=PTS-STARTPTS[a{k}]")
+                n += 1
         else:
             o = piece[1]
-            png = cards.card(work / f"insert-{k}.png", W, H, o["title"], o["kicker"], o["footer"])
+            png = cards.card(work / f"insert-{k}.png", W, H, o["title"], o["kicker"], o["footer"], style=s)
             inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{o['seconds']:.3f}", "-i", str(png)]
-            chains.append(f"[{n}:v]format=yuv420p,setsar=1,fade=t=in:d=0.25,fade=t=out:st={o['seconds'] - 0.25:.3f}:d=0.25[v{k}]")
+            fades = f",fade=t=in:d={fade:.3f},fade=t=out:st={o['seconds'] - fade:.3f}:d={fade:.3f}" if fade > 0 else ""
+            chains.append(f"[{n}:v]format=yuv420p,setsar=1{fades}[v{k}]")
             n += 1
-            clip = sounds.path(sound_dir, o["sound"]) if sound_dir and o["sound"] else None
-            if clip is not None and clip.exists():
+            name, clip = styles.sound(s, o["sound"], sound_dir) if o["sound"] else (None, None)
+            if clip is not None:
                 inputs += ["-i", str(clip)]
-                chains.append(f"[{n}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=0.7,"
+                chains.append(f"[{n}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume={volume:.2f},"
                               f"apad=whole_dur={o['seconds']:.3f},atrim=0:{o['seconds']:.3f},"
                               f"afade=t=out:st={max(0.0, o['seconds'] - 0.4):.3f}:d=0.4,asetpts=PTS-STARTPTS[a{k}]")
             else:
-                if o["sound"]:
-                    missing.add(o["sound"])
+                if name:
+                    missing.add(name)
                 inputs += ["-f", "lavfi", "-t", f"{o['seconds']:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
                 chains.append(f"[{n}:a]asetpts=PTS-STARTPTS[a{k}]")
             n += 1
@@ -406,8 +468,10 @@ def compose(cut: Path, ins: list[dict], p: dict, out: Path, work: Path, sound_di
 
 
 def run(folder: Path, video_args: list[str] | None = None,
-        progress: Callable[[str], None] | None = None, sound_dir: Path | None = None) -> dict:
-    """Render the approved edit list of a session folder; returns render.json."""
+        progress: Callable[[str], None] | None = None, sound_dir: Path | None = None,
+        style_dir: Path | None = None) -> dict:
+    """Render the approved edit list of a session folder in the style of style_dir (style.py; without
+    one, the default look); returns render.json."""
     folder = Path(folder)
     e = edit.load(folder)
     if not e or not e.get("approved"):
@@ -419,16 +483,17 @@ def run(folder: Path, video_args: list[str] | None = None,
     video_args = video_args or X264
     transcript = files.read_json(folder / "transcript.json")
     language = transcript.get("language") or files.read_json(folder / "session.json").get("language") or "de"
+    s = measured(styles.load(style_dir))
     work = Path(tempfile.mkdtemp(prefix="flex3-render-"))
     try:
-        inputs, graph, p, warnings = build(folder, e, work)
+        inputs, graph, p, warnings = build(folder, e, work, style=s)
         script = work / "graph.txt"
         script.write_text(graph, encoding="utf-8")
         long_tmp = folder / "edited.mp4.part"
         say("Ton wird geschnitten …")
-        cut_sound = sound(p, work)
+        cut_sound = sound(p, work, s["cut_fade_ms"])
         sound_input = inputs.count("-i")                    # its index among the inputs
-        ins = timeline.inserts(e, p)
+        ins = timeline.inserts(e, p, s)
         cut_file = work / "cut.mp4" if ins else long_tmp
         say("Langfassung wird gerendert …")
         _run([*inputs, "-i", str(cut_sound), "-/filter_complex", str(script), "-map", "[vout]",
@@ -437,7 +502,7 @@ def run(folder: Path, video_args: list[str] | None = None,
              lambda share: say(f"Langfassung wird gerendert, {share * 100:.0f} %"))
         final_duration = p["duration"]
         if ins:
-            final_duration = compose(cut_file, ins, p, long_tmp, work, sound_dir, video_args, say, warnings)
+            final_duration = compose(cut_file, ins, p, long_tmp, work, sound_dir, video_args, say, warnings, s)
         os.replace(long_tmp, folder / "edited.mp4")
         written = ["edited.mp4"]
         if transcript:
@@ -482,6 +547,7 @@ def run(folder: Path, video_args: list[str] | None = None,
                 written.append("thumbnail.jpg")
         report = {"rendered": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
                   "signature": signature(e), "approved": e.get("approved"), "duration": final_duration,
+                  "style": styles.fingerprint(s), "style_name": s["name"],
                   "cards": [{"kind": o["kind"], "title": o["title"]} for o in ins],
                   "source_duration": e["duration"], "files": written, "clips": len(clips),
                   "chapters": len(chs), "warnings": warnings, "encoder": video_args[1]}

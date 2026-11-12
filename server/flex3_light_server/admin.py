@@ -5,6 +5,7 @@
     python -m flex3_light_server.admin --data DIR devices                   devices with last contact
     python -m flex3_light_server.admin --data DIR revoke DEVICE_ID          a device stops working (lost laptop)
     python -m flex3_light_server.admin --data DIR import FOLDER --user ID   a recording made before the server, for a lecturer
+    python -m flex3_light_server.admin --data DIR style [--preview DIR]     the style of all videos, its cards as pictures
 
 --data defaults to FLEX3_LIGHT_SERVER_DATA, --url to FLEX3_LIGHT_SERVER_URL: the address the
 lecturer's FLEX3 Light reaches the server at. The connection code is printed once and is
@@ -15,6 +16,11 @@ recording only (session.json, recording.mp4, screen.mp4, camera.mp4) and the act
 without window titles, matched against the lecturer's title list as the app does on upload.
 Results of a local pipeline stay behind; the server's pipeline is started on request
 (POST /sessions/{id}/pipeline). The folder appears in sessions/ complete or not at all.
+
+style reads the folder style/ in the data folder (pipeline/style.py) and says what of it holds and
+what fell back to the default; --preview draws a title, chapter, pause and closing card and a lower
+third in it, at 1920 x 1080, to look at before the server renders with it. The server notices a
+change of style within a minute and renders again what is approved and not yet published.
 """
 from __future__ import annotations
 
@@ -85,7 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     imp = sub.add_parser("import", help="a recording filed by FLEX3 Light before it had a server")
     imp.add_argument("folder")
     imp.add_argument("--user", required=True, help="name or id of the lecturer who recorded it")
+    sty = sub.add_parser("style", help="the style of all videos: what holds, and its cards as pictures")
+    sty.add_argument("--preview", help="folder for the pictures")
     a = ap.parse_args(argv)
+    if a.command == "style":
+        return show_style(Path(a.data), Path(a.preview) if a.preview else None)
     accounts = Accounts(Path(a.data) / "accounts.sqlite")
     try:
         if a.command == "invite":
@@ -110,6 +120,39 @@ def main(argv: list[str] | None = None) -> int:
             print(f"übernommen: {import_session(Path(a.data), Path(a.folder), user)}")
     finally:
         accounts.close()
+    return 0
+
+
+def show_style(data: Path, preview: Path | None) -> int:
+    from .worker import ROOT  # noqa: F401 - puts the pipeline on the path
+    from pipeline import cards, style
+
+    s = style.load(data / "style")
+    print(f"Stil: {s['name']} ({style.fingerprint(s)})")
+    print(f"Ordner: {data / 'style'}" + ("" if (data / "style" / style.FILE).exists() else " (ohne style.json: Grundstil)"))
+    print(f"Farben: Hintergrund {s['colors']['background']}, Akzent {s['colors']['accent']}, Schrift {s['colors']['text']}")
+    print(f"Schrift: {style.font(s)} / {style.font(s, 'semibold')}")
+    print(f"Logo: {s['logo'] or 'FLEX3-Zeichen'}; Intro: {s['intro'] or 'keins'}; Outro: {s['outro'] or 'keins'}")
+    c = s["cards"]
+    print(f"Tafeln: Titel {c['title']:g} s, Kapitel {c['chapter']:g} s, Ende {c['closing']:g} s, Blende {c['fade']:g} s; "
+          f"Bauchbinde {s['lower_third']['seconds']:g} s; Blende am Schnitt {s['cut_fade_ms']:g} ms")
+    for moment in ("title", "chapter", "closing"):
+        name, path = style.sound(s, moment, data / "sounds")
+        print(f"Klang {moment}: {name or 'keiner'}" + (f" ({path})" if path else " (fehlt: die Tafel bleibt still)" if name else ""))
+    for problem in s["problems"]:
+        print(f"Hinweis: {problem}")
+    if preview:
+        preview.mkdir(parents=True, exist_ok=True)
+        W, H = 1920, 1080
+        cards.card(preview / "title.png", W, H, "Einführung in die Programmierung", "Digitalisierung und Programmierung",
+                   "12. November 2026   Prof. Dr. Muster", style=s)
+        cards.card(preview / "chapter.png", W, H, "Schleifen und Bedingungen", "Kapitel 2", style=s)
+        cards.card(preview / "pause.png", W, H, "Pause entfernt (12 min)", style=s)
+        cards.card(preview / "closing.png", W, H, "Danke fürs Zuschauen", "Digitalisierung und Programmierung",
+                   "Einführung in die Programmierung", style=s)
+        lower = preview / "lower_third.png"
+        cards.lower_third(lower, W, H, "Schleifen und Bedingungen", "Kapitel 2", style=s)
+        print(f"Vorschau: {preview}")
     return 0
 
 

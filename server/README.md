@@ -59,6 +59,25 @@ The activity log arrives without window titles (decision of 2026-11-06): the app
 
 Recordings filed before the server existed are taken over with `python -m flex3_light_server.admin import <folder> --user <id>`: the files of the recording and the activity log without titles, not the results of a local pipeline.
 
+### Style
+
+How every video looks and sounds is one setting of the server (phase 6 of the cut agent's plan, 2026-11-12): the folder `style/` in the data folder with a `style.json` and the files it names. It sets the colors of the cards and lower thirds (background, accent, text), the fonts, a logo in place of the FLEX3 mark, how long the title, chapter and closing cards last and how they fade, which sound each of them carries (a file of the style folder, else the sounds made once with ElevenLabs), an intro and an outro video before the title card and after the closing card, and a fade of a few milliseconds at every cut so that the sound does not click. Every field is optional; without the folder the videos look as they always did. The same style applies to the long version and to the clips, and the lecturer's choices stay theirs: whether there is a title card at all, chapter cards or lower thirds, the texts of the cards.
+
+```json
+{"name": "Hochschule Osnabrück",
+ "colors": {"background": "#009ee3", "accent": "#006e9f", "text": "#ffffff"},
+ "font": {"regular": "segoeui.ttf", "semibold": "seguisb.ttf"},
+ "logo": "logo.png", "intro": "intro.mp4", "outro": "",
+ "cards": {"title": 4.0, "chapter": 2.0, "closing": 4.0, "fade": 0.25},
+ "lower_third": {"seconds": 5.0},
+ "sounds": {"title": "intro", "chapter": "swoosh", "closing": "outro", "volume": 0.7},
+ "cut_fade_ms": 10}
+```
+
+`python -m flex3_light_server.admin --data DIR style --preview <folder>` says what of the style holds and what fell back to its default (a color that is no `#rrggbb`, a file outside the folder, an unknown field), and draws a title, chapter, pause and closing card and a lower third into the folder, to look at before anything is rendered with it. On a Linux server the fonts belong into the style folder, as Segoe UI is a Windows font.
+
+A change of style needs no restart and no change to any edit list: every render reads the style anew and writes its fingerprint into `render.json`, and within a minute the worker renders again every approved recording that was rendered in another style and is not published. Published recordings keep their style; the window says "gerendert im vorigen Stil" and offers "Neu rendern". The first look of a server only notes the style, so that taking it into use renders nothing again.
+
 ### Meine Aufnahmen
 
 Since phase 4 (2026-11-09) the review runs on the server: the server serves the app's own `ui.html` at `/library/`, which recognises that it runs there (`window.FLEX3_SERVER`) and shows only "Meine Aufnahmen", with every action sent to `/library/api/<call>` instead of the app. One file, so the page in the app and the page on the server never drift apart. The actions themselves are shared too: `recordings.py` at the repository root holds them, and `my_recordings.py` applies them to the server's session folders of whoever is signed in (since phase 5 the app has no library of its own), with the server's pipeline and the settings of their profile; a program rule or a term added on the page lands in the profile and reaches the app with its next sync.

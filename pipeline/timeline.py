@@ -10,7 +10,9 @@ time and stay in sync however many cuts there are.
 map_time() turns a time of the recording into the time in the cut video, which is how
 subtitles, chapters and clips follow the cut. Cards that add time come on top: a title
 card at the start, a card for each chapter and a closing card (inserts()); shift() moves
-a time of the cut video past every card inserted before it.
+a time of the cut video past every card inserted before it. How long the cards last, which
+sounds they carry and whether an intro and an outro frame the video is the server's style
+(style.py); without one, the lengths below.
 """
 from __future__ import annotations
 
@@ -18,7 +20,8 @@ from . import edit, subtitles
 
 CARD = 2.5                       # seconds a removed pause shows its card
 SHORTENED = edit.SHORTENED       # seconds a shortened pause keeps at either end, out of a word (edit.pause_inner)
-TITLE, CHAPTER, CLOSING = 4.0, 2.0, 4.0     # seconds of the inserted cards
+TITLE, CHAPTER, CLOSING = 4.0, 2.0, 4.0     # seconds of the inserted cards, unless the style says otherwise
+ORDER = {"intro": 0, "title": 1, "chapter": 2, "closing": 3, "outro": 4}
 
 
 def _frame(t: float, fps: float) -> float:
@@ -86,19 +89,25 @@ def map_forward(t: float, p: dict) -> float:
     return round(offset, 3)
 
 
-def inserts(e: dict, p: dict) -> list[dict]:
+def inserts(e: dict, p: dict, style: dict | None = None) -> list[dict]:
     """The cards that add time, in order: {"at" (time in the cut video), "seconds", "kind", "title",
-    "kicker", "footer", "sound"}. They follow e["cards"], which the proposal fills from the settings and
-    the lecturer may change."""
+    "kicker", "footer", "sound"}, "sound" being the moment ("title", "chapter", "closing") whose sound
+    the style names. They follow e["cards"], which the proposal fills from the settings and the
+    lecturer may change, and the style: the length of each card, and an intro and outro video
+    ("intro_seconds" and "outro_seconds", measured by render.py) before and after everything."""
     cfg = e.get("cards") or {}
     if not cfg:                                  # a list from before there were cards (approve_cut fills them in)
         return []
+    length = (style or {}).get("cards") or {}
     out = []
+    if (style or {}).get("intro_seconds"):
+        out.append({"at": 0.0, "seconds": style["intro_seconds"], "kind": "intro", "title": "", "kicker": "",
+                    "footer": "", "sound": None})
     title = cfg.get("title") or {}
     if title.get("on"):
-        out.append({"at": 0.0, "seconds": TITLE, "kind": "title", "title": title.get("title", ""),
+        out.append({"at": 0.0, "seconds": length.get("title", TITLE), "kind": "title", "title": title.get("title", ""),
                     "kicker": title.get("kicker", ""), "footer": title.get("footer", ""),
-                    "sound": "intro" if cfg.get("music") else None})
+                    "sound": "title" if cfg.get("music") else None})
     if cfg.get("chapters", "card") == "card":
         number = 0
         for x in sorted((x for x in e["items"] if x["kind"] == "chapter" and x["state"] == "accepted"),
@@ -107,15 +116,18 @@ def inserts(e: dict, p: dict) -> list[dict]:
             at = map_forward(x["start"], p)
             if (title.get("on") and at < 1.0) or any(abs(at - o["at"]) < 1.0 and o["kind"] == "chapter" for o in out):
                 continue                         # right after the title card, or a second card on the same spot
-            out.append({"at": at, "seconds": CHAPTER, "kind": "chapter", "title": x["params"].get("title", ""),
-                        "kicker": f"Kapitel {number}", "footer": "",
-                        "sound": "swoosh" if cfg.get("chapter_sound", True) else None})
+            out.append({"at": at, "seconds": length.get("chapter", CHAPTER), "kind": "chapter",
+                        "title": x["params"].get("title", ""), "kicker": f"Kapitel {number}", "footer": "",
+                        "sound": "chapter" if cfg.get("chapter_sound", True) else None})
     closing = cfg.get("closing") or {}
     if closing.get("on"):
-        out.append({"at": p["duration"], "seconds": CLOSING, "kind": "closing", "title": closing.get("title", ""),
-                    "kicker": closing.get("kicker", ""), "footer": closing.get("footer", ""),
-                    "sound": "outro" if cfg.get("music") else None})
-    return sorted(out, key=lambda o: (o["at"], o["kind"] != "title", o["kind"] == "closing"))
+        out.append({"at": p["duration"], "seconds": length.get("closing", CLOSING), "kind": "closing",
+                    "title": closing.get("title", ""), "kicker": closing.get("kicker", ""),
+                    "footer": closing.get("footer", ""), "sound": "closing" if cfg.get("music") else None})
+    if (style or {}).get("outro_seconds"):
+        out.append({"at": p["duration"], "seconds": style["outro_seconds"], "kind": "outro", "title": "", "kicker": "",
+                    "footer": "", "sound": None})
+    return sorted(out, key=lambda o: (o["at"], ORDER[o["kind"]]))
 
 
 def shift(t: float, ins: list[dict] | None) -> float:

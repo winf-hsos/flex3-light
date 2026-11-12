@@ -21,6 +21,7 @@ from pathlib import Path
 
 import library
 from pipeline import cut_rules, edit, locks, publish, review
+from pipeline import style as styles
 
 
 class Recordings:
@@ -34,7 +35,13 @@ class Recordings:
         folder = getattr(self, "_library", {}).get(sid)
         if folder is None:
             return None
-        return {**library.detail(folder, self.pipeline.queued(folder)), "status": self.pipeline.describe(folder)}
+        view = {**library.detail(folder, self.pipeline.queued(folder)), "status": self.pipeline.describe(folder)}
+        made = (view.get("cut") or {}).get("render")
+        if made:                                   # rendered in the style the server has now?
+            now = styles.load(getattr(self.pipeline, "style_dir", None))
+            made["style_current"] = (made.get("style") or styles.fingerprint(styles.load(None))) == styles.fingerprint(now)
+            made["style_now"] = now["name"]
+        return view
 
     def start_transcription(self, sid: str) -> str:
         """Transcribe a recording by hand that was only filed; returns an error or ''."""

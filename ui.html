@@ -1391,12 +1391,15 @@
       note.textContent = st === "missing"
         ? `Seit dem Rendern fehlen ${made.missing.length === 1 ? "eine Datei" : made.missing.length + " Dateien"}: `
           + made.missing.join(", ") + ". Neu rendern stellt sie aus derselben Freigabe wieder her, ohne neuen Vorschlag und ohne KI."
+        : made && made.current && made.style_current === false
+          ? `Freigegeben am ${fmtDate(e.approved)}, gerendert im vorigen Stil des Servers. Neu rendern übernimmt den Stil „${made.style_now}“, ohne neuen Vorschlag und ohne KI.`
         : made && made.current ? `Freigegeben am ${fmtDate(e.approved)}, gerendert.`
         : st === "failed" ? (d.status || "Das Rendern ist gescheitert.") : `Freigegeben am ${fmtDate(e.approved)}. Das Video wird gleich gerendert.`;
       if (st === "failed" || st === "missing") note.className = "hint error";
       foot.append(note);
       if (st === "failed") foot.appendChild(button("btn primary", "Erneut rendern", () => approve(true)));
-      if (st === "missing") foot.appendChild(button("btn primary", "Neu rendern", rerender));
+      if (st === "missing" || (st === "done" && made && made.style_current === false))
+        foot.appendChild(button(st === "missing" ? "btn primary" : "btn", "Neu rendern", rerender));
       foot.appendChild(button("btn", "Freigabe zurücknehmen", () => approve(false)));
       if (st === "done") box.appendChild(results(made));   // above the foot, which follows
     } else {
