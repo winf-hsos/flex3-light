@@ -1,7 +1,13 @@
 """Topic videos: stage G of the cut agent's plan (phase 7, built 2026-11-12).
 
-From the approved long version and the outline, every slide input (outline.json, "inputs", at
-least 90 seconds) is proposed as a video of its own. The lecturer approves them in a second,
+From the approved long version and the outline, every topic piece (outline.json, "pieces", at
+least 90 seconds: a talk, a demo of software or a worked example that stands on its own) is
+proposed as a video of its own. Clips are a case of it since 2026-11-12: the cut agent proposes
+none any more, and the clips of an edit list from before become proposals here, unless a topic
+piece covers them. Above the pieces stand the topic blocks of the outline (a talk through one slide
+deck or a demo of one program over several pieces): each is proposed as a video of its own too,
+and the videos of its pieces and clips name it as their "parent", so there is a hierarchy of a
+whole talk and its parts (Nicolas, 2026-11-12). The lecturer approves them in a second,
 short step; the profile switch "cut.topic_videos" says whether that happens at all ("off"),
 waits for the lecturer ("propose", the default) or is done by itself ("auto").
 
@@ -74,9 +80,10 @@ def kept_seconds(p: dict, a: float, b: float) -> float:
 
 
 def propose(folder: Path, settings: dict | None = None) -> dict:
-    """Write products.json with one proposal per slide input of the outline; with the switch on
-    "auto" they are accepted and approved at once. Needs no model: the outline already has spans,
-    titles and summaries in the language of the lecture."""
+    """Write products.json with one proposal per topic block and topic piece of the outline and per
+    clip of an older edit list that no piece covers, a block before the videos of its parts, which
+    name it as their parent; with the switch on "auto" they are accepted and approved at once.
+    Needs no model: the outline already has spans, titles and summaries in the language of the lecture."""
     folder = Path(folder)
     e = edit.load(folder)
     if not e:
@@ -85,23 +92,40 @@ def propose(folder: Path, settings: dict | None = None) -> dict:
     p = _long_plan(folder, e)
     auto = mode(settings) == "auto"
     products, notes = [], []
+    pieces = outline.pieces(o) if outline.current(folder) else []
+    blocks = [{**x, "kind": "block"} for x in outline.blocks(o)] if outline.current(folder) else []
     if not outline.current(folder):
-        notes.append("Ohne Gliederung gibt es keine Folien-Inputs zum Vorschlagen.")
-    for x in (o.get("inputs") or []) if outline.current(folder) else []:
+        notes.append("Ohne Gliederung gibt es keine Themenstücke zum Vorschlagen.")
+    clips = [{"start": x["start"], "end": x["end"], "title": x["params"].get("title", ""),
+              "summary": x["params"].get("summary", ""), "kind": "clip"}
+             for x in e["items"] if x["kind"] == "clip" and x["state"] == "accepted" and x["end"] is not None]
+    clips = [c for c in clips if not any(_overlap(c, x) > 0.5 * (c["end"] - c["start"]) for x in pieces)]
+    parents: list[tuple[dict, str]] = []                  # the blocks proposed, with their id
+    for x in sorted(blocks + pieces + clips, key=lambda x: (x["start"], x["kind"] != "block")):
         a, b = float(x["start"]), float(x["end"])
         left = kept_seconds(p, a, b)
         if left < SHORTEST:
             notes.append(f"„{x.get('title', '')}“ bleibt nach dem Schnitt nur {left:.0f} s lang und wird nicht vorgeschlagen.")
             continue
-        products.append({"id": f"t{len(products) + 1}", "title": (x.get("title") or "")[:TITLE_MAX],
+        pid = f"t{len(products) + 1}"
+        parent = next((i for blk, i in parents if outline.inside(x, blk)), None) if x["kind"] != "block" else None
+        products.append({"id": pid, "title": (x.get("title") or "")[:TITLE_MAX],
                          "description": (x.get("summary") or "")[:DESCRIPTION_MAX], "spans": [[a, b]],
-                         "state": "accepted" if auto else "proposed", "source": "input"})
-    if outline.current(folder) and not o.get("inputs"):
-        notes.append("Die Gliederung hat keine Folien-Inputs; du kannst ein Kapitel als Themenvideo hinzufügen.")
+                         "state": "accepted" if auto else "proposed",
+                         "source": {"clip": "clip", "block": "block"}.get(x["kind"], "piece"), "kind": x["kind"],
+                         **({"parent": parent} if parent else {})})
+        if x["kind"] == "block":
+            parents.append((x, pid))
+    if outline.current(folder) and not pieces:
+        notes.append("Die Gliederung hat keine Themenstücke; du kannst ein Kapitel als Themenvideo hinzufügen.")
     data = {"version": 1, "created": _now(), "mode": mode(settings), "approved": _now() if auto and products else None,
             "products": products, "notes": notes}
     files.write_json(folder / FILE, data)
     return data
+
+
+def _overlap(x: dict, y: dict) -> float:
+    return max(0.0, min(x["end"], y["end"]) - max(x["start"], y["start"]))
 
 
 def _clean(x: dict, changes: dict, duration: float) -> str:

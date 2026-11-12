@@ -57,7 +57,7 @@ def _duration(path: Path, stream: str) -> float:
     return float(r.stdout.strip())
 
 
-def test_render_writes_the_long_version_clips_and_chapters(tmp_path):
+def test_render_writes_the_long_version_and_chapters_and_no_clips(tmp_path):
     _video(tmp_path / "recording.mp4", "testsrc2")
     _video(tmp_path / "camera.mp4", "smptebars")
     words = [{"word": f"Wort{i}.", "start": i * 1.0 + 0.1, "end": i * 1.0 + 0.6} for i in range(60)]
@@ -72,7 +72,7 @@ def test_render_writes_the_long_version_clips_and_chapters(tmp_path):
     expected = 60 - 3 - 9.5 - 4
     assert abs(_duration(tmp_path / "edited.mp4", "v:0") - expected) < 0.1
     assert abs(_duration(tmp_path / "edited.mp4", "a:0") - expected) < 0.1           # picture and sound together
-    assert report["clips"] == 1 and (tmp_path / "clip-01.mp4").exists() and (tmp_path / "clip-01.de.vtt").exists()
+    assert not list(tmp_path.glob("clip-*")) and not (tmp_path / "clips.json").exists()   # clips are topic videos
     assert (tmp_path / "thumbnail.jpg").exists() and report["warnings"] == []
     vtt = (tmp_path / "edited.de.vtt").read_text(encoding="utf-8")
     assert "Wort1." not in vtt and "Wort3." in vtt and "Wort25." not in vtt          # cut words are gone

@@ -65,7 +65,7 @@ def test_the_lecturer_changes_adds_and_approves(tmp_path, monkeypatch):
     assert products.add(folder, 20, 40, "Mitte") == ""
     assert products.approve(folder) == ""
     data = products.load(folder)
-    assert [(x["id"], x["state"], x["source"]) for x in data["products"]] == [("t1", "accepted", "input"),
+    assert [(x["id"], x["state"], x["source"]) for x in data["products"]] == [("t1", "accepted", "piece"),
                                                                             ("t2", "accepted", "lecturer")]
     assert products.change(folder, "t2", {"state": "rejected", "description": "Neu"}) == ""
     data = products.load(folder)
@@ -158,7 +158,23 @@ def test_without_the_switch_nothing_is_proposed(tmp_path, monkeypatch):
         r._process(folder)
     assert not (folder / products.FILE).exists()
     data = products.propose(folder, {})                                 # by hand, from the window
-    assert data["products"] == [] and "keine Folien-Inputs" in data["notes"][0]
+    assert data["products"] == [] and "keine Themenstücke" in data["notes"][0]
+
+
+def test_pieces_of_every_kind_and_the_clips_of_an_old_list_are_proposed(tmp_path, monkeypatch):
+    monkeypatch.setattr(products, "SHORTEST", 10.0)
+    folder = _folder(tmp_path, inputs=[])
+    (folder / "outline.json").write_text(json.dumps({"pieces": [
+        {"start": 2.0, "end": 14.0, "kind": "demo", "title": "Das Werkzeug", "summary": "Vorgeführt."},
+        {"start": 26.0, "end": 38.0, "kind": "example", "title": "Ein Beispiel", "summary": ""}]}), encoding="utf-8")
+    e = edit.load(folder)
+    edit.add(e, edit.item("clip", 3, 13, "", "agent", 0.8, "accepted", title="Doppelt"))      # inside a piece
+    edit.add(e, edit.item("clip", 15, 28, "", "agent", 0.8, "accepted", title="Eigener Clip"))
+    e["approved"] = "2026-11-12T11:00:00+01:00"
+    edit.save(folder, e)
+    data = products.propose(folder, {})
+    assert [(x["title"], x["kind"], x["source"]) for x in data["products"]] == [
+        ("Das Werkzeug", "demo", "piece"), ("Eigener Clip", "clip", "clip"), ("Ein Beispiel", "example", "piece")]
 
 
 def test_the_window_proposes_changes_and_approves_through_the_server(tmp_path, monkeypatch):
@@ -181,3 +197,18 @@ def test_the_window_proposes_changes_and_approves_through_the_server(tmp_path, m
     assert data["approved"] and [x["title"] for x in data["products"]] == ["Abtastung und Quantisierung", "Mitte"]
     from flex3_light_server import my_recordings
     assert {"propose_topics", "change_topic", "add_topic", "approve_topics"} <= set(my_recordings.CALLS)
+
+
+def test_a_block_is_a_video_of_its_own_above_the_videos_of_its_pieces(tmp_path, monkeypatch):
+    monkeypatch.setattr(products, "SHORTEST", 5.0)
+    folder = _folder(tmp_path, inputs=[])
+    (folder / "outline.json").write_text(json.dumps({
+        "pieces": [{"start": 2.0, "end": 12.0, "kind": "lecture", "title": "Teil eins", "summary": ""},
+                   {"start": 12.0, "end": 24.0, "kind": "lecture", "title": "Teil zwei", "summary": ""},
+                   {"start": 28.0, "end": 38.0, "kind": "demo", "title": "Für sich", "summary": ""}],
+        "blocks": [{"start": 2.0, "end": 24.0, "title": "Der ganze Foliensatz", "summary": "Am Stück."}]}),
+        encoding="utf-8")
+    data = products.propose(folder, {})
+    assert [(x["id"], x["title"], x["source"], x.get("parent")) for x in data["products"]] == [
+        ("t1", "Der ganze Foliensatz", "block", None), ("t2", "Teil eins", "piece", "t1"),
+        ("t3", "Teil zwei", "piece", "t1"), ("t4", "Für sich", "piece", None)]

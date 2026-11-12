@@ -223,7 +223,7 @@ class Recordings:
         return folder, ""
 
     def propose_topics(self, sid: str) -> str:
-        """Propose the topic videos (again) from the slide inputs of the outline; replaces earlier proposals."""
+        """Propose the topic videos (again) from the topic pieces of the outline; replaces earlier proposals."""
         folder, error = self._topics_of(sid)
         if error:
             return error

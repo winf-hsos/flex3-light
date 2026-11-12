@@ -90,7 +90,8 @@ def test_staged_cut_works_section_by_section(tmp_path, monkeypatch):
     log = (folder / "edit.log.jsonl").read_text(encoding="utf-8")
     assert "outside your section" in log
     first_close = closing.bodies[0]["input"][0]["content"][0]["text"]
-    assert "Slide inputs (clip candidates): 20-60 Einstieg" in first_close and "x: knapp" in first_close
+    assert "20-60 lecture: Einstieg" in first_close and "x: knapp" in first_close   # an old outline: a talk
+    assert "clip" not in closing.bodies[0]["instructions"].lower().replace("clipped", "")
     assert "1 (0:00:00–0:00:20): Ende: der Einstieg beginnt" in first_close                  # the notes go to the closing
     assert said[0] == "Feinschnitt: 2 Abschnitte, 2 gleichzeitig …" and any("2 von 2 Abschnitten fertig" in t for t in said)
     assert (folder / "edit.agent.json").exists()

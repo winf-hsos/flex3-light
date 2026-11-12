@@ -125,7 +125,7 @@ def _post(url: str, body: dict, headers: dict, timeout: float) -> dict:
                 time.sleep(10 * (attempt + 1))
                 continue
             raise ModelError(f"Das Sprachmodell antwortet mit Fehler {e.code}: {detail}") from None
-        except (urllib.error.URLError, TimeoutError) as e:
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:     # also a socket reset mid-reply
             if attempt < 2:
                 time.sleep(10 * (attempt + 1))
                 continue

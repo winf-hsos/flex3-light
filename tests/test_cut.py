@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -317,7 +318,9 @@ def test_agent_leaves_nothing_open_and_the_summary_has_one_shape(tmp_path):
         assert pause["state"] == "proposed" and any("Noch nicht entschieden" in p for p in b.check())
         b.propose("cut", 5.2, 8.3, "Mikrofontest", 0.9, category="technical")
         b.propose("blur", 20, 30, "Mailadresse im Browser", 0.8, category="privacy", region=[0.1, 0.1, 0.2, 0.05])
-        b.propose("clip", 9, 50, "Steht für sich", 0.7, title="Wie man anfängt")
+        with pytest.raises(ValueError, match="topic pieces"):     # since 2026-11-12 short videos are topic videos
+            b.propose("clip", 9, 50, "Steht für sich", 0.7, title="Wie man anfängt")
+        edit.add(b.edit, edit.item("clip", 9, 50, "Steht für sich", "agent", 0.7, "accepted", title="Wie man anfängt"))
         b.propose("chapter", 0, None, "Beginn", 0.9, title="Einstieg")
         b.set_summary([{"category": "technical", "text": "Ein Mikrofontest am Anfang."},
                        {"category": "nonsense", "text": "x"}], [{"id": pause["id"], "why": "knapp"}],

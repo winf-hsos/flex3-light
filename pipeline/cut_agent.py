@@ -41,8 +41,9 @@ remove false starts, repetitions or slow passages of the teaching itself: a lect
 loses trust. When unsure, propose with low confidence instead of leaving it out; the lecturer decides.
 
 Also propose: chapters with short titles (the first at 0:00, at least three, each at least ten seconds; slide titles
-are good chapter titles), a title and a description of the recording, clips (passages that stand on their own as
-short videos), zooms where screen content is too small to read, the camera layout where it matters, and a thumbnail.
+are good chapter titles), a title and a description of the recording, zooms where screen content is too small to
+read, the camera layout where it matters, and a thumbnail. No clips: the short videos come from the topic pieces of
+the outline, in a step of their own after the approval.
 
 Work from coarse to fine: read the transcript and the rule proposals, get the structure and chapters, then check
 edges and pauses, then privacy (programs in front, what is on screen, quiet voices from the room: compare loudness
@@ -93,6 +94,9 @@ def _tool(name: str, description: str, properties: dict, required: list[str]) ->
 T = {"type": "number"}
 S = {"type": "string"}
 TRACK = {"type": "string", "enum": ["program", "screen", "camera"]}
+# clips are no longer proposed (2026-11-12): the topic videos come from the outline's topic pieces
+AGENT_KINDS = [k for k in edit.KINDS if k != "clip"]
+
 TOOLS = [
     _tool("get_words", "Words with start time, confidence and, if known, speaker, between two times.",
           {"start": T, "end": T}, ["start", "end"]),
@@ -120,11 +124,11 @@ TOOLS = [
           ["start", "end"]),
     _tool("get_activity", "Programs and window titles in front, and privacy-key spans, in a span.",
           {"start": T, "end": T}, ["start", "end"]),
-    _tool("propose", "Add a proposal to the edit list. Kinds: " + ", ".join(edit.KINDS) + ". chapter and thumbnail "
+    _tool("propose", "Add a proposal to the edit list. Kinds: " + ", ".join(AGENT_KINDS) + ". chapter and thumbnail "
           "take only start (end null). params by kind: pause {mode: card|shorten|cut}, blur/zoom {region: [x, y, w, h] "
-          "as fractions of the frame}, layout {camera: big|small|hidden}, chapter/clip {title, summary}, lower_third "
+          "as fractions of the frame}, layout {camera: big|small|hidden}, chapter {title, summary}, lower_third "
           "{text}, thumbnail {track}.",
-          {"kind": {"type": "string", "enum": list(edit.KINDS)}, "start": T, "end": {"type": ["number", "null"]},
+          {"kind": {"type": "string", "enum": AGENT_KINDS}, "start": T, "end": {"type": ["number", "null"]},
            "reason": S, "confidence": {"type": "number", "description": "0 to 1"},
            "params": {"type": "object", "description": "kind-specific, see above"},
            "replaces": {"type": "array", "items": S, "description": "ids of rule proposals this one stands in for"},

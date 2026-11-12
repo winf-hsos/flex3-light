@@ -4,7 +4,7 @@ Into the session folder (names proposed for the FLEX3 contract, docs/pipeline.md
   edited.mp4                the long version
   edited.<language>.vtt     its subtitles, from the word times moved along with the cut
   chapters.json             chapters in the edited video, with the lines for a YouTube description
-  clip-01.mp4 ...           the accepted clips, with clip-01.<language>.vtt, listed in clips.json
+  (clips are no longer rendered here since 2026-11-12: they are topic videos, products.py)
   thumbnail.jpg             the accepted thumbnail, 1280 x 720
   render.json               what was rendered from which list, and what could not be done
 
@@ -513,30 +513,9 @@ def run(folder: Path, video_args: list[str] | None = None,
         chs = timeline.chapters(e, p, ins)
         files.write_json(folder / "chapters.json", {"chapters": chs, "youtube": timeline.youtube_chapters(chs)})
         written.append("chapters.json")
-        # clips, cut from the long version, so that they carry everything done to it
-        for old in folder.glob("clip-*.*"):
+        # the clips of a render from before 2026-11-12 go: short videos are topic videos now (products.py)
+        for old in [*folder.glob("clip-*.*"), folder / "clips.json"]:
             old.unlink(missing_ok=True)
-        clips = []
-        accepted_clips = sorted((x for x in e["items"] if x["kind"] == "clip" and x["state"] == "accepted"),
-                                key=lambda x: x["start"])
-        for i, x in enumerate(accepted_clips, 1):
-            a = timeline.shift(timeline.map_forward(x["start"], p), ins)
-            b = timeline.shift(timeline.map_forward(x["end"], p), ins)
-            if b - a < 3:
-                warnings.append(f"{x['id']}: Clip nach dem Schnitt kürzer als drei Sekunden, ausgelassen")
-                continue
-            name = f"clip-{i:02d}"
-            say(f"Teilvideo {i} von {len(accepted_clips)} wird gerendert …")
-            _run(["-ss", f"{a:.3f}", "-i", str(folder / "edited.mp4"), "-t", f"{b - a:.3f}", *video_args,
-                  "-c:a", "aac", "-b:a", "160k", str(folder / f"{name}.mp4")], b - a, None)
-            if transcript:
-                (folder / f"{name}.{language}.vtt").write_text(
-                    timeline.vtt(timeline.words(transcript, p, a, b, ins)), encoding="utf-8")
-            clips.append({"file": f"{name}.mp4", "title": x["params"].get("title", ""),
-                          "summary": x["params"].get("summary", ""), "start": a, "end": b,
-                          "source_start": x["start"], "source_end": x["end"]})
-            written.append(f"{name}.mp4")
-        files.write_json(folder / "clips.json", {"clips": clips})
         thumb = next((x for x in e["items"] if x["kind"] == "thumbnail" and x["state"] == "accepted"), None)
         if thumb:
             t = timeline.shift(timeline.map_forward(thumb["start"], p), ins)
@@ -550,7 +529,7 @@ def run(folder: Path, video_args: list[str] | None = None,
                   "signature": signature(e), "approved": e.get("approved"), "duration": final_duration,
                   "style": styles.fingerprint(s), "style_name": s["name"],
                   "cards": [{"kind": o["kind"], "title": o["title"]} for o in ins],
-                  "source_duration": e["duration"], "files": written, "clips": len(clips),
+                  "source_duration": e["duration"], "files": written,
                   "chapters": len(chs), "warnings": warnings, "encoder": video_args[1]}
         files.write_json(folder / "render.json", report)
         return report

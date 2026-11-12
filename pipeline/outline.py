@@ -7,8 +7,13 @@ tool call, three things in seconds of the recording:
 - phases that cover the whole recording without gaps: input, demo, exercise, discussion,
   organisation, break, technical, idle;
 - topics: the chapters of the long version, each a span of teaching on one subject;
-- slide inputs: spans where the lecturer teaches with slides, with start and end, so that each
-  can later become a video of its own (stage G).
+- topic pieces: spans in which the lecturer treats one subject so that it stands on its own, as a
+  talk, a demo of software or a worked example, so that each can become a topic video of its own
+  (stage G, products.py). Until 2026-11-12 these were "slide inputs" (talks with slides only); an
+  outline.json from before is read with its inputs as pieces of the kind lecture (pieces());
+- topic blocks: the larger units above the pieces, a talk through one slide deck or a demo of one
+  program over several pieces, so that the whole stays one video next to its pieces (since
+  2026-11-12, Nicolas: a hierarchy of topic videos).
 
 The program checks what comes back (order, bounds, at least three topics of at least ten seconds)
 and gives the model its mistakes to correct; boundaries snap to the start or end of the nearest
@@ -25,15 +30,17 @@ from typing import Callable
 
 from . import files, llm
 
-VERSION = 1
+VERSION = 3                  # 2: topic pieces of any kind instead of slide inputs, 3: topic blocks (2026-11-12)
 SNAP = 15.0                  # seconds a boundary may move to the start or end of a sentence
 SHORTEST_PHASE = 5.0         # shorter phases go into the one before
 SHORTEST_TOPIC = 10.0
-SHORTEST_INPUT = 90.0       # a slide input is a video of its own later, not a single slide
+SHORTEST_PIECE = 90.0       # a topic piece is a video of its own later, not a single slide
+SHORTEST_BLOCK = 180.0      # a block holds at least two pieces
 ROUNDS = 4                   # tries to get a valid outline before taking what is valid of the last
 
 KINDS = {"input": "Input", "demo": "Demo", "exercise": "Übung", "discussion": "Diskussion",
          "organisation": "Organisatorisches", "break": "Pause", "technical": "Technik", "idle": "Leerlauf"}
+PIECE_KINDS = {"lecture": "Vortrag", "demo": "Demo", "example": "Beispiel"}
 LANGUAGES = {"de": "German", "en": "English"}
 
 INSTRUCTIONS = """You outline a lecture recording at a university of applied sciences, before it is cut. You get an
@@ -56,13 +63,24 @@ start and end: at least three, each at least ten seconds; idle, breaks, technica
 topic. A topic can span an input, a demo and an exercise on the same subject. Title in about five words and a
 summary in one or two sentences, both in the language of the lecture ({language}); slide titles are good titles.
 
-inputs: every slide input, that is a continuous stretch where the lecturer presents a subject with slides (a
-presentation in front, slide titles changing, the lecturer speaking continuously), from the sentence that opens the
-subject to the sentence that closes it, before a demo, an exercise or another subject begins. Each input may later
-become a short video of its own, so it must make sense alone and is several minutes long as a rule, at least 90
-seconds: neighbouring passages on the same subject form one input, not one per slide. Going through a quiz or
-questions with the room is discussion, not an input, even with slides and explanations in between. Title and summary
-in the language of the lecture. No inputs if there are none.
+pieces: every topic piece, that is a continuous stretch in which the lecturer treats one subject so that it can be
+understood without the rest of the session, whatever is on screen: a talk with slides or at the board (kind lecture),
+introducing or showing software, a tool or a website, or coding live (kind demo), working through an example or a task
+in front of the room (kind example). From the sentence that opens the subject to the sentence that closes it. Each
+piece may become a short video of its own, so it must make sense alone and is several minutes long as a rule, at least
+90 seconds: neighbouring passages on the same subject form one piece, not one per slide or step; a talk that leads
+straight into a demo of the same subject, where neither makes sense without the other, is one piece of the kind that
+takes most of its time. No pieces: organisation, waiting, breaks, technical trouble, stretches where the students work
+by themselves, going through a quiz or collecting answers from the room. Pieces do not overlap and need not cover the
+recording. Title and summary in the language of the lecture. No pieces if there are none.
+
+blocks: the larger units above the pieces, so that a whole talk stays one video next to its pieces: a stretch in
+which the lecturer goes through the same slide deck, or shows the same program step by step, over two or more topic
+pieces, from the sentence that opens the first of them to the one that closes the last. A block contains its pieces
+completely; a short round of questions, a short exercise or a break in between belongs to it if the same deck or
+program goes on after it (the cut removes what is not worth keeping). Blocks do not overlap; a piece that belongs to
+no larger unit has no block. Title and summary in the language of the lecture; the title of the slide deck is a good
+title. No blocks if no deck or program carries several pieces.
 
 summary: two or three sentences in {ui_language} for the lecturer on how the session went, as phases and topics.
 
@@ -71,14 +89,17 @@ or end of a sentence by themselves. If set_outline reports problems, fix them an
 
 T = {"type": "number"}
 S = {"type": "string"}
-TOOL = llm.Tool("set_outline", "The outline of the recording: phases, topics, slide inputs and a summary.", {
-    "type": "object", "additionalProperties": False, "required": ["phases", "topics", "inputs", "summary"],
+TOOL = llm.Tool("set_outline", "The outline of the recording: phases, topics, topic pieces, blocks and a summary.", {
+    "type": "object", "additionalProperties": False, "required": ["phases", "topics", "pieces", "blocks", "summary"],
     "properties": {
         "phases": {"type": "array", "items": {"type": "object", "required": ["start", "kind", "title"], "properties": {
             "start": T, "kind": {"type": "string", "enum": list(KINDS)}, "title": S, "note": S}}},
         "topics": {"type": "array", "items": {"type": "object", "required": ["start", "end", "title", "summary"],
                                               "properties": {"start": T, "end": T, "title": S, "summary": S}}},
-        "inputs": {"type": "array", "items": {"type": "object", "required": ["start", "end", "title", "summary"],
+        "pieces": {"type": "array", "items": {"type": "object", "required": ["start", "end", "kind", "title", "summary"],
+                                              "properties": {"start": T, "end": T, "title": S, "summary": S,
+                                                             "kind": {"type": "string", "enum": list(PIECE_KINDS)}}}},
+        "blocks": {"type": "array", "items": {"type": "object", "required": ["start", "end", "title", "summary"],
                                               "properties": {"start": T, "end": T, "title": S, "summary": S}}},
         "summary": S}})
 
@@ -90,6 +111,41 @@ def _clock(t: float) -> str:
 
 def load(folder: Path) -> dict:
     return files.read_json(Path(folder) / "outline.json")
+
+
+def pieces(o: dict) -> list[dict]:
+    """The topic pieces of an outline; one from before 2026-11-12 had slide inputs, read as talks."""
+    if "pieces" in o:
+        return o.get("pieces") or []
+    return [{**x, "kind": "lecture"} for x in o.get("inputs") or []]
+
+
+def blocks(o: dict) -> list[dict]:
+    """The topic blocks of an outline; one from before had none."""
+    return o.get("blocks") or []
+
+
+def inside(x: dict, block: dict) -> bool:
+    """Whether span x (a piece, a clip) lies in the block, by more than half of its length."""
+    return max(0.0, min(x["end"], block["end"]) - max(x["start"], block["start"])) > 0.5 * (x["end"] - x["start"])
+
+
+def _blocks(raw: list, found: list[dict], duration: float, starts: list[float], ends: list[float],
+            errors: list[str]) -> list[dict]:
+    """The blocks, each grown to hold its pieces whole; a block needs two pieces and must not overlap another."""
+    out = []
+    for x in _spans(raw, "block", SHORTEST_BLOCK, duration, starts, ends, errors):
+        held = [p for p in found if inside(p, x)]
+        if len(held) < 2:
+            errors.append(f"block ({x['title']}, {_clock(x['start'])}–{_clock(x['end'])}): holds {len(held)} piece(s), "
+                          "a block needs two or more; leave it out or give it the pieces it holds")
+            continue
+        x["start"], x["end"] = min(x["start"], held[0]["start"]), max(x["end"], held[-1]["end"])
+        if out and x["start"] < out[-1]["end"]:
+            errors.append(f"block ({x['title']}) overlaps the block before ({out[-1]['title']}) once it holds its pieces")
+            continue
+        out.append(x)
+    return out
 
 
 def current(folder: Path) -> bool:
@@ -137,7 +193,7 @@ def _snap(t: float, marks: list[float]) -> float:
 
 
 def _spans(raw: list, name: str, shortest: float, duration: float, starts: list[float], ends: list[float],
-           errors: list[str]) -> list[dict]:
+           errors: list[str], kinds: dict | None = None) -> list[dict]:
     out, given_end = [], 0.0                      # overlaps count in the model's own times, before snapping
     for i, x in enumerate(sorted(raw or [], key=lambda x: float(x.get("start", 0)))):
         try:
@@ -148,6 +204,9 @@ def _spans(raw: list, name: str, shortest: float, duration: float, starts: list[
         title = str(x.get("title") or "").strip()
         if not title:
             errors.append(f"{name} {i + 1} at {_clock(a)}: title missing")
+        if kinds is not None and x.get("kind") not in kinds:
+            errors.append(f"{name} {i + 1} ({title}): unknown kind {x.get('kind')!r}, one of {', '.join(kinds)}")
+            continue
         a, b = max(0.0, min(a, duration)), max(0.0, min(b, duration))
         if out and a < given_end - 0.5:
             errors.append(f"{name} {i + 1} ({title}, starts {_clock(a)}) overlaps the one before "
@@ -162,7 +221,7 @@ def _spans(raw: list, name: str, shortest: float, duration: float, starts: list[
             continue
         given_end = given
         out.append({"start": round(a, 2), "end": round(b, 2), "title": title,
-                    "summary": str(x.get("summary") or "").strip()})
+                    "summary": str(x.get("summary") or "").strip(), **({"kind": x["kind"]} if kinds else {})})
     return out
 
 
@@ -192,8 +251,9 @@ def check(raw: dict, duration: float, segments: list[dict]) -> tuple[dict, list[
     topics = _spans(raw.get("topics"), "topic", SHORTEST_TOPIC, duration, starts, ends, errors)
     if len(topics) < 3 and duration >= 600:
         errors.append(f"topics: {len(topics)}, at least three are needed")
-    inputs = _spans(raw.get("inputs"), "input", SHORTEST_INPUT, duration, starts, ends, errors)
-    return {"phases": phases, "topics": topics, "inputs": inputs,
+    found = _spans(raw.get("pieces"), "piece", SHORTEST_PIECE, duration, starts, ends, errors, PIECE_KINDS)
+    grouped = _blocks(raw.get("blocks"), found, duration, starts, ends, errors)
+    return {"phases": phases, "topics": topics, "pieces": found, "blocks": grouped,
             "summary": str(raw.get("summary") or "").strip()}, errors
 
 
@@ -251,7 +311,7 @@ def run(folder: Path, key, settings: dict | None = None, progress: Callable[[str
                "agent": {**agent, "rounds": rounds, "seconds": round(time.monotonic() - started, 1), "usage": usage.as_dict()}}
         files.write_json(folder / "outline.json", out)
         return out
-    for x in result["inputs"]:
+    for x in result["pieces"] + result["blocks"]:
         x["slides"] = _slides(overview, x["start"], x["end"])
     out = {"version": VERSION, "created": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
            "duration": round(duration, 1), "language": language, **result,
@@ -274,7 +334,12 @@ def lines(folder: Path) -> str:
              for p in o.get("phases", [])]
     rows.append("Topics:")
     rows += [f"  {t['start']:.0f}-{t['end']:.0f} {t['title']}: {t['summary']}" for t in o.get("topics", [])]
-    if o.get("inputs"):
-        rows.append("Slide inputs (candidates for short videos):")
-        rows += [f"  {x['start']:.0f}-{x['end']:.0f} {x['title']}" for x in o["inputs"]]
+    if pieces(o):
+        rows.append("Topic pieces (they become topic videos of their own after the approval; a cut should not tear one "
+                    "apart where it can be avoided):")
+        rows += [f"  {x['start']:.0f}-{x['end']:.0f} {x['kind']}: {x['title']}" for x in pieces(o)]
+    if blocks(o):
+        rows.append("Topic blocks (a talk through one slide deck or a demo of one program over several pieces; each "
+                    "becomes a topic video of its own as well):")
+        rows += [f"  {x['start']:.0f}-{x['end']:.0f} {x['title']}" for x in blocks(o)]
     return "\n".join(rows)

@@ -93,8 +93,6 @@ The fine cut is done, section by section. You see the whole edit list, the outli
 Now:
 - set_metadata: a title of one line of about eight words and a description for the video platforms, in the language
   of the lecture; the title appears on the title card.
-- clips: propose a clip (params title, summary) for every passage that stands on its own as a short video, above all
-  the slide inputs of the outline that stay largely intact; a clip spans what remains of the passage.
 - a thumbnail at a moment with a clear, telling picture (look at it first).
 - borders between sections: two cuts that touch or a remnant too short to keep between them, merge or adjust them.
 - call check_edit and fix what it reports.
@@ -320,12 +318,9 @@ class StagedCut(CutAgent):
 
     def _closing_message(self, plan: dict) -> str:
         b_ = self.bench
-        inputs = plan.get("inputs", [])
         return "\n\n".join([
             "Recording: " + as_json(b_.overview()),
             outline.lines(b_.folder) or "No outline of the recording.",
-            ("Slide inputs (clip candidates): " + "; ".join(f"{x['start']:.0f}-{x['end']:.0f} {x['title']}" for x in inputs))
-            if inputs else "No slide inputs.",
             "Notes of the sections:\n" + ("\n".join(f"{n['section']}: {n['note']}" for n in self.notes if n["note"]) or "none"),
             "Worth a look, from the sections:\n" + "\n".join(f"{c['id']}: {c.get('why', '')}" for c in self.checks)
             if self.checks else "The sections marked nothing worth a look.",

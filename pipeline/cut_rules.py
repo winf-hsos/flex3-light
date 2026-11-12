@@ -32,7 +32,7 @@ MERGE_GAP = 2.0                      # spans of the same rule closer than this b
 
 CARD_DEFAULTS = {"title_card": True, "closing_card": True, "chapter_display": "card", "chapter_sound": True,
                  "music": True,
-                 "topic_videos": "propose"}   # off, propose or auto: the videos of the slide inputs (products.py)
+                 "topic_videos": "propose"}   # off, propose or auto: the videos of the topic pieces (products.py)
 AFTER_RECORDING = ("nothing", "transcribe", "cut")   # what starts by itself once a recording is filed
 
 

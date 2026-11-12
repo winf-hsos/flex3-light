@@ -237,6 +237,8 @@ class Workbench:
         replaces: ids of rule proposals this one stands in for; category: why something is removed."""
         if kind in self.kinds_off:
             raise ValueError(f"the lecturer switched {kind} off; do not propose it")
+        if kind == "clip":
+            raise ValueError("clips are not proposed any more; the topic videos come from the topic pieces of the outline")
         if kind not in edit.SPANLESS:
             start, end = edit.snap(start, self.words), edit.snap(end, self.words)
         start, end = self._bounds(kind, start, end)

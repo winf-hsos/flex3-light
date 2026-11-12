@@ -361,6 +361,9 @@
   .topic .cut-text p { margin: 2px 0 0; font-size: 12.5px; color: var(--slate); max-width: 72ch; }
   .topic-tag { font-size: 11px; font-weight: 600; color: var(--deep); background: var(--sky); border-radius: 4px; padding: 1px 6px; }
   .outline-inputs summary { cursor: pointer; font-size: 12.5px; color: var(--slate); padding: 4px 0; }
+  .outline-inputs .topic.nested { margin-left: 22px; }
+  .tv.child { margin-left: 26px; }
+  .tv.block .tv-title { font-size: 13.5px; }
   .cut-foot .hint { flex: 1; }
   .station.review .no { border-color: var(--amber); color: #8a6200; background: var(--amber-soft); }
   .station.review small { color: #8a6200; font-weight: 600; }
@@ -658,7 +661,7 @@
             <div class="setting-row"><span>Kapitel</span><select id="cut_chapter_display" onchange="saveCutSettings()"><option value="card">als Tafel</option><option value="lower_third">als Bauchbinde</option><option value="none">ohne Einblendung</option></select></div>
             <label class="toggle"><input type="checkbox" id="cut_chapter_sound" onchange="saveCutSettings()"><span class="knob"></span><span><b>Wisch-Geräusch bei Kapiteln</b><small>Ein kurzer, leiser Klang zur Kapiteltafel.</small></span></label>
             <div class="setting-row"><span>Themenvideos</span><select id="cut_topic_videos" onchange="saveCutSettings()"><option value="propose">vorschlagen, ich gebe frei</option><option value="auto">vorschlagen und gleich rendern</option><option value="off">nicht vorschlagen</option></select></div>
-            <div class="section-note">Aus jedem Folien-Input einer Vorlesung kann ein eigenes kurzes Video werden, mit eigener Titeltafel und allem, was in der Langfassung geschnitten, stumm oder verpixelt ist.</div>
+            <div class="section-note">Aus jedem Themenstück einer Vorlesung (ein Vortrag, die Vorführung einer Software, ein durchgerechnetes Beispiel) kann ein eigenes kurzes Video werden, und ein Vortrag über mehrere Stücke zum selben Foliensatz bleibt zusätzlich als ein Video erhalten, mit eigener Titeltafel und allem, was in der Langfassung geschnitten, stumm oder verpixelt ist.</div>
             <label class="toggle"><input type="checkbox" id="cut_music" onchange="saveCutSettings()"><span class="knob"></span><span><b>Musik zu Titel und Abspann</b><small id="soundState">Kurze Klänge, einmal mit ElevenLabs erzeugt.</small></span></label>
             <div class="setting-row"><span>Lange Pausen</span><select id="cut_pause_mode" onchange="saveCutSettings()"><option value="card">mit Tafel „Pause entfernt“ schneiden</option><option value="shorten">auf zwei Sekunden kürzen</option><option value="cut">ohne Hinweis schneiden</option></select></div>
             <div class="cut-group"><h3>Was der Schnitt-Agent vorschlagen darf</h3><div class="kinds" id="cutKinds"></div>
@@ -1326,7 +1329,7 @@
                      zoom: "Zoom", layout: "Layout", chapter: "Kapitel", clip: "Clip", lower_third: "Bauchbinde",
                      thumbnail: "Vorschaubild"};
   const CUT_TABS = [["cuts", "Schnitte", ["cut", "pause", "mute", "freeze", "blur"]], ["chapters", "Kapitel", ["chapter"]],
-                    ["more", "Weitere", ["zoom", "layout", "clip", "lower_third", "thumbnail"]]];
+                    ["more", "Weitere", ["zoom", "layout", "lower_third", "thumbnail"]]];   // clips: topic videos
   const PAUSE_MODES = {card: "Tafel „Pause entfernt“", shorten: "auf zwei Sekunden kürzen", cut: "ohne Hinweis schneiden"};
   const SOURCE_TEXT = {rule: "Regel", agent: "Schnitt-Agent", lecturer: "von dir"};
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -1483,7 +1486,7 @@
     }
   }
 
-  // the outline of stage C: the course of the session as phases, the topics (chapters) and the slide inputs
+  // the outline of stage C: the course of the session as phases, the topics (chapters) and the topic pieces
   const PHASE_ORDER = ["input", "demo", "exercise", "discussion", "organisation", "break", "technical", "idle"];
   function outlineBlock(o) {
     const g = el("div", "outline");
@@ -1495,9 +1498,10 @@
                                           + " Der nächste Vorschlag versucht es erneut."));
       return g;
     }
-    const phases = o.phases || [], topics = o.topics || [], inputs = o.inputs || [];
+    const phases = o.phases || [], topics = o.topics || [], pieces = o.pieces || [], blocks = o.blocks || [];
     head.appendChild(el("span", "hint", [`${phases.length} Phasen`, `${topics.length} Themen`,
-      inputs.length ? `${inputs.length} ${inputs.length === 1 ? "Folien-Input" : "Folien-Inputs"}` : "keine Folien-Inputs"].join(", ")));
+      pieces.length ? `${pieces.length} ${pieces.length === 1 ? "Themenstück" : "Themenstücke"}` : "keine Themenstücke",
+      ...(blocks.length ? [`${blocks.length} ${blocks.length === 1 ? "Themenblock" : "Themenblöcke"}`] : [])].join(", ")));
     if (o.summary) g.appendChild(el("p", "outline-sum", o.summary));
     const dur = o.duration || (phases.length ? phases[phases.length - 1].end : 1) || 1;
     const bar = el("div", "phasebar");
@@ -1520,8 +1524,8 @@
     }
     g.appendChild(legend);
     const overlap = (a, b) => Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start));
-    const row = (x, tag) => {
-      const r = el("div", "topic" + (tag ? " input" : ""));
+    const row = (x, tag, nested) => {
+      const r = el("div", "topic" + (tag ? " input" : "") + (nested ? " nested" : ""));
       const go = button("round", "", () => { const v = $("player"); v.currentTime = x.start; v.play(); }, "Ab hier abspielen");
       go.innerHTML = '<svg class="i"><use href="#i-play"/></svg>';
       const t = el("div", "cut-text");
@@ -1534,15 +1538,25 @@
       return r;
     };
     for (const x of topics) {
-      const isInput = inputs.some(i => overlap(i, x) > 0.5 * (x.end - x.start));
-      g.appendChild(row(x, isInput ? "Folien-Input" : ""));
+      const piece = pieces.find(i => overlap(i, x) > 0.5 * (x.end - x.start));
+      g.appendChild(row(x, piece ? "Themenstück: " + piece.label : ""));
     }
-    if (inputs.length) {
+    if (pieces.length) {
       const det = el("details", "outline-inputs");
-      det.appendChild(el("summary", "", `Folien-Inputs (${inputs.length}), daraus können später eigene Videos werden`));
-      for (const x of inputs) {
-        const n = new Set((x.slides || []).map(s => s.title)).size;
-        det.appendChild(row(x, n ? `${n} ${n === 1 ? "Folie" : "Folien"}` : ""));
+      det.appendChild(el("summary", "", (blocks.length ? `Themenblöcke (${blocks.length}) und ` : "")
+        + `Themenstücke (${pieces.length}), daraus werden nach der Freigabe eigene Videos`));
+      const slides = x => { const n = new Set((x.slides || []).map(s => s.title)).size;
+                            return n ? `${n} ${n === 1 ? "Folie" : "Folien"}` : ""; };
+      const within = (x, b) => overlap(x, b) > 0.5 * (x.end - x.start);
+      const items = [...blocks.map(b => ({...b, block: true})), ...pieces]
+        .sort((a, b) => a.start - b.start || (b.block ? 1 : 0) - (a.block ? 1 : 0));
+      for (const x of items) {
+        if (x.block) {
+          const n = pieces.filter(p => within(p, x)).length;
+          det.appendChild(row(x, ["Themenblock", `${n} Stücke`, slides(x)].filter(Boolean).join(", ")));
+        } else {
+          det.appendChild(row(x, [x.label, slides(x)].filter(Boolean).join(", "), blocks.some(b => within(x, b))));
+        }
       }
       g.appendChild(det);
     }
@@ -1662,14 +1676,14 @@
     for (const w of made.warnings || []) g.appendChild(el("div", "hint error", w));
     return g;
   }
-  // stage G: the topic videos of the slide inputs, approved in a second, short step after the long version
+  // stage G: the topic videos of the topic pieces, approved in a second, short step after the long version
   function topicsBlock(t, e) {
     const g = el("div", "topics");
     g.appendChild(el("h3", "", "Themenvideos"));
     const off = (cutSettings.topic_videos || "propose") === "off";
     if (!t.proposed) {
       g.appendChild(el("p", "hint", off
-        ? "Aus den Folien-Inputs dieser Vorlesung können eigene kurze Videos werden. In deinen Einstellungen schlägt FLEX3 Light sie nicht von selbst vor."
+        ? "Aus den Themenstücken dieser Vorlesung können eigene kurze Videos werden. In deinen Einstellungen schlägt FLEX3 Light sie nicht von selbst vor."
         : "Die Themenvideos werden gleich vorgeschlagen."));
       g.appendChild(button("btn", "Themenvideos vorschlagen", proposeTopics));
       return g;
@@ -1677,7 +1691,8 @@
     for (const n of t.notes || []) g.appendChild(el("p", "hint", n));
     const done = Object.fromEntries((t.videos || []).map(v => [v.id, v]));
     for (const x of t.products) {
-      const row = el("div", "tv" + (x.state === "rejected" ? " off" : ""));
+      const row = el("div", "tv" + (x.state === "rejected" ? " off" : "") + (x.parent ? " child" : "")
+                            + (x.kind === "block" ? " block" : ""));
       const cb = el("input"); cb.type = "checkbox"; cb.checked = x.state !== "rejected";
       cb.title = "Dieses Themenvideo machen";
       cb.onchange = () => changeTopic(x.id, {state: cb.checked ? "accepted" : "rejected"});
@@ -1687,8 +1702,11 @@
       const desc = el("textarea", "tv-desc"); desc.rows = 2; desc.value = x.description || "";
       desc.placeholder = "Beschreibung"; desc.setAttribute("aria-label", "Beschreibung");
       desc.onchange = () => changeTopic(x.id, {description: desc.value});
-      body.append(title, el("span", "hint tabular", `${fmtClock(x.start)}–${fmtClock(x.end)} der Aufnahme, `
-        + `nach dem Schnitt ${fmtLength(x.kept)}` + (x.source === "lecturer" ? ", von dir hinzugefügt" : "")), desc);
+      const parts = t.products.filter(y => y.parent === x.id).length;
+      const origin = x.source === "lecturer" ? "von dir hinzugefügt"
+        : x.kind === "block" ? `Themenblock mit ${parts} ${parts === 1 ? "Teil" : "Teilen"}` : PIECE_LABELS[x.kind] || "";
+      body.append(title, el("span", "hint tabular", (origin ? origin + ", " : "") + `${fmtClock(x.start)}–${fmtClock(x.end)} der Aufnahme, `
+        + `nach dem Schnitt ${fmtLength(x.kept)}`), desc);
       const v = done[x.id];
       const look = v ? button("btn", playing === v.file ? "Läuft im Player" : "Ansehen", () => play(v.file))
                      : button("link", "Anfang ansehen", async () => {
@@ -1727,13 +1745,14 @@
     }
     foot.appendChild(button("link", "Neu vorschlagen", async () => {
       if (await ask({title: "Themenvideos neu vorschlagen?", confirm: "Neu vorschlagen",
-                     text: "Die Vorschläge entstehen neu aus den Folien-Inputs der Gliederung; deine Titel, Beschreibungen und hinzugefügten Kapitel gehen dabei verloren."}))
+                     text: "Die Vorschläge entstehen neu aus den Themenstücken der Gliederung; deine Titel, Beschreibungen und hinzugefügten Kapitel gehen dabei verloren."}))
         proposeTopics();
     }));
     g.appendChild(foot);
     for (const w of t.warnings || []) g.appendChild(el("div", "hint error", w));
     return g;
   }
+  const PIECE_LABELS = {lecture: "Vortrag", demo: "Demo", example: "Beispiel", clip: "Clip des Schnitt-Agenten"};
   const proposeTopics = async () => cutResult(await api().propose_topics(selectedId));
   const changeTopic = async (id, changes) => cutResult(await api().change_topic(selectedId, id, changes));
   const approveTopics = async approved => cutResult(await api().approve_topics(selectedId, approved));

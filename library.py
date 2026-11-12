@@ -146,7 +146,9 @@ def cut_view(folder: Path) -> dict:
     plan = _read(folder / "outline.json")
     if plan:
         view["outline"] = plan if plan.get("error") else {
-            **{k: plan.get(k) for k in ("duration", "summary", "topics", "inputs", "problems", "created")},
+            **{k: plan.get(k) for k in ("duration", "summary", "topics", "problems", "created")},
+            "pieces": [{**x, "label": outline.PIECE_KINDS.get(x["kind"], x["kind"])} for x in outline.pieces(plan)],
+            "blocks": outline.blocks(plan),
             "phases": [{**p, "label": outline.KINDS.get(p["kind"], p["kind"])} for p in plan.get("phases", [])]}
     e = _read(folder / "edit.json")
     if e:

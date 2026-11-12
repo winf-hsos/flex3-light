@@ -39,7 +39,8 @@ GOOD = {"phases": [{"start": 3, "kind": "idle", "title": "Ankommen"},
         "topics": [{"start": 295, "end": 600, "title": "Was ist digital?", "summary": "Begriff."},
                    {"start": 600, "end": 896, "title": "Analog und digital", "summary": "Vergleich."},
                    {"start": 1495, "end": 1790, "title": "Zum Schluss", "summary": "Rückblick."}],
-        "inputs": [{"start": 295, "end": 896, "title": "Digital und analog", "summary": "Der Input."}],
+        "pieces": [{"start": 295, "end": 896, "kind": "lecture", "title": "Digital und analog", "summary": "Der Input."},
+                   {"start": 1495, "end": 1790, "kind": "demo", "title": "Das Werkzeug", "summary": "Vorgeführt."}],
         "summary": "Erst Folien, dann eine Übung."}
 
 
@@ -52,7 +53,17 @@ def test_check_snaps_to_sentences_and_covers_the_recording():
     assert all(p["end"] == q["start"] for p, q in zip(phases, phases[1:]))      # no gaps
     assert phases[1]["start"] == 280.0                                          # snapped to a sentence start
     assert result["topics"][0]["start"] == 280.0 and result["topics"][1]["end"] == 905.0   # to a sentence end
-    assert result["inputs"][0]["title"] == "Digital und analog"
+    assert [(x["title"], x["kind"]) for x in result["pieces"]] == [("Digital und analog", "lecture"),
+                                                                  ("Das Werkzeug", "demo")]
+
+
+def test_a_piece_needs_a_known_kind_and_old_slide_inputs_are_talks():
+    raw = {**GOOD, "pieces": [{**GOOD["pieces"][0], "kind": "quiz"}]}
+    result, errors = outline.check(raw, DURATION, SEGMENTS)
+    assert result["pieces"] == [] and "unknown kind 'quiz'" in errors[0]
+    old = {"inputs": [{"start": 1.0, "end": 100.0, "title": "Alt", "summary": ""}]}
+    assert outline.pieces(old) == [{"start": 1.0, "end": 100.0, "title": "Alt", "summary": "", "kind": "lecture"}]
+    assert outline.pieces({"pieces": [], "inputs": old["inputs"]}) == []
 
 
 def test_touching_topics_that_snap_past_each_other_are_no_overlap():
@@ -114,7 +125,7 @@ def test_run_corrects_and_writes_the_outline(tmp_path):
     assert result["agent"]["rounds"] == 2 and result["agent"]["usage"]["input_tokens"] == 2000
     assert any("at least three" in e for e in result["agent"]["corrections"][0])
     assert len(result["topics"]) == 3 and result["problems"] == []
-    assert [s["title"] for s in result["inputs"][0]["slides"]] == ["Was ist digital?", "Analog und digital"]
+    assert [s["title"] for s in result["pieces"][0]["slides"]] == ["Was ist digital?", "Analog und digital"]
     second = model.bodies[1]
     assert second["previous_response_id"] == "r1"                       # only the correction goes up again
     assert "at least three" in second["input"][0]["output"]
@@ -122,7 +133,8 @@ def test_run_corrects_and_writes_the_outline(tmp_path):
     assert "German" in model.bodies[0]["instructions"]
     assert outline.current(folder) and said[0].startswith("Gliederung")
     text = outline.lines(folder)
-    assert "610-905 Analog und digital: Vergleich." in text and "Topics:" in text and "Slide inputs" in text
+    assert "610-905 Analog und digital: Vergleich." in text and "Topics:" in text
+    assert "Topic pieces" in text and "demo: Das Werkzeug" in text
 
 
 def test_a_failing_model_leaves_an_error_and_the_next_proposal_tries_again(tmp_path):
@@ -156,3 +168,19 @@ def test_agent_and_approval_see_the_outline(tmp_path):
     edit.save(folder, edit.new(60))
     view = library.cut_view(folder)
     assert view["outline"]["phases"][0]["label"] == "Input" and view["outline"]["topics"][0]["title"] == "Einstieg"
+
+
+def test_a_block_holds_two_pieces_or_more_and_grows_to_hold_them_whole():
+    two = [{"start": 295, "end": 600, "kind": "lecture", "title": "Was ist digital?", "summary": ""},
+           {"start": 600, "end": 896, "kind": "lecture", "title": "Analog und digital", "summary": ""},
+           {"start": 1495, "end": 1790, "kind": "demo", "title": "Das Werkzeug", "summary": ""}]
+    raw = {**GOOD, "pieces": two, "blocks": [
+        {"start": 300, "end": 880, "title": "Foliensatz Digitalisierung", "summary": "Der ganze Vortrag."},
+        {"start": 1400, "end": 1795, "title": "Nur eins", "summary": ""}]}
+    result, errors = outline.check(raw, DURATION, SEGMENTS)
+    assert [b["title"] for b in result["blocks"]] == ["Foliensatz Digitalisierung"]
+    block = result["blocks"][0]
+    assert block["start"] == result["pieces"][0]["start"] and block["end"] == result["pieces"][1]["end"]
+    assert len(errors) == 1 and "Nur eins" in errors[0] and "holds 1 piece" in errors[0]
+    assert outline.blocks({"pieces": two}) == [] and outline.inside(two[1], block)
+    assert not outline.inside(two[2], block)
