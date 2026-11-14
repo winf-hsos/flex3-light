@@ -30,7 +30,8 @@ def _lines(words: list[str]) -> str:
     return "\n".join(lines)
 
 
-def cues(words: list[dict]) -> list[tuple[float, float, str]]:
+def groups(words: list[dict]) -> list[list[dict]]:
+    """The words of each cue, stripped, with everything else they carry (languages.py keeps their index)."""
     result, cur = [], []
     for w in words:
         if cur:
@@ -38,12 +39,16 @@ def cues(words: list[dict]) -> list[tuple[float, float, str]]:
             ends_sentence = text.rstrip().endswith((".", "?", "!")) and cur[-1]["end"] - cur[0]["start"] >= 1.0
             too_long = len(text) + 1 + len(w["word"]) > LINE * LINES or w["end"] - cur[0]["start"] > LONGEST
             if ends_sentence or too_long or w["start"] - cur[-1]["end"] > PAUSE:
-                result.append((cur[0]["start"], cur[-1]["end"], _lines([x["word"] for x in cur])))
+                result.append(cur)
                 cur = []
         cur.append({**w, "word": w["word"].strip()})
     if cur:
-        result.append((cur[0]["start"], cur[-1]["end"], _lines([x["word"] for x in cur])))
+        result.append(cur)
     return result
+
+
+def cues(words: list[dict]) -> list[tuple[float, float, str]]:
+    return [(g[0]["start"], g[-1]["end"], _lines([x["word"] for x in g])) for g in groups(words)]
 
 
 def run(session_dir: Path) -> Path:

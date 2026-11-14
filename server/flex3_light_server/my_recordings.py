@@ -7,6 +7,12 @@ repository root, served by the server in its server mode). The actions are the a
 server's worker and the settings of their profile. Publishing makes a zip file with the
 Opencast names, which the lecturer downloads, until FLEX3 talks to Opencast itself.
 
+The look of all videos (pipeline/style.py) belongs to the server, not to one lecturer: since
+2026-11-13 the app's settings change its name, colors, captions and logo through the calls
+video_style, set_video_style and set_video_logo, but only for whoever runs the server. That is
+everyone listed in admins.txt in the data folder (one user id per line), and without that file
+the only lecturer of a server with one, as on the lecturer's own computer.
+
 The page signs in without a password: the app asks for a one-time ticket with its device
 token and opens the page with it; the page trades the ticket for a session of a few hours
 (Sessions). Videos are fetched by the <video> element, which sends no header, so their
@@ -14,8 +20,12 @@ address carries the session.
 """
 from __future__ import annotations
 
+import base64
+import io
 import secrets
 import shutil
+import sqlite3
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -25,7 +35,8 @@ from . import profiles
 from .worker import Worker               # puts the repository root on sys.path
 
 import library  # noqa: E402
-from pipeline import cut_rules, publish, sounds  # noqa: E402
+from pipeline import cards, cut_rules, publish, sounds  # noqa: E402
+from pipeline import style as styles  # noqa: E402
 from recordings import Recordings  # noqa: E402
 
 TICKET_SECONDS = 120
@@ -37,7 +48,8 @@ CALLS = ("data", "recordings", "recording", "start_transcription", "redo_transcr
          "set_cut_metadata",
          "set_cut_cards", "set_cut_settings", "approve_cut", "recheck", "rerender", "make_summary", "publish_plan", "publish",
          "propose_topics", "change_topic", "add_topic", "approve_topics", "redo_outline", "revise_topics",
-         "delete_recording")
+         "set_languages", "delete_recording", "video_style", "set_video_style", "set_video_logo")
+ADMINS = "admins.txt"
 
 
 class Sessions:
@@ -143,6 +155,81 @@ class MyRecordings(Recordings):
 
     def data(self) -> dict:
         return {"cut": self.cut_settings(), "after_recording": cut_rules.after_recording(self.store.values(self.user_id))}
+
+    # ---------------------------------------------------------- the look of all videos
+
+    def _style_dir(self) -> Path:
+        return Path(getattr(self.pipeline, "style_dir", None) or self.data_dir / "style")
+
+    def may_style(self) -> bool:
+        """Whether this lecturer may change the look of all videos (see the module's docstring)."""
+        listed = self.data_dir / ADMINS
+        if listed.exists():
+            ids = {x.strip() for x in listed.read_text(encoding="utf-8-sig").splitlines()}
+            return self.user_id in ids
+        db = self.data_dir / "accounts.sqlite"
+        if not db.exists():
+            return True                              # a server with tokens and no accounts: a test or one person
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            return con.execute("SELECT count(*) FROM users").fetchone()[0] <= 1
+        finally:
+            con.close()
+
+    @staticmethod
+    def _picture(img) -> str:
+        out = io.BytesIO()
+        img.convert("RGB").save(out, "JPEG", quality=88)
+        return "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode()
+
+    def video_style(self) -> dict:
+        """The look of all videos for the settings: name, colors, captions, whether there is a logo, and
+        a title card and a burned-in caption as pictures."""
+        from PIL import Image, ImageDraw
+        s = styles.load(self._style_dir())
+        with tempfile.TemporaryDirectory() as work:
+            png = cards.card(Path(work) / "title.png", 1280, 720, "Schleifen und Bedingungen", "Modul",
+                             "13. November 2026   Name", style=s)
+            with Image.open(png) as img:
+                title = self._picture(img.resize((640, 360)))
+        # a caption as languages.py burns it in, on a grey screen
+        pic = Image.new("RGB", (640, 120), (58, 62, 68))
+        draw = ImageDraw.Draw(pic, "RGBA")
+        font = cards._font(s, int(360 * s["captions"]["size"] / 100), "semibold")
+        words = ["Das", "ist", "eine", "Untertitelzeile."]
+        widths = [draw.textlength(w + " ", font=font) for w in words]
+        x0 = (640 - sum(widths)) / 2
+        pad = font.size * 0.25
+        draw.rectangle((x0 - pad, 60 - font.size * 0.7, x0 + sum(widths) + pad, 60 + font.size * 0.7),
+                       fill=(0, 0, 0, int(255 * s["captions"]["box"])))
+        h = s["captions"]["highlight"]
+        lit = (int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16))
+        x = x0
+        for k, w in enumerate(words):
+            draw.text((x, 60), w, font=font, anchor="lm", fill=lit if k == 2 else (255, 255, 255))
+            x += widths[k]
+        return {"may_edit": self.may_style(), "name": s["name"], "colors": s["colors"], "captions": s["captions"],
+                "logo": bool(styles.asset(s, "logo")), "problems": s["problems"],
+                "preview": title, "caption_preview": self._picture(pic)}
+
+    def set_video_style(self, changes: dict) -> dict:
+        if not self.may_style():
+            raise ValueError("Das Aussehen der Videos legt fest, wer den Server betreibt.")
+        with self.lock("style"):
+            styles.save(self._style_dir(), changes or {})
+        return self.video_style()
+
+    def set_video_logo(self, data: str, kind: str = "png") -> dict:
+        """The logo as base64 (empty: remove it)."""
+        if not self.may_style():
+            raise ValueError("Das Aussehen der Videos legt fest, wer den Server betreibt.")
+        try:
+            raw = base64.b64decode(data or "", validate=True)
+        except ValueError:
+            raise ValueError("Das Logo kam nicht vollständig an.") from None
+        with self.lock("style"):
+            styles.set_logo(self._style_dir(), raw or None, "jpg" if kind in ("jpg", "jpeg") else "png")
+        return self.video_style()
 
     # ---------------------------------------------------------- publishing: a package to download
 

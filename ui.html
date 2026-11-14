@@ -186,7 +186,7 @@
   .rec-item b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rec-item small { color: var(--slate); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
   .rec-item small span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mini-way { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+  .mini-way { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; }
   .mini-way i { height: 4px; border-radius: 2px; background: #e6ebf0; }
   .mini-way i.done { background: var(--green); } .mini-way i.running, .mini-way i.queued { background: var(--blue); }
   .mini-way i.waiting, .mini-way i.failed, .mini-way i.missing { background: var(--amber); }
@@ -197,7 +197,7 @@
   .player { width: min(100%, calc((100vh - 260px) * 16 / 9)); justify-self: center; aspect-ratio: 16 / 9; border-radius: 14px; background: var(--stage); display: block; }
   .player::cue { font-family: var(--text); font-size: 18px; background: rgba(16, 24, 32, .72); }
   /* the way of a recording: a real sequence, so the stations are numbered */
-  .way { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); padding: 12px 8px 10px; }
+  .way { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); padding: 12px 8px 10px; }
   button.station { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 4px 2px 6px;
                    border-radius: 10px; }
   button.station:hover { background: var(--hover); }
@@ -401,6 +401,30 @@
   .setting-row select, .setting-row input { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
   .setting-row input { width: 70px; }
   .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 12px; }
+  /* the languages of a recording: a row per video, a column per language */
+  .lang-wrap { overflow-x: auto; }
+  .lang-table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+  .lang-table th { text-align: left; font-weight: 600; font-size: 12px; color: var(--slate); padding: 6px 10px;
+                   border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .lang-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .lang-table td.video { min-width: 200px; }
+  .lang-table td.video.part { padding-left: 26px; }
+  .lang-table td.video small { display: block; color: var(--slate); font-size: 12px; margin-top: 2px; }
+  .lang-table td.video .link { padding: 0; font-size: 12px; }
+  .lang-table .pick { display: grid; gap: 3px; white-space: nowrap; font-size: 12.5px; }
+  .lang-table .pick input { margin: 0 5px 0 0; vertical-align: -1px; }
+  .step-actions select { font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 8px;
+                       background: var(--surface); }
+  .text-row { display: grid; gap: 4px; font-size: 13px; }
+  .text-row input { font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px;
+                    background: var(--surface); color: var(--ink); }
+  .style-pics { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .style-pics img { width: 100%; border-radius: 8px; border: 1px solid var(--line); display: block; }
+  .style-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
+  .style-row input[type=color] { width: 44px; height: 28px; padding: 0 2px; border: 1px solid var(--line); border-radius: 8px;
+                                 background: var(--surface); cursor: pointer; }
+  .style-row input[type=range] { width: 150px; }
+  .style-row .actions { display: flex; gap: 10px; align-items: center; }
   .card-edit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .card-edit > .check { grid-column: 1 / -1; font-weight: 600; color: var(--ink); }
   .card-edit .field { padding: 5px 10px; }
@@ -695,6 +719,15 @@
             <div class="section-note">Programme legst du in „Meine Aufnahmen“ beim Schnitt einer Aufnahme fest.</div>
           </div>
           <div class="panel section">
+            <div class="panel-head"><h2>Videos</h2></div>
+            <label class="text-row"><b>Name in den Videos</b>
+              <input type="text" id="cut_lecturer_name" maxlength="80" placeholder="z. B. Prof. Dr. Erika Mustermann" onchange="saveCutSettings()"></label>
+            <div class="section-note">Steht auf der Titeltafel jeder Aufnahme. Ohne Eintrag steht dort der Name deines Kontos auf dem Server.</div>
+            <div class="cut-group"><h3>Untertitel in weiteren Sprachen</h3><div class="kinds" id="cutLanguages"></div></div>
+            <label class="toggle"><input type="checkbox" id="cut_burned_captions" onchange="saveCutSettings()"><span class="knob"></span><span><b>Untertitel im Bild</b><small>Jedes Video zusätzlich als Fassung mit Untertiteln im Bild, das gesprochene Wort hervorgehoben.</small></span></label>
+            <div class="section-note">Gilt für neue Aufnahmen. Bei einer einzelnen Aufnahme änderst du es unter „Meine Aufnahmen“ im Schritt „Sprachen“, auch für jedes Themenvideo.</div>
+          </div>
+          <div class="panel section">
             <div class="panel-head"><h2>Ablage</h2></div>
             <div class="folders">
               <span>Aufnahmen</span><span class="path" id="archive_dir"></span><button class="link" onclick="pickFolder('archive_dir')">Ändern</button>
@@ -709,6 +742,10 @@
             <div class="section-note" id="serverNote"></div>
             <div class="key-edit" id="serverConnect"><div class="field"><input type="text" id="serverCode" autocomplete="off" spellcheck="false" placeholder="FLX3-…@https://…"></div><button class="btn primary" id="serverButton" onclick="connectServer()">Verbinden</button></div>
             <div class="key-actions"><button class="link danger" id="serverDisconnect" onclick="disconnectServer()">Trennen</button><span class="hint" id="serverMsg"></span></div>
+          </div>
+          <div class="panel section">
+            <div class="panel-head"><h2>Aussehen der Videos</h2><span class="hint" id="styleMsg"></span></div>
+            <div id="styleBody" class="cut-group"></div>
           </div>
           <div class="panel section">
             <div class="panel-head"><h2>KI-Dienste</h2></div>
@@ -829,6 +866,7 @@
     if (name === "library" && SERVER) loadRecordings();
     if (name === "library" && !SERVER && serverOrigin && !frameSignedIn) signInFrame();
     if (name === "modules") renderModules();
+    if (name === "settings" && !SERVER) loadVideoStyle();
     if (name !== "library" && $("player")) $("player").pause();
     updatePreview();
   }
@@ -935,9 +973,9 @@
 
   // ---------------------------------------------------------------- my recordings
   let recordings = [], selectedId = null, shownMedia = "";
-  // the way of a recording in eight steps (library.STEPS); each step shows only what belongs to it
+  // the way of a recording in nine steps (library.STEPS); each step shows only what belongs to it
   const STATIONS = [["recorded", "Aufnahme"], ["transcript", "Transkrip­tion"], ["outline", "Gliede­rung"], ["edit", "Schnitt"],
-                    ["longversion", "Lang­fassung"], ["topics", "Themen­videos"], ["content", "Inhalte"],
+                    ["longversion", "Lang­fassung"], ["topics", "Themen­videos"], ["languages", "Spra­chen"], ["content", "Inhalte"],
                     ["publish", "Veröffent­lichen"]];         // soft hyphens: a narrow window breaks the names there
   let activeStep = null;                       // the step clicked; null: the one that needs the lecturer
   const NEEDS_YOU = ["review", "failed", "missing", "waiting"];
@@ -947,7 +985,7 @@
       || [...keys].reverse().find(k => st[k] && st[k] !== "soon") || "recorded";
   }
   const goStep = k => { activeStep = k; resetSteps(); refreshDetail(); };
-  const resetSteps = () => { for (const id of ["cut", "outlineStep", "longStep", "topicsStep", "recordedStep"]) if ($(id)) $(id).dataset.sig = ""; };
+  const resetSteps = () => { for (const id of ["cut", "outlineStep", "longStep", "topicsStep", "languagesStep", "recordedStep"]) if ($(id)) $(id).dataset.sig = ""; };
   const STATE_TEXT = {done: "erledigt", running: "läuft", waiting: "wartet", failed: "gestoppt", queued: "folgt", soon: "kommt bald",
                       review: "zur Freigabe", open: "offen", missing: "Dateien fehlen"};
   const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("de-DE", {day: "numeric", month: "long", year: "numeric"}) : "";
@@ -1016,8 +1054,9 @@
     if (playing !== "original" && !d.media.includes(playing)) playing = "original";   // gone, e.g. rendered anew
     const media = playing === "original" ? original : playing;
     const stem = media.replace(/\.mp4$/, "");
-    const subs = playing === "original" ? d.media.find(n => n.startsWith("subtitles."))
-                                        : d.media.find(n => n.startsWith(stem + ".") && n.endsWith(".vtt"));
+    const tracks = playing === "original" ? d.media.filter(n => n.startsWith("subtitles."))
+                                          : d.media.filter(n => /^[^.]+\.[a-z]{2}\.vtt$/.test(n) && n.startsWith(stem + "."));
+    const subs = tracks.join(",");
     const textSig = d.segments.length + ":" + d.segments.map(x => x.text).join("").length;
     const key = d.id;                                        // only another recording rebuilds the view
     if (key !== shownMedia) {
@@ -1039,6 +1078,7 @@
         <div class="panel cutpanel step-panel" data-step="edit" id="cut"></div>
         <div class="panel cutpanel step-panel" data-step="longversion" id="longStep"></div>
         <div class="panel cutpanel step-panel" data-step="topics" id="topicsStep"></div>
+        <div class="panel cutpanel step-panel" data-step="languages" id="languagesStep"></div>
         <div class="panel cutpanel step-panel" data-step="content" id="content"></div>
         <div class="panel cutpanel step-panel" data-step="publish" id="publish"></div>`;
       $("dTitle").textContent = d.title;
@@ -1060,10 +1100,11 @@
       const v = $("player");
       v.dataset.track = trackSig;
       for (const old of v.querySelectorAll("track")) old.remove();
-      if (subs) {
+      for (const n of tracks) {                              // the spoken language first and switched on
+        const lang = n.split(".")[1];
         const t = document.createElement("track");
-        Object.assign(t, {kind: "subtitles", srclang: d.language, label: d.language === "en" ? "English" : "Deutsch", default: true,
-                          src: mediaUrl(d.id, subs, trackSig)});
+        Object.assign(t, {kind: "subtitles", srclang: lang, label: LANG_NAMES[lang] || lang, default: lang === d.language,
+                          src: mediaUrl(d.id, n, trackSig)});
         v.appendChild(t);
       }
     }
@@ -1134,6 +1175,7 @@
     renderCut(d);
     renderLongStep(d);
     renderTopicsStep(d);
+    renderLanguagesStep(d);
     renderContent(d);
     renderPublish(d);
   }
@@ -1284,6 +1326,95 @@
     }
     if (st === "failed") box.appendChild(el("p", "hint error", d.status || "Der letzte Schritt ist gescheitert."));
     if (view.topics) box.appendChild(topicsBlock(view.topics, e));
+  }
+
+  // step 7: subtitles in more languages and captions in the picture (pipeline/languages.py)
+  const LANG_NAMES = {de: "Deutsch", en: "Englisch", fr: "Französisch", es: "Spanisch", it: "Italienisch", nl: "Niederländisch",
+                      pl: "Polnisch", tr: "Türkisch", uk: "Ukrainisch", ar: "Arabisch", zh: "Chinesisch"};
+  let langDraft = {id: "", dirty: false, choices: {}, extra: []};
+  function renderLanguagesStep(d) {
+    const st = d.stations.languages, view = (d.cut || {}).languages;
+    const box = stepBox("languagesStep", JSON.stringify([d.id, st, view, ["running", "failed"].includes(st) && d.status, playing,
+                                                         langDraft.id === d.id && langDraft.extra]));
+    if (!box) return;
+    const hint = stepHead(box, "Sprachen");
+    const spoken = view ? view.spoken : d.language;
+    box.appendChild(el("p", "step-intro", `Jedes Video hat Untertitel in der Sprache des Tons (${LANG_NAMES[spoken] || spoken}). `
+      + "Hier wählst du für die Langfassung und jedes Themenvideo weitere Sprachen und ob es zusätzlich eine Fassung mit "
+      + "Untertiteln im Bild gibt, in der das gesprochene Wort hervorgehoben ist. Ein Sprachmodell übersetzt Satz für Satz, "
+      + "und die Untertitel behalten dabei die Zeiten der gesprochenen."));
+    if (st === "soon" || !view || !view.videos.length) {
+      box.appendChild(el("p", "step-intro", "Das geht, sobald die Langfassung gerendert ist."));
+      return;
+    }
+    if (st === "running") { hint.className = "cut-status"; hint.textContent = d.status || "Untertitel entstehen …"; }
+    else if (st === "queued") hint.textContent = "folgt";
+    if (st === "failed") box.appendChild(el("p", "hint error", d.status || "Der letzte Schritt ist gescheitert."));
+    if (langDraft.id !== d.id || !langDraft.dirty) {
+      langDraft = {id: d.id, dirty: false, extra: langDraft.id === d.id ? langDraft.extra : [],
+                   choices: Object.fromEntries(view.videos.map(v => [v.id, {languages: [...v.languages], burned: [...v.burned]}]))};
+    }
+    const chosen = Object.values(langDraft.choices).flatMap(c => [...c.languages, ...c.burned]);
+    const cols = [...new Set([spoken, ...chosen, ...langDraft.extra])];
+    const apply = button("btn primary", "Übernehmen", async () => {
+      const error = await api().set_languages(selectedId, langDraft.choices);
+      if (error) { note.textContent = error; note.className = "hint error"; return; }
+      langDraft.dirty = false; box.dataset.sig = ""; await refreshDetail();
+    });
+    apply.disabled = !langDraft.dirty;
+    const note = el("span", "hint", langDraft.dirty ? "Geändert, noch nicht übernommen." : "");
+    const changed = () => { langDraft.dirty = true; apply.disabled = false; note.className = "hint";
+                            note.textContent = "Geändert, noch nicht übernommen."; };
+    const wrap = el("div", "lang-wrap"), table = el("table", "lang-table"), head = el("tr");
+    head.appendChild(el("th", "", "Video"));
+    for (const lang of cols) head.appendChild(el("th", "", LANG_NAMES[lang] || lang));
+    const more = Object.keys(LANG_NAMES).filter(l => !cols.includes(l)), sel = el("select");
+    sel.appendChild(new Option("Sprache hinzufügen …", ""));
+    for (const l of more) sel.appendChild(new Option(LANG_NAMES[l], l));
+    sel.onchange = () => { if (!sel.value) return; langDraft.extra.push(sel.value); box.dataset.sig = ""; renderLanguagesStep(d); };
+    const thead = el("thead"); thead.appendChild(head); table.appendChild(thead);
+    const tbody = el("tbody"), ids = new Set(view.videos.map(v => v.id));
+    for (const v of view.videos) {
+      const tr = el("tr"), cell = el("td", "video" + (v.parent && ids.has(v.parent) ? " part" : ""));
+      cell.appendChild(el("b", "", v.title));
+      const ready = v.files.filter(f => f.ready && f.kind === "burned"), waiting = v.files.filter(f => !f.ready);
+      if (ready.length || waiting.length) {
+        const line = el("small");
+        for (const f of ready) {
+          line.appendChild(button("link", `Im Bild (${f.language.toUpperCase()}) ansehen`, () => play(f.file)));
+          line.append(" ");
+        }
+        if (waiting.length) line.append(`${waiting.length} ${waiting.length === 1 ? "Datei folgt" : "Dateien folgen"}`);
+        cell.appendChild(line);
+      }
+      tr.appendChild(cell);
+      const c = langDraft.choices[v.id];
+      for (const lang of cols) {
+        const td = el("td"), pick = el("div", "pick");
+        const sub = el("input"); sub.type = "checkbox";
+        sub.checked = lang === spoken || c.languages.includes(lang); sub.disabled = lang === spoken;
+        sub.onchange = () => { c.languages = sub.checked ? [...c.languages, lang] : c.languages.filter(x => x !== lang); changed(); };
+        const pic = el("input"); pic.type = "checkbox"; pic.checked = c.burned.includes(lang);
+        pic.onchange = () => { c.burned = pic.checked ? [...c.burned, lang] : c.burned.filter(x => x !== lang); changed(); };
+        const a = el("label"); a.append(sub, "Untertitel");
+        const b = el("label"); b.append(pic, "im Bild");
+        pick.append(a, b);
+        td.appendChild(pick);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    box.appendChild(wrap);
+    const used = Object.entries(view.translations || {});
+    if (used.length) box.appendChild(el("p", "hint", "Übersetzt: " + used.map(([l, t]) =>
+      `${LANG_NAMES[l] || l} am ${fmtDate(t.made)}${t.model ? " mit " + t.model : ""}`).join(", ") + "."));
+    const foot = el("div", "step-actions");
+    if (more.length) foot.append(sel);
+    foot.append(apply, button("link", "Zurücksetzen", () => { langDraft = {id: "", dirty: false, choices: {}, extra: []};
+                                                              box.dataset.sig = ""; renderLanguagesStep(d); }), note);
+    box.appendChild(foot);
   }
 
   // ---------------------------------------------------------------- publishing: the files leave for the upload folder
@@ -2281,6 +2412,20 @@
     $("cut_chapter_sound").checked = cutSettings.chapter_sound !== false;
     $("cut_music").checked = cutSettings.music !== false;
     $("cut_topic_videos").value = cutSettings.topic_videos || "propose";
+    if (document.activeElement !== $("cut_lecturer_name")) $("cut_lecturer_name").value = cutSettings.lecturer_name || "";
+    $("cut_burned_captions").checked = !!cutSettings.burned_captions;
+    const langs = $("cutLanguages"); langs.innerHTML = "";
+    const wanted = cutSettings.subtitle_languages || [];
+    for (const [lang, name] of Object.entries(LANG_NAMES)) {
+      const label = el("label", "check");
+      const box = el("input"); box.type = "checkbox"; box.checked = wanted.includes(lang);
+      box.onchange = async () => {
+        await api().set_cut_settings({subtitle_languages: box.checked ? [...wanted, lang] : wanted.filter(x => x !== lang)});
+        cutSettings = (await api().data()).cut; fillCutSettings();
+      };
+      label.append(box, " " + name);
+      langs.appendChild(label);
+    }
     const made = cutSettings.sounds || [];
     $("soundState").textContent = made.length >= 3 ? "Kurze Klänge, mit ElevenLabs erzeugt und bereit."
       : "Die Klänge entstehen einmalig mit dem ElevenLabs-Schlüssel (KI-Dienste), beim ersten Rendern.";
@@ -2317,10 +2462,63 @@
                                   title_card: $("cut_title_card").checked, closing_card: $("cut_title_card").checked,
                                   chapter_display: $("cut_chapter_display").value,
                                   chapter_sound: $("cut_chapter_sound").checked, music: $("cut_music").checked,
-                                  topic_videos: $("cut_topic_videos").value});
+                                  topic_videos: $("cut_topic_videos").value,
+                                  lecturer_name: $("cut_lecturer_name").value.trim(),
+                                  burned_captions: $("cut_burned_captions").checked});
     cutSettings = (await api().data()).cut; fillCutSettings();
   }
   const MODELS = {"assemblyai/universal-3-pro": "AssemblyAI Universal-3 Pro", "openai/whisper-1": "OpenAI whisper-1"};
+
+  // the look of all videos: the server keeps it, whoever runs the server changes it (my_recordings.py)
+  let videoStyle = null;
+  async function loadVideoStyle() {
+    $("styleMsg").textContent = "";
+    videoStyle = await api().video_style();
+    renderVideoStyle();
+  }
+  async function changeStyle(call, ...args) {
+    $("styleMsg").className = "hint"; $("styleMsg").textContent = "Wird gespeichert …";
+    let r;
+    try { r = await api()[call](...args); } catch (e) { r = {error: e.message}; }
+    if (r === null || r === undefined) { $("styleMsg").textContent = ""; return; }      // the file dialog was closed
+    if (r.error) { $("styleMsg").className = "hint error"; $("styleMsg").textContent = r.error; return; }
+    videoStyle = r; $("styleMsg").textContent = "Gespeichert"; renderVideoStyle();
+  }
+  function renderVideoStyle() {
+    const box = $("styleBody"), s = videoStyle || {};
+    box.innerHTML = "";
+    if (s.error) {
+      box.appendChild(el("div", "section-note", s.error === "Kein Server verbunden."
+        ? "Das Aussehen der Videos hält der FLEX3-Server. Sobald du mit ihm verbunden bist, siehst du es hier." : s.error));
+      return;
+    }
+    const pics = el("div", "style-pics");
+    for (const [src, alt] of [[s.preview, "Titeltafel"], [s.caption_preview, "Untertitel im Bild"]]) {
+      if (!src) continue;
+      const img = el("img"); img.src = src; img.alt = alt; pics.appendChild(img);
+    }
+    box.appendChild(pics);
+    if (!s.may_edit) {
+      box.appendChild(el("div", "section-note", "Das Aussehen gilt für alle Videos dieses Servers. Ändern kann es, wer den Server betreibt."));
+      return;
+    }
+    const row = (label, control) => { const r = el("div", "style-row"); r.append(el("span", "", label), control); box.appendChild(r); };
+    const actions = el("span", "actions");
+    actions.appendChild(button("btn", s.logo ? "Anderes Logo" : "Logo wählen", () => changeStyle("pick_logo")));
+    if (s.logo) actions.appendChild(button("link danger", "Entfernen", () => changeStyle("remove_logo")));
+    row(s.logo ? "Logo auf den Tafeln" : "Logo (ohne: das FLEX3-Zeichen)", actions);
+    const color = (value, apply) => { const c = el("input"); c.type = "color"; c.value = value; c.onchange = () => apply(c.value); return c; };
+    row("Grundfarbe der Tafeln", color(s.colors.background, v => changeStyle("set_video_style", {colors: {background: v}})));
+    row("Akzentfarbe", color(s.colors.accent, v => changeStyle("set_video_style", {colors: {accent: v}})));
+    row("Schrift auf den Tafeln", color(s.colors.text, v => changeStyle("set_video_style", {colors: {text: v}})));
+    row("Gesprochenes Wort im Bild", color(s.captions.highlight, v => changeStyle("set_video_style", {captions: {highlight: v}})));
+    const range = (min, max, step, value, apply) => { const r = el("input"); r.type = "range";
+      Object.assign(r, {min, max, step, value}); r.onchange = () => apply(+r.value); return r; };
+    row("Größe der Untertitel", range(2.5, 8, 0.5, s.captions.size, v => changeStyle("set_video_style", {captions: {size: v}})));
+    row("Kasten hinter den Untertiteln", range(0, 1, 0.05, s.captions.box, v => changeStyle("set_video_style", {captions: {box: v}})));
+    box.appendChild(el("div", "section-note", "Gilt für alle Videos des Servers. Freigegebene, noch nicht veröffentlichte Videos "
+      + "rendert er danach von selbst neu, Untertitel im Bild bekommen das neue Aussehen ebenso."));
+  }
   async function startTranscription() {
     const error = await api().start_transcription(selectedId);
     if (error) { $("dStatus").textContent = error; $("dStatus").className = "hint error"; return; }

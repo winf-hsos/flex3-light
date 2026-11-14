@@ -9,6 +9,10 @@ which the lecturer uploads them, named the way Opencast uploads are named (decis
                                                                      with its .vtt, .jpg and .txt
   <root>\\<term>\\<module>\\<date> - <module> - <title> - Zusammenfassung.pdf
 
+and since 2026-11-13 what languages.py made: the subtitles of each video in more languages, named like
+those of the spoken language, and each video with captions in the picture as
+<name of the video> (Untertitel EN).mp4. In a package the videos carry their subtitles as tracks too.
+
 The files are moved, not copied. publish.json in the session folder records where each one
 went, so that the window still plays them and the next publication of a new render replaces
 them instead of leaving old ones behind.
@@ -65,6 +69,7 @@ def plan(folder: Path, root: Path) -> list[tuple[str, Path]]:
         return []
     out_dir, base = target_dir(folder, root), stem(folder)
     moves: list[tuple[str, Path]] = []
+    stems = {"edited": base}                              # video -> its name in the target, for languages.py
     languages = []
     for name in made.get("files", []):
         m = re.fullmatch(r"edited(\.([a-z]{2})\.vtt|\.mp4)", name)
@@ -91,8 +96,15 @@ def plan(folder: Path, root: Path) -> list[tuple[str, Path]]:
         while name.lower() in used:
             name, k = f"{title} ({k})", k + 1
         used.add(name.lower())
+        stems[video["name"]] = f"{base} - {name}"
         for file in video.get("files", []):
             moves.append((file, out_dir / f"{base} - {name}{file[len(video['name']):]}"))
+    from . import languages
+    for x in languages.finished(folder):                 # subtitles in more languages, captions in the picture
+        if x["video"] in stems:
+            target = f"{stems[x['video']]}.{x['language']}.vtt" if x["kind"] == "vtt" else \
+                f"{stems[x['video']]} (Untertitel {x['language'].upper()}).mp4"
+            moves.append((x["file"], out_dir / target))
     s = files.read_json(folder / "summary.json")
     if s.get("signature") and s.get("signature") == made.get("signature") and locate(folder, "summary.pdf"):
         moves.append(("summary.pdf", out_dir / f"{base} - {SUMMARY_NAME}.pdf"))
@@ -199,6 +211,34 @@ def flat_name(name: str) -> bool:
             and not _FORBIDDEN.search(name) and name.strip(". ") != "")
 
 
+def tracks(name: str, names: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """(subtitle file, language) of a video in the package, in the order of the package; none for a video
+    with captions in the picture."""
+    m = re.fullmatch(r"(edited|topic-\d{2})\.mp4", name)
+    if not m:
+        return []
+    return [(n, n.split(".")[1]) for n, _ in names if re.fullmatch(m.group(1) + r"\.[a-z]{2}\.vtt", n)]
+
+
+def with_tracks(video: Path, vtts: list[tuple[Path, str]], out: Path) -> None:
+    """The video with its subtitles as tracks (mov_text), picture and sound copied as they are."""
+    import subprocess
+    from . import binaries, languages
+    args = [binaries.ffmpeg(), "-hide_banner", "-v", "error", "-y", "-i", str(video)]
+    for path, _ in vtts:
+        args += ["-i", str(path)]
+    args += ["-map", "0:v", "-map", "0:a?"] + [x for k in range(len(vtts)) for x in ("-map", f"{k + 1}:0")]
+    args += ["-c", "copy", "-c:s", "mov_text"]
+    for k, (_, lang) in enumerate(vtts):
+        args += [f"-metadata:s:s:{k}", f"language={languages.ISO3.get(lang, 'und')}",
+                 f"-metadata:s:s:{k}", f"title={languages.NAMES.get(lang, lang)}"]
+    args += ["-f", "mp4", str(out)]
+    r = subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", creationflags=binaries.flags())
+    if r.returncode != 0:
+        raise OSError("Untertitel ließen sich nicht ins Video legen: " + r.stderr[:300])
+
+
 def make_package(folder: Path, target: Path) -> dict:
     """Write the zip file of a recording's finished files to target and record it in publish.json."""
     import zipfile
@@ -211,12 +251,30 @@ def make_package(folder: Path, target: Path) -> dict:
             raise FileNotFoundError(f"{name} fehlt im Ordner der Aufnahme.")
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
-    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:   # videos do not shrink
-        for name, packed in names:
-            z.write(folder / name, packed)
-    tmp.replace(target)
+    tracked = target.with_name(target.name + ".video.tmp")
+    untracked = []                                        # videos whose subtitles are only beside them
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:   # videos do not shrink
+            for name, packed in names:
+                vtts = tracks(name, names)
+                if vtts:                                  # the subtitles inside the video too, to switch on
+                    try:
+                        with_tracks(folder / name, [(folder / n, lang) for n, lang in vtts], tracked)
+                    except OSError:                       # the .vtt files are in the package all the same
+                        untracked.append(name)
+                    else:
+                        z.write(tracked, packed)
+                        tracked.unlink()
+                        continue
+                z.write(folder / name, packed)
+        tmp.replace(target)
+    finally:
+        tracked.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
     report = {"published": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
               "signature": _render_signature(folder), "package": True, "folder": "",
               "files": {name: packed for name, packed in names}}
+    if untracked:
+        report["untracked"] = untracked
     files.write_json(folder / "publish.json", report)
     return report

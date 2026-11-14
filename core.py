@@ -8,6 +8,7 @@ run in different threads.
 """
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import json
 import math
@@ -579,6 +580,40 @@ class Core:
     def publish_dir(self) -> Path:
         """Root of the folders the lecturer uploads from; next to the recordings unless chosen."""
         return Path(self.settings.get("publish_dir") or self.archive / "Veröffentlichen")
+
+    # ---------------------------------------------------------- the look of all videos, kept by the server
+
+    def _server_call(self, call: str, *args) -> dict:
+        """A call of the server's page that answers with a dict; {"error": text} if it cannot."""
+        client = self.delivery.client
+        if client is None:
+            return {"error": "Kein Server verbunden."}
+        try:
+            return client.library_call(call, *args)
+        except server_api.ServerError as e:
+            return {"error": str(e.detail) if e.status == 422 else f"Der Server antwortet mit Fehler {e.status}."}
+        except OSError as e:
+            return {"error": f"Der Server ist gerade nicht erreichbar: {e}"}
+
+    def video_style(self) -> dict:
+        return self._server_call("video_style")
+
+    def set_video_style(self, changes: dict) -> dict:
+        return self._server_call("set_video_style", changes or {})
+
+    def set_video_logo(self, path: str | None) -> dict:
+        """Send a picture file as the logo of all videos, or remove the logo with None."""
+        if not path:
+            return self._server_call("set_video_logo", "", "png")
+        p = Path(path)
+        try:
+            data = p.read_bytes()
+        except OSError as e:
+            return {"error": f"Das Bild ließ sich nicht lesen: {e}"}
+        if len(data) > 2_000_000:
+            return {"error": "Das Logo ist größer als 2 MB."}
+        kind = "jpg" if p.suffix.lower() in (".jpg", ".jpeg") else "png"
+        return self._server_call("set_video_logo", base64.b64encode(data).decode(), kind)
 
     # ---------------------------------------------------------- "Meine Aufnahmen" on the server (phase 4)
 

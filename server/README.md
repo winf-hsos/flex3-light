@@ -78,6 +78,10 @@ How every video looks and sounds is one setting of the server (phase 6 of the cu
 
 A change of style needs no restart and no change to any edit list: every render reads the style anew and writes its fingerprint into `render.json`, and within a minute the worker renders again every approved recording that was rendered in another style and is not published. Published recordings keep their style; the window says "gerendert im vorigen Stil" and offers "Neu rendern". The first look of a server only notes the style, so that taking it into use renders nothing again.
 
+The section `"captions": {"highlight": "#009ee3", "size": 4.5, "box": 0.6}` sets the captions burned into the picture (step "Sprachen"): the color of the word being spoken, the height of the text in percent of the picture and how opaque the box behind it is. It is not part of the fingerprint, so changing it renders no long version again, only the captioned versions not yet published.
+
+Name, colors, caption look and logo can also be changed in the app (Einstellungen, Aussehen der Videos, through `/library/api/video_style`, `set_video_style` and `set_video_logo`, a PNG or JPEG of at most 2 MB). Who may do that: the user ids listed in `admins.txt` in the data folder, one per line; without that file, whoever is signed in as long as the server has at most one lecturer, so that a server of one's own needs no setup. Everyone else sees the previews only.
+
 ### Meine Aufnahmen
 
 Since phase 4 (2026-11-09) the review runs on the server: the server serves the app's own `ui.html` at `/library/`, which recognises that it runs there (`window.FLEX3_SERVER`) and shows only "Meine Aufnahmen", with every action sent to `/library/api/<call>` instead of the app. One file, so the page in the app and the page on the server never drift apart. The actions themselves are shared too: `recordings.py` at the repository root holds them, and `my_recordings.py` applies them to the server's session folders of whoever is signed in (since phase 5 the app has no library of its own), with the server's pipeline and the settings of their profile; a program rule or a term added on the page lands in the profile and reaches the app with its next sync.
@@ -85,6 +89,10 @@ Since phase 4 (2026-11-09) the review runs on the server: the server serves the 
 Nobody types a password: the app asks for a one-time ticket with its device token and opens the page with it, in a frame of its window or in the default browser ("Im Browser öffnen"). The page trades the ticket for a page session of twelve hours, kept in memory (a restarted server only means a new ticket); a `<video>` sends no header, so media addresses carry the page session, never the device token. Deleting moves the session folder into `trash/` below the data folder, which an administrator empties.
 
 Publishing moves nothing on the server. It packs the long version, the clips, the approved topic videos (with their subtitles, preview picture and a text file with title, description and chapters), all subtitles and the summary into a zip file (`packages/`) with the names Opencast uploads get; in the app's frame FLEX3 Light fetches it and unpacks it into its folder for uploads under `<term>\<module>`, as publishing on the computer did, while a browser downloads the zip file. Until FLEX3 talks to Opencast, the upload stays by hand. A package is open again when something belongs to the recording that it does not hold, or the other way round: a summary finished later, a topic video approved or dropped since.
+
+### Languages
+
+Once the long version is rendered, the step "Sprachen" (`pipeline/languages.py`) makes the subtitles in further languages and the versions with captions in the picture that the lecturer chose for the long version and each topic video, with their profile's defaults (`cut.subtitle_languages`, `cut.burned_captions`) fixed in `languages.json` at the first render. The translation is a stage of its own in `models.json` (`"translate"`, by default `gpt-6.1-sol` with low effort); it gets the sentences said, cut into cues, and the module's terms, nothing else, and is made once per language and recording (`translation.<language>.json`). What was chosen and not made yet is due: the worker makes it after the topic videos, and a changed choice in the window removes the files no longer wanted.
 
 ### Topic videos
 

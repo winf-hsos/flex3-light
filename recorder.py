@@ -140,6 +140,21 @@ class Api:
     def set_cut_settings(self, values):
         self._core.set_cut_settings(values or {})
 
+    def video_style(self):
+        return self._core.video_style()
+
+    def set_video_style(self, changes):
+        return self._core.set_video_style(changes or {})
+
+    def pick_logo(self):
+        picked = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Bilder (*.png;*.jpg;*.jpeg)",))
+        if not picked:
+            return None
+        return self._core.set_video_logo(picked[0] if isinstance(picked, (list, tuple)) else picked)
+
+    def remove_logo(self):
+        return self._core.set_video_logo(None)
+
     def view(self, mode):
         """Switch the window between "full" (setup), "bar" (recording) and "ask" (save question).
 

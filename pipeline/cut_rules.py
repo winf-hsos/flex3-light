@@ -32,7 +32,11 @@ MERGE_GAP = 2.0                      # spans of the same rule closer than this b
 
 CARD_DEFAULTS = {"title_card": True, "closing_card": True, "chapter_display": "card", "chapter_sound": True,
                  "music": True,
-                 "topic_videos": "propose"}   # off, propose or auto: the videos of the topic pieces (products.py)
+                 "topic_videos": "propose",   # off, propose or auto: the videos of the topic pieces (products.py)
+                 "lecturer_name": "",         # the name on the title card; empty: the name of the account
+                 "subtitle_languages": [],    # languages every video gets subtitles in besides its own (languages.py)
+                 "burned_captions": False}    # every video also with captions burned into the picture
+NAME_MAX = 80
 AFTER_RECORDING = ("nothing", "transcribe", "cut")   # what starts by itself once a recording is filed
 
 
@@ -50,7 +54,8 @@ def settings_from(preferences: dict) -> dict:
 
 
 CUT_FIELDS = ("pause_mode", "pause_min", "cut_programs", "keep_programs", "cut_titles", "kinds_off",
-              "title_card", "closing_card", "chapter_display", "chapter_sound", "music", "topic_videos")
+              "title_card", "closing_card", "chapter_display", "chapter_sound", "music", "topic_videos",
+              "lecturer_name", "subtitle_languages", "burned_captions")
 
 
 def cut_preferences(current: dict, values: dict) -> dict:
@@ -74,6 +79,11 @@ def cut_preferences(current: dict, values: dict) -> dict:
         current[k] = bool(current.get(k, True))
     if current.get("topic_videos") not in ("off", "propose", "auto"):
         current["topic_videos"] = CARD_DEFAULTS["topic_videos"]
+    current["lecturer_name"] = " ".join(str(current.get("lecturer_name") or "").split())[:NAME_MAX]
+    from . import languages                         # here, because languages builds on the cut
+    current["subtitle_languages"] = [x for x in dict.fromkeys(current.get("subtitle_languages") or [])
+                                     if x in languages.NAMES]
+    current["burned_captions"] = bool(current.get("burned_captions", False))
     return {f"cut.{k}": v for k, v in current.items()}
 
 

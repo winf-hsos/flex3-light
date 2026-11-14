@@ -29,7 +29,7 @@ def test_scan_summary_and_stations(tmp_path):
     s = library.summary(a)
     assert s["title"] == "Mikrocontroller und LiFi" and s["camera"] and s["term"] == "2026-27 - WS"
     assert s["stations"] == {"recorded": "done", "transcript": "queued", "cut": "soon", "content": "soon", "publish": "soon",
-                             "outline": "soon", "edit": "soon", "longversion": "soon", "topics": "soon"}
+                             "outline": "soon", "edit": "soon", "longversion": "soon", "topics": "soon", "languages": "soon"}
     assert set(library.STEPS) <= set(s["stations"])
     assert library.stations(b)["transcript"] == "waiting"
     assert library.stations(c)["transcript"] == "done"

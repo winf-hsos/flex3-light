@@ -26,9 +26,11 @@ try:
     import services          # the app's keys in the Windows Credential Manager
 except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
     services = None
-from pipeline import cut_agent, cut_review, cut_stages, edit, files, llm, outline, products, render, screening, sounds, subtitles, summary, transcribe
+from pipeline import (cut_agent, cut_review, cut_stages, edit, files, languages, llm, outline, products, render,
+                      screening, sounds, subtitles, summary, transcribe)
+from pipeline import style as styles
 
-STEPS = ("transcribe", "subtitles", "cut", "render", "topics", "summary")
+STEPS = ("transcribe", "subtitles", "cut", "render", "topics", "languages", "summary")
 TRANSCRIPT_STEPS = ("transcribe", "subtitles")   # what a new transcription redoes; the edit list stays
 WAIT = 30                    # seconds between checks while waiting for a key or for the recording to end
 WHISPER_END = dt.date(2027, 2, 26)   # OpenAI shuts whisper-1 down
@@ -148,6 +150,12 @@ class PipelineRunner:
             self.failed.discard(str(folder))
         self.enqueue(folder)
         return True
+
+    def apply_languages(self, folder: Path) -> None:
+        """Make what a new choice of languages asks for (languages.json, written by the window)."""
+        with self.lock:
+            self.failed.discard(str(Path(folder)))
+        self.enqueue(folder)
 
     def redo_summary(self, folder: Path) -> bool:
         """Write the summary again, e.g. after the prompt changed; False while the recording is worked on."""
@@ -396,6 +404,17 @@ class PipelineRunner:
                         folder, "topics", "running", text), sound_dir=self.sound_dir, style_dir=self.style_dir)
                     self._set(folder, "topics", "done")
                     return True
+                # subtitles in more languages and captions in the picture, once the videos are there
+                chosen = languages.fixed(folder, settings)
+                if languages.due(folder, styles.load(self.style_dir), chosen):
+                    say = lambda text: self._set(folder, "languages", "running", text)      # noqa: E731
+                    say("Untertitel in weiteren Sprachen …")
+                    meta = files.read_json(folder / "session.json")
+                    languages.run(folder, self.key, settings, llm.stage_config("translate", self.models()),
+                                  self.video_args, self.style_dir, self.terms_for(meta), progress=say)
+                    made = languages.finished(folder)
+                    self._set(folder, "languages", "done", f"{len(made)} Dateien in weiteren Sprachen" if made else "")
+                    return True
             if (folder / "render.json").exists() and \
                     (not summary.current(folder) or read_state(folder).get("summary_requested")):
                 key = self.key("openai")
@@ -418,7 +437,8 @@ class PipelineRunner:
             step = next((k for k in STEPS if now.get(k, {}).get("state") == "running"), None) or \
                 next((k for k in STEPS if now.get(k, {}).get("state") != "done"), STEPS[-1])
             name = {"transcribe": "Transkription", "subtitles": "Untertitel", "cut": "Schnitt-Vorschlag",
-                    "render": "Rendern", "topics": "Themenvideos", "summary": "Zusammenfassung"}[step]
+                    "render": "Rendern", "topics": "Themenvideos", "languages": "Sprachen",
+                    "summary": "Zusammenfassung"}[step]
             self._set(folder, step, "failed", f"{name} fehlgeschlagen: {e}"[:300])
             self.failed.add(str(folder))
             return True

@@ -3,9 +3,10 @@
 A recording is a session folder <archive>\\<term>\\<module>\\<date> - <topic>\\ with a
 session.json; older recordings filed as two loose videos are not listed. On the server a
 session folder is named by its session id, so topic and term come from session.json. For
-each recording the page shows its way through the pipeline as eight steps, in order (STEPS):
+each recording the page shows its way through the pipeline as nine steps, in order (STEPS):
 recorded, transcript, outline, edit (the proposal and its approval), longversion (the
-rendered long version), topics (the topic videos), content, publish. The station "cut" spans
+rendered long version), topics (the topic videos), languages (subtitles in more languages and
+captions in the picture, since 2026-11-13), content, publish. The station "cut" spans
 edit and longversion, as before 2026-11-12, for the badge and older callers.
 """
 from __future__ import annotations
@@ -14,12 +15,12 @@ import datetime as dt
 import re
 from pathlib import Path
 
-from pipeline import cut_review, cut_rules, edit, files, locks, outline, products, publish, render, review
+from pipeline import cut_review, cut_rules, edit, files, languages, locks, outline, products, publish, render, review
 from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
-STEPS = ("recorded", "transcript", "outline", "edit", "longversion", "topics", "content", "publish")
-MEDIA = re.compile(r"^(recording|screen|camera|edited|clip-\d{2}|topic-\d{2})\.mp4$"
+STEPS = ("recorded", "transcript", "outline", "edit", "longversion", "topics", "languages", "content", "publish")
+MEDIA = re.compile(r"^(recording|screen|camera|edited|clip-\d{2}|topic-\d{2})\.mp4$|^(edited|topic-\d{2})\.burned\.[a-z]{2}\.mp4$"
                    r"|^(subtitles|edited|clip-\d{2}|topic-\d{2})\.[a-z]{2}\.vtt$|^(thumbnail|topic-\d{2})\.jpg$")
 
 
@@ -135,8 +136,19 @@ def stations(folder: Path, queued: bool | None = None) -> dict[str, str]:
         topics = "queued"
     else:
         topics = "done"
+    # the languages: subtitles in more languages and captions in the picture, once the videos are there
+    lang = steps.get("languages", {}).get("state")
+    if longversion != "done":
+        spoken_only = "soon"
+    elif lang in ("running", "failed"):
+        spoken_only = lang
+    elif languages.due(folder):
+        spoken_only = "queued"
+    else:
+        spoken_only = "done"
     return {"recorded": "done", "transcript": transcript, "cut": cut, "content": content, "publish": out,
-            "outline": outlined, "edit": proposal, "longversion": longversion, "topics": topics}
+            "outline": outlined, "edit": proposal, "longversion": longversion, "topics": topics,
+            "languages": spoken_only}
 
 
 def scan(archive: Path) -> dict[str, Path]:
@@ -224,4 +236,5 @@ def cut_view(folder: Path) -> dict:
                               "clips": _read(folder / "clips.json").get("clips", []),
                               "chapters": _read(folder / "chapters.json").get("chapters", [])}
             view["topics"] = products.view(folder)
+            view["languages"] = languages.view(folder)
     return view

@@ -242,7 +242,7 @@ def default_cards(e: dict, meta: dict, settings: dict | None = None) -> dict:
     except ValueError:
         date = ""
     module, title = meta.get("course_name", ""), e.get("title", "")
-    lecturer = meta.get("instructor_name", "")
+    lecturer = settings.get("lecturer_name") or meta.get("instructor_name", "")
     return {"title": {"on": settings.get("title_card", True), "title": title, "kicker": module,
                       "footer": "   ".join(x for x in (date, lecturer) if x)},
             "closing": {"on": settings.get("closing_card", True), "title": "Danke fürs Zuschauen",
@@ -250,6 +250,18 @@ def default_cards(e: dict, meta: dict, settings: dict | None = None) -> dict:
             "chapters": settings.get("chapter_display", "card"),
             "chapter_sound": settings.get("chapter_sound", True),
             "music": settings.get("music", True)}
+
+
+def renamed(cards: dict | None, meta: dict, settings: dict | None) -> dict | None:
+    """The cards with the name of the account on the title card replaced by the name the lecturer gave in
+    the settings (cut.lecturer_name, since 2026-11-13); None if nothing changes. Cards made before there was
+    the setting carry the account's name, on a computer of its own the Windows user name."""
+    new, old = ((settings or {}).get("lecturer_name") or "").strip(), (meta.get("instructor_name") or "").strip()
+    title = (cards or {}).get("title") or {}
+    parts = (title.get("footer") or "").split("   ")
+    if not new or not old or new == old or old not in parts:
+        return None
+    return {**cards, "title": {**title, "footer": "   ".join(new if x == old else x for x in parts)}}
 
 
 def approve(folder: Path, settings: dict | None = None) -> str:
@@ -267,9 +279,10 @@ def approve(folder: Path, settings: dict | None = None) -> str:
     if exposed:
         return (f"{len(exposed)} Datenschutz-Sperre{'n' if len(exposed) > 1 else ''} noch sichtbar oder hörbar "
                 f"({', '.join(x['id'] for x in exposed[:6])}): abdecken oder ausdrücklich aufheben, dann freigeben.")
+    meta = files.read_json(folder / "session.json")
     if "cards" not in e:
-        meta = files.read_json(folder / "session.json")
         e["cards"] = default_cards(e, meta, settings)
+    e["cards"] = renamed(e["cards"], meta, settings) or e["cards"]
     e["approved"] = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     save(folder, e)
     return ""

@@ -34,6 +34,7 @@ DEFAULTS = {
     "review": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},     # transitions, cut_review.py
     "summary": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},
     "topics": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},   # feedback, products.py
+    "translate": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "low"},   # subtitles, languages.py
 }
 
 

@@ -17,12 +17,18 @@ style.json, every field optional:
      "lower_third": {"seconds": 5.0},
      "sounds": {"title": "intro", "chapter": "swoosh", "closing": "outro", "volume": 0.7},
      "intro": "intro.mp4", "outro": "outro.mp4",
-     "cut_fade_ms": 10}
+     "cut_fade_ms": 10,
+     "captions": {"highlight": "#009ee3", "size": 4.5, "box": 0.6}}
 
 Files are named relative to the style folder and must lie inside it. A font that is no file there is
 looked up among the system's fonts. A sound is a file <name>.mp3 or <name>.wav in the style folder,
 else one of the sounds made once with ElevenLabs (sounds.py). The intro plays before the title card,
-the outro after the closing card, both scaled to the size of the recording.
+the outro after the closing card, both scaled to the size of the recording. "captions" is the look of
+captions burned into the picture (languages.py): the color of the word being spoken, the size of the
+type in percent of the picture's height, and how opaque the dark box behind the lines is.
+
+Since 2026-11-13 the window changes the name, the colors, the captions and the logo (save(),
+set_logo()); who may do that is the server's business (my_recordings.py).
 """
 from __future__ import annotations
 
@@ -43,11 +49,15 @@ DEFAULT = {
     "intro": "",
     "outro": "",
     "cut_fade_ms": 10,                   # the sound fades in and out this long at every cut, so it does not click
+    "captions": {"highlight": "#009ee3", "size": 4.5, "box": 0.6},   # burned-in captions (languages.py)
 }
 LIMITS = {("cards", "title"): (1.0, 15.0), ("cards", "chapter"): (0.5, 10.0), ("cards", "closing"): (1.0, 15.0),
           ("cards", "fade"): (0.0, 1.0), ("lower_third", "seconds"): (1.0, 20.0), ("sounds", "volume"): (0.0, 1.5),
-          ("cut_fade_ms",): (0.0, 50.0)}
+          ("cut_fade_ms",): (0.0, 50.0), ("captions", "size"): (2.5, 8.0), ("captions", "box"): (0.0, 1.0)}
 FILE = "style.json"
+NOT_IN_FINGERPRINT = ("captions",)      # only the burned-in captions use it, and they have their own signature
+LOGO_TYPES = {"png": bytes.fromhex("89504e470d0a1a0a"), "jpg": bytes.fromhex("ffd8ff")}
+LOGO_BYTES = 2_000_000
 
 
 def _color(value) -> bool:
@@ -95,6 +105,9 @@ def load(folder: Path | None) -> dict:
         if not _color(v):
             problems.append(f"Farbe „{k}“ ist kein #rrggbb: {v!r}")
             s["colors"][k] = DEFAULT["colors"][k]
+    if not _color(s["captions"]["highlight"]):
+        problems.append(f"Farbe „captions.highlight“ ist kein #rrggbb: {s['captions']['highlight']!r}")
+        s["captions"]["highlight"] = DEFAULT["captions"]["highlight"]
     for path, (lo, hi) in LIMITS.items():
         parent = s if len(path) == 1 else s[path[0]]
         default = DEFAULT[path[0]] if len(path) == 1 else DEFAULT[path[0]][path[1]]
@@ -135,7 +148,7 @@ def fingerprint(s: dict) -> str:
         if path is not None:
             st = path.stat()
             stamps.append((name, st.st_size, st.st_mtime_ns))
-    body = {k: s[k] for k in DEFAULT}                      # not where it lies, nor what render.py measured
+    body = {k: s[k] for k in DEFAULT if k not in NOT_IN_FINGERPRINT}   # not where it lies, nor what render.py measured
     return hashlib.sha1(json.dumps([body, stamps], sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -169,3 +182,80 @@ def sound(s: dict, moment: str, sound_dir: Path | None) -> tuple[str | None, Pat
 def asset(s: dict, key: str) -> Path | None:
     """The file of the style's logo, intro or outro, if it has one."""
     return inside(Path(s["folder"]) if s.get("folder") else None, s.get(key, ""))
+
+
+# ---------------------------------------------------------------- changed from the window (2026-11-13)
+
+EDITABLE = {"name": None, "colors": ("background", "accent", "text"), "captions": ("highlight", "size", "box")}
+
+
+def _raw(folder: Path) -> dict:
+    try:
+        raw = json.loads((Path(folder) / FILE).read_text(encoding="utf-8-sig"))
+        return raw if isinstance(raw, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write(folder: Path, raw: dict) -> None:
+    Path(folder).mkdir(parents=True, exist_ok=True)
+    tmp = Path(folder) / (FILE + ".tmp")
+    tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(Path(folder) / FILE)
+
+
+def save(folder: Path, changes: dict) -> dict:
+    """Write the name, colors and captions of changes into style.json in folder, keeping every other field
+    of it (fonts, sounds, intro, outro, which are kept by hand); returns the style. Raises ValueError for
+    a value the style would not accept, so a wrong click never leaves a broken style behind."""
+    raw = _raw(folder)
+    for key, fields in EDITABLE.items():
+        if key not in (changes or {}):
+            continue
+        value = changes[key]
+        if fields is None:
+            raw[key] = " ".join(str(value or "").split())[:80] or DEFAULT[key]
+            continue
+        if not isinstance(value, dict):
+            raise ValueError(f"{key} ist kein Objekt")
+        part = dict(raw.get(key) or {})
+        for k, v in value.items():
+            if k not in fields:
+                raise ValueError(f"unbekanntes Feld {key}.{k}")
+            if (key == "colors" or k == "highlight") and not _color(v):
+                raise ValueError(f"{key}.{k} ist keine Farbe #rrggbb")
+            if (key, k) in LIMITS:
+                lo, hi = LIMITS[(key, k)]
+                v = float(v)
+                if not lo <= v <= hi:
+                    raise ValueError(f"{key}.{k} liegt nicht zwischen {lo:g} und {hi:g}")
+            part[k] = v
+        raw[key] = part
+    _write(folder, raw)
+    return load(folder)
+
+
+def set_logo(folder: Path, data: bytes | None, kind: str = "png") -> dict:
+    """Put a logo (PNG or JPEG, at most LOGO_BYTES) into the style folder and name it in style.json; with no
+    data the logo goes and the cards show the FLEX3 mark again. Returns the style."""
+    raw = _raw(folder)
+    old = inside(folder, str(raw.get("logo") or ""))
+    if data:
+        if kind not in LOGO_TYPES or not data.startswith(LOGO_TYPES[kind]):
+            raise ValueError("Das Logo muss ein PNG- oder JPEG-Bild sein.")
+        if len(data) > LOGO_BYTES:
+            raise ValueError("Das Logo ist größer als 2 MB.")
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        name = f"logo.{kind}"
+        tmp = Path(folder) / (name + ".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(Path(folder) / name)
+        raw["logo"] = name
+        if old is not None and old.name != name:
+            old.unlink(missing_ok=True)
+    else:
+        raw.pop("logo", None)
+        if old is not None and old.name.startswith("logo."):
+            old.unlink(missing_ok=True)
+    _write(folder, raw)
+    return load(folder)

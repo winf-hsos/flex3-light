@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 
 import library
-from pipeline import cut_rules, edit, locks, products, publish, review
+from pipeline import cut_rules, edit, files, languages, locks, products, publish, review
 from pipeline import style as styles
 
 
@@ -36,6 +36,12 @@ class Recordings:
         if folder is None:
             return None
         view = {**library.detail(folder, self.pipeline.queued(folder)), "status": self.pipeline.describe(folder)}
+        shown = (view.get("cut") or {}).get("edit")
+        if shown and not shown.get("approved"):     # the name from the settings, saved with the approval
+            shown["cards"] = edit.renamed(shown.get("cards"), files.read_json(folder / "session.json"),
+                                          self.cut_settings()) or shown.get("cards")
+        if (view.get("cut") or {}).get("languages") is not None:   # with the choice the settings would give
+            view["cut"]["languages"] = languages.view(folder, self.cut_settings())
         made = (view.get("cut") or {}).get("render")
         if made:                                   # rendered in the style the server has now?
             now = styles.load(getattr(self.pipeline, "style_dir", None))
@@ -249,6 +255,20 @@ class Recordings:
             return "Es gibt noch keine Themenvideos."
         return "" if self.pipeline.revise_topics(folder, text) else "An dieser Aufnahme wird gerade gearbeitet."
 
+    def set_languages(self, sid: str, choices: dict) -> str:
+        """The lecturer's choice of languages per video {video id: {"languages", "burned"}}, made at once."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        with self.pipeline.lock:
+            if self.pipeline.active == str(folder):
+                return "An dieser Aufnahme wird gerade gearbeitet. Versuch es gleich noch einmal."
+            error = languages.set_choices(folder, choices or {})
+        if error:
+            return error
+        self.pipeline.apply_languages(folder)
+        return ""
+
     def change_topic(self, sid: str, pid: str, changes: dict) -> str:
         folder, error = self._topics_of(sid)
         return error or products.change(folder, pid, changes or {})
@@ -299,6 +319,12 @@ class Recordings:
         e = edit.load(folder)
         if not (e and e.get("approved")):
             return "Neu rendern geht nur mit einem freigegebenen Schnitt."
+        if self.pipeline.active == str(folder):
+            return "An dieser Aufnahme wird gerade gearbeitet."
+        cards = edit.renamed(e.get("cards"), files.read_json(folder / "session.json"), self.cut_settings())
+        if cards:                                  # the name from the settings instead of the account's
+            e["cards"] = cards
+            edit.save(folder, e)
         if not self.pipeline.redo_render(folder):
             return "An dieser Aufnahme wird gerade gearbeitet."
         return ""
