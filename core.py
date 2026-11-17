@@ -32,6 +32,7 @@ import monitors                  # sets DPI awareness on import: physical pixels
 import obs_remote as remote
 import obs_scene as scene
 import delivery as delivery_mod
+import device_watch
 import local_server
 from delivery import Delivery, recycle
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
@@ -162,6 +163,23 @@ class LevelMeter(threading.Thread):
                 time.sleep(2)
 
 
+# ------------------------------------------------------------------ devices
+
+# Without a saved choice: the likely screen, camera and microphone, by name.
+DEVICE_GUESS = {"screen": lambda n: "Haupt" in n or "Primary" in n, "camera": lambda n: "C920" in n,
+                "microphone": lambda n: "DJI" in n or "C920" in n}
+
+
+def pick_device(names: list[str], wanted: str | None, current: str | None, guess) -> str:
+    """The device to use: the lecturer's choice if it is there, else the one in use, else a likely
+    one, else the first. A chosen camera that was unplugged comes back by itself when plugged in."""
+    if wanted in names:
+        return wanted
+    if current in names:
+        return current
+    return next((n for n in names if guess(n)), names[0] if names else "")
+
+
 # ------------------------------------------------------------------ core
 
 class Core:
@@ -190,6 +208,9 @@ class Core:
         self.message, self.message_kind = "", "info"
         self.obs_state = {"paused": False, "time": "00:00:00"}
         self.screen_size = (scene.FIELD_W, scene.FIELD_H)
+        self.devices_stamp = 0                    # counts changes of the device lists, for the window
+        self.device_print = device_watch.fingerprint()
+        self.devices_due: list[float] = []        # when to ask OBS for the device lists again
         # The modules live in the lecturer's profile; on the very first start it takes over what exists.
         self.profile = Profile(PROFILE_FILE)
         if self.profile.is_new:
@@ -222,16 +243,12 @@ class Core:
         with self.lock:
             if self.session is None:               # OBS cannot switch profiles while it records
                 scene.ensure_profile_and_scene(self.o, self.raw_dir)
-            self.devices = scene.devices(self.o)
-        self.devices["camera"] = self.devices["camera"] + [(scene.NO_CAMERA, scene.NO_CAMERA)]
-        guess = {"screen": lambda n: "Haupt" in n or "Primary" in n, "camera": lambda n: "C920" in n,
-                 "microphone": lambda n: "DJI" in n or "C920" in n}
-        self.choice = {}
+            self.devices = self._read_devices(self.o)
+        self.choice, self.wanted = {}, {}
         for kind, items in self.devices.items():
-            names = [n for n, _ in items]
-            saved = self.settings.get(kind)
-            self.choice[kind] = saved if saved in names else next(
-                (n for n in names if guess[kind](n)), names[0] if names else "")
+            self.choice[kind] = pick_device([n for n, _ in items], self.settings.get(kind), None, DEVICE_GUESS[kind])
+            # what the lecturer chose stays wanted while it is unplugged, so it comes back with the device
+            self.wanted[kind] = self.settings.get(kind) or self.choice[kind]
         if self.session is None:                   # never change the sources of a running recording
             self.apply_devices()
 
@@ -258,6 +275,48 @@ class Core:
                 "options": dict(self.options), "cut": self.cut_settings(), "after_recording": self.after_recording(),
                 "server": self.server_info()}
 
+    @staticmethod
+    def _read_devices(o: remote.Obs) -> dict[str, list[tuple[str, str]]]:
+        devices = scene.devices(o)
+        devices["camera"] = devices["camera"] + [(scene.NO_CAMERA, scene.NO_CAMERA)]
+        return devices
+
+    def watch_devices(self) -> None:
+        """While idle: notice a camera, microphone or screen plugged in or out. Windows reports it at
+        once and cheaply; OBS is asked only then (it takes 1 to 2 s), and once more a few seconds
+        later, because an audio device can reach OBS a moment after its camera."""
+        now = time.time()
+        fp = device_watch.fingerprint()
+        if fp != self.device_print:
+            self.device_print = fp
+            self.devices_due = [now + 1, now + 5]
+        if self.devices_due and now >= self.devices_due[0]:
+            self.devices_due.pop(0)
+            try:
+                self.refresh_devices()
+            except Exception:                     # OBS busy or reconnecting: try once more shortly
+                if not self.devices_due:
+                    self.devices_due.append(now + 5)
+
+    def refresh_devices(self) -> bool:
+        """Read the device lists from OBS again; never during a recording. Returns whether they changed."""
+        if self.session is not None:
+            return False
+        with remote.Obs() as o:                   # own connection: the slow query does not hold the lock
+            new = self._read_devices(o)
+        with self.lock:
+            if self.session is not None or new == self.devices:
+                return False
+            before = {k: self._device_id(k) for k in self.devices}
+            self.devices = new
+            for kind, items in new.items():
+                self.choice[kind] = pick_device([n for n, _ in items], self.wanted.get(kind),
+                                                self.choice.get(kind), DEVICE_GUESS[kind])
+            if any(self._device_id(k) != before.get(k) for k in new):
+                self.apply_devices()
+            self.devices_stamp += 1
+        return True
+
     def _device_id(self, kind: str) -> str | None:
         return next((i for n, i in self.devices[kind] if n == self.choice.get(kind)), None)
 
@@ -275,7 +334,7 @@ class Core:
 
     def select(self, kind: str, name: str) -> None:
         if self.session is None and name in [n for n, _ in self.devices[kind]]:
-            self.choice[kind] = name
+            self.choice[kind] = self.wanted[kind] = name
             self.apply_devices()
 
     def set_option(self, name: str, value: bool) -> None:
@@ -411,7 +470,8 @@ class Core:
         self.delivery.wake.set()
 
     def save(self) -> None:
-        self.settings.update({"module": self.module, **self.choice, "archive_dir": str(self.archive),
+        self.settings.update({"module": self.module, **{k: v for k, v in self.wanted.items() if v},
+                              "archive_dir": str(self.archive),
                               "raw_dir": str(self.raw_dir), **self.options})
         save_settings(self.settings)
 
@@ -718,9 +778,11 @@ class Core:
                 "private": self.private_start is not None,
                 "connection": self.delivery.connection(), "profile_status": self.profile.status,
                 "profile_pending": self.profile.dirty() and self.delivery.connection() != "local",
-                "profile_stamp": f"{self.profile.data['revision']}-{self.profile.data['synced_at']}"}
+                "profile_stamp": f"{self.profile.data['revision']}-{self.profile.data['synced_at']}",
+                "devices_stamp": self.devices_stamp}
 
     def _loop(self) -> None:
+        next_device_check = 0.0
         while True:
             try:
                 if self.session is not None:
@@ -736,6 +798,9 @@ class Core:
                     self.obs_state = {"paused": st["outputPaused"], "time": st["outputTimecode"].split(".")[0]}
                 while not self.events.empty():
                     self._handle(*self.events.get())
+                if self.session is None and time.time() >= next_device_check:
+                    next_device_check = time.time() + 2
+                    self.watch_devices()
             except Exception as e:
                 self.message, self.message_kind = f"Verbindung zu OBS gestört: {e}", "error"
                 try:

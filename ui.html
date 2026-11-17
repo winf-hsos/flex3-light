@@ -813,6 +813,7 @@
   const $ = id => document.getElementById(id);
   let view = "full", page = "record", pauseIcon = "pause", confirmUntil = 0;
   let profile = [], editingId = null, profileStamp = "";
+  let devicesStamp;                                      // see the status loop: device lists changed
   let previewUrl = "", mediaBase = "", lastLevelAt = 0;
   const LANGUAGES = {de: "DE", en: "EN"};
   const PAGES = {
@@ -2731,6 +2732,15 @@
       document.body.classList.toggle("recording", st.recording);
       document.body.classList.toggle("asking", st.recording && st.asking);
       showConnection(st);
+      if (st.devices_stamp !== devicesStamp) {              // a camera, microphone or screen came or went
+        const first = devicesStamp === undefined;
+        devicesStamp = st.devices_stamp;
+        if (!first && !st.recording) {
+          const d = await api().data();
+          for (const kind of ["screen", "camera", "microphone"]) fillSelect(kind, d.devices[kind], d.choice[kind]);
+          updatePreview(); updateReady();
+        }
+      }
       if (st.profile_stamp !== profileStamp) {              // changed here or on another device
         const first = !profileStamp;
         profileStamp = st.profile_stamp;
