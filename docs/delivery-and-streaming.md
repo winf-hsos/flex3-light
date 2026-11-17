@@ -1,6 +1,6 @@
 # Delivery to the FLEX3 server and live streaming: plan
 
-Status: proposal of 2026-10-26, nothing of it is built yet. Decisions that only Nicolas can make are marked **Decision**.
+Status: proposal of 2026-10-26; delivery is built since then, and Nicolas decided the open points on 2026-11-17 (marked **Decided**).
 
 FLEX3 Light takes over the jobs of the FLEX3 device on the lecturer's laptop. For the server it has to look like a device: it delivers one session folder per recording to the ingest endpoint and sends one live stream. This document plans both, based on the FLEX3 repository (`flex3-hsos/flex3`): `knowledge-base/architecture/session-folder.md` (the contract), `post-pipeline.md`, `live-pipeline.md`, `design-principles.md` and the work packages `device`, `ingest-delivery` and `livestream`. Open points of the contract were checked with the FLEX3 project on 2026-10-26. On the same day Nicolas decided that FLEX3 Light is an alternative to the device, not its replacement (IT concept §4.2, decision 30), and that a session folder may carry extra tracks (decision 31). The remaining open points are listed in §4.2 of the IT concept and below.
 
@@ -26,11 +26,11 @@ How the program mix comes about depends on the canvas decision in [virtual-camer
 
 Folders wait in a local outbox (`%USERPROFILE%\Videos\flex3-light-outbox\<session_id>\`) until the upload is confirmed. The session id follows the contract's pattern `<date>_<course code>_<session>`.
 
-**Decision:** layout of the program mix (picture in picture, size and corner of the camera, or side by side). The contract leaves it open.
+**Decided on 2026-11-17:** picture in picture, the screen fills the 1080p picture and the camera sits small at the bottom right (`split.py`); without a camera, the screen alone.
 
-**Decision:** `consent_source`. The contract knows `register` and `restricted_on_device`, and neither fits a laptop without a register. Either FLEX3 Light always delivers `unassigned` and the server takes consent from the register when it assigns the session, or the contract gets a new value. The second is a contract change.
+**Decided on 2026-11-17:** consent comes from the lecturer's profile, which counts as their entry in the register: `consent_source` is `register`, `consent.publication` is what the lecturer set for the module (off until set), `consent.voice_clone` is never set. No contract change. The server sets the same from its copy of the profile when it assembles a session and keeps earlier sessions in step when the profile changes. `status` stays `assigned` only once the module names an ILIAS course and an Opencast series.
 
-**Decision:** whether `duration_sec` is the net length (without pauses, matching the file) or the gross length. The net length is proposed, because the post-pipeline works on the file.
+**Decided on 2026-11-17:** `duration_sec` is the net length: nothing is recorded during a pause, so it matches the file. The same holds for the device.
 
 ## Part 2: delivery during the lecture
 
@@ -86,15 +86,15 @@ Targets in the order of the FLEX3 work package `livestream`:
 
 Recording and streaming are independent outputs in OBS. A failed stream must never stop the recording; FLEX3 Light shows the stream state in the bar and retries, while the recording runs on.
 
-**Decision:** which live targets FLEX3 Light should offer in its first version (proposed: Teams/Zoom as camera first, YouTube second, the FLEX3 server once its ingest exists).
+**Decided on 2026-11-17:** no Teams or Zoom variant and so no virtual camera: whoever uses Teams shares the screen there, while FLEX3 Light records in parallel with two tracks, and Windows 11 lets Teams and FLEX3 Light use the webcam at the same time (tested by Nicolas). The live target is streaming to YouTube and other platforms, the FLEX3 server once its ingest exists.
 
-**Decision:** whether the FLEX3 server accepts 30 fps on the live path. The live simulator table asks for the device's frame rate (25 or 50), the post-pipeline does not.
+**Decided on 2026-11-17:** a session with a stream switches to 1920×1080 at 25 fps, the device's rate; without a stream FLEX3 Light stays at 30 fps with the wide canvas.
 
 ## Order of work
 
 1. Rename to FLEX3 Light, so it runs next to the lecture recorder (done on 2026-10-26).
 2. Program mix and session folder in the outbox, without upload. Useful at once: the FLEX3 team gets real sessions for its pipeline.
-3. Virtual camera (see the separate document), because it decides the canvas layout that streaming depends on.
-4. Streaming to YouTube and as a camera for Teams/Zoom.
+3. ~~Virtual camera~~ (dropped on 2026-11-17, see above).
+4. Streaming to YouTube and other platforms.
 5. Segmented recording with background processing and the receiving server in `server/`, starting with a test of the split boundaries.
 6. Stream to the FLEX3 server, as soon as MediaMTX runs and a stream key scheme exists.

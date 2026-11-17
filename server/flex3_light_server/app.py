@@ -56,6 +56,7 @@ from .accounts import Accounts, InvalidKey
 from .assemble import join
 from .my_recordings import CALLS, MyRecordings, Sessions
 from .worker import ACTIONS, ROOT, Worker
+from pipeline import files  # noqa: E402  (on the path through .worker)
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +274,9 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
             session = {**session, "device_id": device_id}
             if who.get("user_id"):        # the server knows who recorded, whatever the device claims
                 session.update(instructor_id=who["user_id"], instructor_name=who.get("user_name", ""))
+                module = store.module(who["user_id"], session.get("course_name", ""))
+                if module is not None:    # and the consent from its copy of the lecturer's profile
+                    session.update(profiles.consent(module))
             if tracks:
                 session["tracks"] = tracks
             (out / "session.json").write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -362,7 +366,32 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
             modules = profiles.merge(modules, entries)
             preferences = profiles.merge_preferences(preferences, prefs)
             store.save(who["user_id"], modules, preferences)
+        apply_consent(who["user_id"])
         return answer(who, modules, preferences)
+
+    def apply_consent(user_id: str) -> int:
+        """Keep the consent in the lecturer's recordings in step with their profile, which is their
+        entry in the register: a change there counts for earlier recordings too, and recordings from
+        before 2026-11-17 ("restricted_on_device") are taken over. A recording whose module is gone
+        from the profile keeps what it has. Returns how many session.json were changed."""
+        changed = 0
+        for f in sorted(sessions.iterdir()) if sessions.exists() else []:
+            meta_file = f / "session.json"
+            if not f.is_dir() or f.name.startswith(".") or not meta_file.exists():
+                continue
+            with lock(f.name):
+                meta = files.read_json(meta_file, {})
+                if meta.get("instructor_id") != user_id:
+                    continue
+                module = store.module(user_id, meta.get("course_name", ""))
+                want = profiles.consent(module) if module is not None else None
+                if want is None or all(meta.get(k) == v for k, v in want.items()):
+                    continue
+                files.write_json(meta_file, {**meta, **want})
+                changed += 1
+        if changed:
+            logger.info("Consent of %d recording(s) of %s follows the profile", changed, user_id)
+        return changed
 
     # ---------------------------------------------------------- the page "Meine Aufnahmen"
 

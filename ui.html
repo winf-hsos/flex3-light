@@ -680,6 +680,7 @@
             <div class="field"><label>ILIAS-Kurs, optional</label><input id="m_ilias" placeholder="Kurs-ID"></div>
             <div class="field"><label>Opencast-Serie, optional</label><input id="m_series" placeholder="Serien-ID"></div>
           </div>
+          <label class="toggle"><input type="checkbox" id="m_publication"><span class="knob"></span><span><b>Veröffentlichen im Kurs erlaubt</b><small>Deine Freigabe für die Aufnahmen dieses Moduls. Sie gilt auch für frühere Aufnahmen und geht mit jeder Aufnahme an den FLEX3-Server; ohne sie wird dort nichts im Kurs sichtbar.</small></span></label>
           <div class="field"><label>Fachbegriffe für die Transkription, durch Komma getrennt</label><textarea id="m_terms" rows="3" placeholder="z. B. LiFi, Claude Code, Mikrocontroller"></textarea></div>
           <div class="editor-buttons">
             <button class="btn primary" onclick="saveModule()">Speichern</button>
@@ -2564,6 +2565,7 @@
     $("m_name").value = m.name; $("m_code").value = m.code; $("m_language").value = m.language;
     $("m_ilias").value = m.ilias_course_id; $("m_series").value = m.opencast_series_id;
     $("m_terms").value = (m.terms || []).join(", ");
+    $("m_publication").checked = m.publication === true;
     $("deleteModuleButton").style.display = id ? "" : "none";
     $("manageHint").textContent = ""; $("manageHint").className = "hint";
     for (const r of $("modList").children) r.classList.toggle("selected", r.dataset.id === id);
@@ -2572,7 +2574,7 @@
   async function saveModule() {
     const error = await api().save_module({id: editingId, name: $("m_name").value, code: $("m_code").value,
       language: $("m_language").value, ilias_course_id: $("m_ilias").value, opencast_series_id: $("m_series").value,
-      terms: $("m_terms").value});
+      terms: $("m_terms").value, publication: $("m_publication").checked});
     if (error) { $("manageHint").textContent = error; $("manageHint").className = "hint error"; return; }
     const name = $("m_name").value.trim();
     fillModules(await api().data());

@@ -207,3 +207,46 @@ def test_complete_names_the_lecturer(server, clips):
     meta = json.loads((data / "sessions" / SID / "session.json").read_text(encoding="utf-8"))
     assert (meta["instructor_id"], meta["instructor_name"], meta["device_id"]) == \
         ("lecturer1", "Lecturer One", "flex3-light-laptop")
+
+
+# ------------------------------------------------------------------ consent from the profile
+
+def test_consent_comes_from_the_profile_and_follows_it(server, clips):
+    """Decision of 2026-11-17: the profile is the lecturer's register entry; a change there counts
+    for earlier recordings too, and recordings from before ("restricted_on_device") are taken over."""
+    client, data = server
+    auth = {"Authorization": f"Bearer {LAPTOP}"}
+    sync(client, LAPTOP, [module("m1", "Test", 1, publication=True)])
+    client.put(f"/sessions/{SID}", headers=auth)
+    put(client, "mix", 0, clips[0], headers=auth)
+    client.post(f"/sessions/{SID}/complete", headers=auth, json={"session": session_json(), "parts": {"mix": 1}})
+    meta_file = data / "sessions" / SID / "session.json"
+    end = time.time() + 60
+    while not meta_file.exists() and time.time() < end:
+        time.sleep(0.2)
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    assert meta["consent"] == {"recording": True, "publication": True, "voice_clone": False}
+    assert meta["consent_source"] == "register"
+    # the lecturer withdraws it in the profile: the earlier recording follows
+    sync(client, OFFICE, [module("m1", "Test", 2, publication=False)])
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    assert meta["consent"]["publication"] is False and meta["consent_source"] == "register"
+    # a recording from before, of a module the profile does not know, keeps what it has
+    old = data / "sessions" / "2026-10-01_other_0800"
+    old.mkdir()
+    before = {**session_json("2026-10-01_other_0800"), "course_name": "Other", "instructor_id": "lecturer1"}
+    (old / "session.json").write_text(json.dumps(before), encoding="utf-8")
+    sync(client, LAPTOP, [])
+    assert json.loads((old / "session.json").read_text(encoding="utf-8"))["consent_source"] == "restricted_on_device"
+    # once the module is there, it is taken over
+    sync(client, LAPTOP, [module("m2", "Other", 3, publication=True)])
+    after = json.loads((old / "session.json").read_text(encoding="utf-8"))
+    assert after["consent_source"] == "register" and after["consent"]["publication"] is True
+
+
+def test_publication_must_be_true_or_false(server):
+    client, _ = server
+    bad = client.post("/profile/sync", headers={"Authorization": f"Bearer {LAPTOP}"},
+                      json={"modules": [module("m1", "X", 1, publication="yes")]})
+    assert bad.status_code == 422
+    assert sync(client, LAPTOP, [module("m1", "X", 1)])["m1"]["publication"] is False

@@ -1,6 +1,6 @@
 # Virtual camera for Teams and Zoom: proposal
 
-Status: proposal of 2026-10-26, nothing of it is built yet. Decisions that only Nicolas can make are marked **Decision**. Claims without a primary source are marked *unverified*.
+Status: dropped on 2026-11-17 (Nicolas). Teams and Zoom get no variant of their own: whoever uses them shares the screen, FLEX3 Light records in parallel, and Windows 11 lets both use the webcam at the same time (tested by Nicolas on 2026-11-17). Of this proposal only the canvas switch (layout C) stays, for sessions with a stream. The text below is kept as the reasoning of 2026-10-26.
 
 ## The problem
 
@@ -43,7 +43,7 @@ All camera and streaming options run into the same question, because OBS sends i
 
 Since 2026-10-26 the separate tracks are worth more than before: Nicolas allowed extra tracks in the session folder (FLEX3 IT concept §4, decision 31), so with layout A the server gets `screen.mp4` and `camera.mp4` next to the mix instead of the mix alone.
 
-**Decision:** layout A, B or C. Proposed: **C**. Sessions without a live part keep everything layout A gives (the mix plus both tracks, for the archive and for the server), while sessions with Teams, Zoom or a stream get a proper 1080p picture with stock OBS and no plugin. The cost is that live sessions arrive with the mix only. A plugin for a second canvas (layout A for everything) remains possible later if that turns out to matter.
+**Decided on 2026-11-17:** layout **C**, for sessions with a stream. Sessions without a live part keep everything layout A gives (the mix plus both tracks, for the archive and for the server), while sessions with Teams, Zoom or a stream get a proper 1080p picture with stock OBS and no plugin. The cost is that live sessions arrive with the mix only. A plugin for a second canvas (layout A for everything) remains possible later if that turns out to matter.
 
 ## Proposed steps
 

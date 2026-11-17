@@ -29,7 +29,7 @@ import time
 import uuid
 from pathlib import Path
 
-FIELDS = ("name", "code", "language", "ilias_course_id", "opencast_series_id", "terms")
+FIELDS = ("name", "code", "language", "ilias_course_id", "opencast_series_id", "terms", "publication")
 SYNC_EVERY = 300            # seconds between syncs when nothing changed locally
 
 
@@ -39,6 +39,13 @@ def _newer(a: dict, b: dict) -> dict:
         return a if a["updated_at"] > b["updated_at"] else b
     wire = lambda e: json.dumps({k: v for k, v in e.items() if k != "seed"}, sort_keys=True)  # noqa: E731
     return a if wire(a) >= wire(b) else b
+
+
+def _complete(entry: dict) -> dict:
+    """Fields added later get their default, as the server's clean() gives them; otherwise two
+    devices could keep the same entry with and without the field and never agree."""
+    entry.setdefault("publication", False)          # since 2026-11-17: consent to publish, off until set
+    return entry
 
 
 def _norm(name: str) -> str:
@@ -87,6 +94,8 @@ class Profile:
             self.data = {"user_id": "", "user_name": "", "modules": {}, "revision": 0, "synced_revision": -1,
                          "synced_at": 0}
         self.data.setdefault("preferences", {})
+        for e in self.data["modules"].values():
+            _complete(e)
         self.status = "local"     # "local" (no server), "online", "offline" or "no-profile"
 
     @property
@@ -142,7 +151,8 @@ class Profile:
 
     def add(self, name: str, **fields) -> dict:
         entry = {"id": uuid.uuid4().hex, "name": name.strip(), "code": "", "language": "de",
-                 "ilias_course_id": "", "opencast_series_id": "", "terms": [], "deleted": False}
+                 "ilias_course_id": "", "opencast_series_id": "", "terms": [], "publication": False,
+                 "deleted": False}
         entry.update({k: v for k, v in fields.items() if k in FIELDS})
         if not entry["code"]:
             entry["code"] = code_for(entry["name"])
@@ -191,8 +201,8 @@ class Profile:
                 eid = uuid.uuid4().hex
                 self.data["modules"][eid] = {"id": eid, "name": e["name"], "code": e.get("code", ""),
                                              "language": e.get("language", "de"), "ilias_course_id": "",
-                                             "opencast_series_id": "", "terms": [], "deleted": False, "updated_at": 0.0,
-                                             "seed": True}
+                                             "opencast_series_id": "", "terms": [], "publication": False,
+                                             "deleted": False, "updated_at": 0.0, "seed": True}
             self.data["revision"] += 1
             self.save()
 
@@ -224,6 +234,7 @@ class Profile:
                 for eid in [i for i, e in mods.items() if e.get("seed") and _norm(e["name"]) in known]:
                     del mods[eid]
             for e in theirs:
+                e = _complete(dict(e))
                 mine = mods.get(e["id"])
                 mods[e["id"]] = e if mine is None else _newer(mine, e)
             prefs = self.data["preferences"]
