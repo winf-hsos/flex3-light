@@ -28,7 +28,7 @@ Folders wait in a local outbox (`%USERPROFILE%\Videos\flex3-light-outbox\<sessio
 
 **Decided on 2026-11-17:** picture in picture, the screen fills the 1080p picture and the camera sits small at the bottom right (`split.py`); without a camera, the screen alone.
 
-**Decided on 2026-11-17:** consent comes from the lecturer's profile, which counts as their entry in the register: `consent_source` is `register`, `consent.publication` is what the lecturer set for the module (off until set), `consent.voice_clone` is never set. No contract change. The server sets the same from its copy of the profile when it assembles a session and keeps earlier sessions in step when the profile changes. `status` stays `assigned` only once the module names an ILIAS course and an Opencast series.
+**Decided on 2026-11-17:** every recording arrives unreleased: `consent.publication` is false, `consent_source` is `register`, `consent.voice_clone` is never set, whatever the device sends. The lecturer looks at the recording after the cut and releases it on the server's web page with "Veröffentlichen", recording by recording (`server/flex3_light_server/consent.py`); a per-module consent in the profile was tried the same day and dropped, because a lecturer wants to see each recording first. No contract change. The app stays as narrow as possible: in the long run the steps after the recording leave it for the server's web page. `status` stays `assigned` only once the module names an ILIAS course and an Opencast series.
 
 **Decided on 2026-11-17:** `duration_sec` is the net length: nothing is recorded during a pause, so it matches the file. The same holds for the device.
 

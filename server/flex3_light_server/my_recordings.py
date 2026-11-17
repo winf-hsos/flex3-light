@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import profiles
+from . import consent, profiles
 from .worker import Worker               # puts the repository root on sys.path
 
 import library  # noqa: E402
@@ -249,7 +249,8 @@ class MyRecordings(Recordings):
                 "term": meta["term"], "module": publish.clean(meta["module"]), "name": self.package_name(sid)}
 
     def publish(self, sid: str) -> str:
-        """Pack the finished files into the zip file the page then downloads; returns an error or ''."""
+        """Pack the finished files into the zip file the page then downloads, and release the recording
+        for publication in its session.json; returns an error or ''."""
         folder = self._library.get(sid)
         if folder is None or not folder.exists():
             return "Die Aufnahme ist nicht mehr in der Ablage."
@@ -262,6 +263,7 @@ class MyRecordings(Recordings):
                 publish.make_package(folder, self.package_file(sid))
             except (OSError, ValueError) as e:
                 return str(e) if isinstance(e, (FileNotFoundError, ValueError)) else f"Packen fehlgeschlagen: {e}"
+            consent.release(folder)               # publishing is the lecturer's release of this recording
         return ""
 
     def package(self, sid: str) -> Path | None:

@@ -205,12 +205,10 @@ def test_unreachable_server_keeps_everything_and_resumes(tmp_path, server, segme
     wait_for(lambda: not s.folder.exists())
 
 
-def test_consent_comes_from_the_module_of_the_profile():
+def test_a_recording_starts_unreleased():
     import datetime as dt
     started = dt.datetime(2026, 11, 17, 10, 0, tzinfo=dt.timezone.utc)
     user = {"user_id": "lecturer1", "user_name": "Lecturer One"}
-    allowed = delivery.session_metadata("s1", {"name": "DuP", "publication": True}, "", started, {}, user)
-    assert allowed["consent"] == {"recording": True, "publication": True, "voice_clone": False}
-    assert allowed["consent_source"] == "register"
-    unset = delivery.session_metadata("s2", {"name": "AAI"}, "", started, {}, user)
-    assert unset["consent"]["publication"] is False and unset["consent_source"] == "register"
+    meta = delivery.session_metadata("s1", {"name": "DuP", "publication": True}, "", started, {}, user)
+    assert meta["consent"] == {"recording": True, "publication": False, "voice_clone": False}
+    assert meta["consent_source"] == "register"

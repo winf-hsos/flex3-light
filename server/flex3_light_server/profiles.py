@@ -47,20 +47,9 @@ def clean(entry: dict) -> dict:
             not isinstance(t, str) or not t.strip() or len(t) > TERM_LIMIT for t in terms):
         raise ValueError(f"invalid terms in {eid}")
     out["terms"] = [t.strip() for t in terms]
-    publication = entry.get("publication", False)
-    if not isinstance(publication, bool):
-        raise ValueError(f"invalid publication in {eid}")
-    out["publication"] = publication            # the lecturer's consent to publish this module's recordings
     if not out["deleted"] and not out["name"]:
         raise ValueError(f"module {eid} has no name")
     return out
-
-
-def consent(module: dict | None) -> dict:
-    """The consent fields of a session.json from the lecturer's module (decision of 2026-11-17):
-    the profile is their entry in the register; publication only if set, a cloned voice never."""
-    return {"consent": {"recording": True, "publication": bool(module and module.get("publication") is True),
-                        "voice_clone": False}, "consent_source": "register"}
 
 
 def newer(a: dict, b: dict) -> dict:

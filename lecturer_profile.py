@@ -29,7 +29,7 @@ import time
 import uuid
 from pathlib import Path
 
-FIELDS = ("name", "code", "language", "ilias_course_id", "opencast_series_id", "terms", "publication")
+FIELDS = ("name", "code", "language", "ilias_course_id", "opencast_series_id", "terms")
 SYNC_EVERY = 300            # seconds between syncs when nothing changed locally
 
 
@@ -42,9 +42,10 @@ def _newer(a: dict, b: dict) -> dict:
 
 
 def _complete(entry: dict) -> dict:
-    """Fields added later get their default, as the server's clean() gives them; otherwise two
-    devices could keep the same entry with and without the field and never agree."""
-    entry.setdefault("publication", False)          # since 2026-11-17: consent to publish, off until set
+    """The entry as the server's clean() gives it back; otherwise two devices could keep the same
+    entry with and without a field and never agree. "publication" lived in modules for a few hours
+    on 2026-11-17, until consent moved to each recording."""
+    entry.pop("publication", None)
     return entry
 
 
@@ -151,8 +152,7 @@ class Profile:
 
     def add(self, name: str, **fields) -> dict:
         entry = {"id": uuid.uuid4().hex, "name": name.strip(), "code": "", "language": "de",
-                 "ilias_course_id": "", "opencast_series_id": "", "terms": [], "publication": False,
-                 "deleted": False}
+                 "ilias_course_id": "", "opencast_series_id": "", "terms": [], "deleted": False}
         entry.update({k: v for k, v in fields.items() if k in FIELDS})
         if not entry["code"]:
             entry["code"] = code_for(entry["name"])
@@ -201,8 +201,8 @@ class Profile:
                 eid = uuid.uuid4().hex
                 self.data["modules"][eid] = {"id": eid, "name": e["name"], "code": e.get("code", ""),
                                              "language": e.get("language", "de"), "ilias_course_id": "",
-                                             "opencast_series_id": "", "terms": [], "publication": False,
-                                             "deleted": False, "updated_at": 0.0, "seed": True}
+                                             "opencast_series_id": "", "terms": [], "deleted": False, "updated_at": 0.0,
+                                             "seed": True}
             self.data["revision"] += 1
             self.save()
 

@@ -129,10 +129,9 @@ def default_device_id() -> str:
     return "flex3-light-" + slug(os.environ.get("COMPUTERNAME") or socket.gethostname(), 30)
 
 
-def consent(module: dict) -> dict:
-    """The consent fields of session.json from a module of the lecturer's profile."""
-    return {"consent": {"recording": True, "publication": module.get("publication") is True, "voice_clone": False},
-            "consent_source": "register"}
+# Every recording starts unreleased (decision of 2026-11-17): the lecturer looks at it after the cut
+# and releases it on the server's page, recording by recording. The device never releases anything.
+CONSENT = {"consent": {"recording": True, "publication": False, "voice_clone": False}, "consent_source": "register"}
 
 
 def session_metadata(session_id: str, module: dict, topic: str, started: dt.datetime, settings: dict,
@@ -141,11 +140,8 @@ def session_metadata(session_id: str, module: dict, topic: str, started: dt.date
 
     The module from the lecturer's profile gives course name and language, and, once
     they are entered there, ILIAS course and Opencast series: then the session arrives
-    assigned, otherwise unassigned for the server's queue. Consent comes from the profile
-    as well (decision of 2026-11-17): the profile is the lecturer's entry in the register,
-    so the source is "register". Recording is allowed by starting it, publication is what
-    the lecturer set for the module (off until set), a cloned voice never. The server sets
-    the same from its copy of the profile and keeps it current when the profile changes.
+    assigned, otherwise unassigned for the server's queue. Consent: recording is allowed by
+    starting it, publication only later on the server's page, a cloned voice never (CONSENT).
     """
     ilias, series = module.get("ilias_course_id", ""), module.get("opencast_series_id", "")
     assigned = bool(ilias and series and user.get("user_id"))
@@ -154,7 +150,7 @@ def session_metadata(session_id: str, module: dict, topic: str, started: dt.date
             "instructor_name": user.get("user_name", ""), "recorded_at": started.isoformat(timespec="seconds"),
             "room": "", "language": module.get("language") or settings.get("language", "de"),
             "ilias_course_id": ilias, "opencast_series_id": series,
-            **consent(module),
+            **CONSENT,
             "device_id": settings.get("device_id") or default_device_id(), "software_version": VERSION}
     if topic:
         meta["topic"] = topic             # not in the contract; unknown fields are ignored

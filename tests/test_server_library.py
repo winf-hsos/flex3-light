@@ -120,7 +120,11 @@ def test_the_cut_is_approved_and_published_as_a_package(tmp_path):
     plan = call("publish_plan", MINE)
     assert plan["term"] == "2026-27 - WS" and plan["module"] == "Digitization and Programming"
     assert plan["files"][0] == "2026-11-09 - Digitization and Programming - Bits and Bytes.mp4"   # the title card
+    assert files.read_json(folder / "session.json").get("consent") is None
     assert call("publish", MINE) == ""
+    meta = files.read_json(folder / "session.json")                       # publishing is the release
+    assert meta["consent"] == {"recording": True, "publication": True, "voice_clone": False}
+    assert meta["consent_source"] == "register" and meta["topic"] == "Symbols and Information"
     package = client.get(f"/library/package/{MINE}?s={session}")
     assert package.status_code == 200 and "attachment" in package.headers["content-disposition"]
     with zipfile.ZipFile(io.BytesIO(package.content)) as z:

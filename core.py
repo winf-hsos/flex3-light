@@ -458,7 +458,6 @@ class Core:
         fields["terms"] = list(dict.fromkeys(t.strip()[:80] for t in terms if t.strip()))[:300]
         fields["code"] = re.sub(r"[^a-z0-9-]+", "-", fields["code"].lower()).strip("-")[:40]
         fields["language"] = fields["language"] if re.fullmatch(r"[a-z]{2}", fields["language"] or "") else "de"
-        fields["publication"] = entry.get("publication") is True     # the lecturer's consent, see delivery
         if entry.get("id"):
             self.profile.update(entry["id"], name=name, **fields)
         else:
