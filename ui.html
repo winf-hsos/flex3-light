@@ -416,6 +416,8 @@
   /* what a recording cost: tokens and hours of audio per step and model */
   .usage-table td.num, .usage-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .usage-table tr.total td { font-weight: 600; border-bottom: none; }
+  .usage-panel.off { display: none; }
+  .usage-details { border-top: none; padding-top: 0; }
   .usage-table td.model { color: var(--slate); font-size: 12.5px; white-space: nowrap; }
   .step-actions select { font: inherit; font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 8px;
                        background: var(--surface); }
@@ -1073,6 +1075,7 @@
         <nav class="panel way" id="way" aria-label="Schritte dieser Aufnahme"></nav>
         <div class="player-wrap" id="playerWrap"><video class="player" id="player" controls preload="metadata" crossorigin="anonymous"></video>
           <div class="card-overlay" id="cardOverlay"></div><div id="regions"></div></div>
+        <div class="panel cutpanel usage-panel" id="usageBox"></div>
         <div class="panel cutpanel step-panel" data-step="recorded" id="recordedStep"></div>
         <div class="panel spots step-panel" data-step="transcript" id="spots"></div>
         <div class="panel transcript step-panel" data-step="transcript"><div class="panel-head"><h2>Transkription</h2><span class="hint" id="dStatus"></span>
@@ -1175,6 +1178,7 @@
       }
     }
     renderSpots(d);
+    renderUsage(d);
     renderRecorded(d);
     renderOutlineStep(d);
     renderCut(d);
@@ -1206,7 +1210,7 @@
 
   // step 1: the recording itself
   function renderRecorded(d) {
-    const box = stepBox("recordedStep", JSON.stringify([d.id, d.duration, d.module, playing, d.usage]));
+    const box = stepBox("recordedStep", JSON.stringify([d.id, d.duration, d.module, playing]));
     if (!box) return;
     stepHead(box, "Aufnahme");
     const facts = el("dl", "step-facts");
@@ -1217,14 +1221,30 @@
     box.appendChild(el("p", "step-intro", "Darauf folgen Transkription, Gliederung und Schnitt-Vorschlag; danach entstehen "
       + "nach deinen Freigaben die Langfassung und die Themenvideos. Klick oben auf einen Schritt, um ihn anzusehen."));
     if (playing !== "original") box.appendChild(button("link", "Wieder das Original abspielen", () => play("original")));
-    if (d.usage) box.appendChild(usageTable(d.usage));
   }
-  // tokens per model and the cost of every step so far (pipeline/usage_log.py)
+  // tokens per model and the cost of every step so far (pipeline/usage_log.py), shown with every step;
+  // folding it away is remembered in this browser
+  let usageOpen = true;
+  try { usageOpen = localStorage.getItem("flex3.usageOpen") !== "0"; } catch (e) { /* storage blocked: open */ }
+  const usd = x => "$" + x.toFixed(x < 0.1 ? 3 : 2).replace(".", ",");
+  function renderUsage(d) {
+    const box = stepBox("usageBox", JSON.stringify([d.id, d.usage]));
+    if (!box) return;
+    box.classList.toggle("off", !d.usage);
+    if (!d.usage) return;
+    const det = el("details", "cut-details usage-details");
+    det.open = usageOpen;
+    det.ontoggle = () => {
+      usageOpen = det.open;
+      try { localStorage.setItem("flex3.usageOpen", det.open ? "1" : "0"); } catch (e) { /* only a convenience */ }
+    };
+    det.appendChild(el("summary", "", `Verbrauch und Kosten: ${usd(d.usage.total)} bisher`));
+    det.appendChild(usageTable(d.usage));
+    box.appendChild(det);
+  }
   function usageTable(u) {
     const wrap = el("div", "lang-wrap");
-    wrap.appendChild(el("h3", "", "Verbrauch und Kosten"));
     const tokens = n => n ? (n >= 1e6 ? (n / 1e6).toFixed(2).replace(".", ",") + " Mio." : Math.round(n / 1000).toLocaleString("de-DE") + " Tsd.") : "–";
-    const usd = x => "$" + x.toFixed(x < 0.1 ? 3 : 2).replace(".", ",");
     const t = el("table", "lang-table usage-table");
     const head = el("tr");
     for (const [h, c] of [["Schritt", ""], ["Modell", ""], ["Aufrufe", "num"], ["Eingabe", "num"], ["davon Cache", "num"],
