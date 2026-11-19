@@ -206,7 +206,7 @@ def test_the_agent_gets_the_locks_and_checks_them(tmp_path):
 class Listener:
     """Answers like AssemblyAI with speaker labels: the lecturer, and a question from the room."""
 
-    def transcribe_file(self, mp3, language, terms, speakers=False):
+    def transcribe_file(self, mp3, language, terms, speakers=False, purpose="transcribe"):
         assert speakers and mp3.stat().st_size > 0
         lecturer = [{"word": w, "start": 1.0 + i * 0.5, "end": 1.4 + i * 0.5, "speaker": "A"}
                     for i, w in enumerate("Hallo heute geht es los und weiter".split())]

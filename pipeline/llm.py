@@ -23,6 +23,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable
 
+from pipeline import usage_log
+
 # The models of the stages, unless the server's configuration says otherwise (models.json in its
 # data folder): {"cut": {"adapter": ..., "model": ..., "effort": ...}, ...}
 DEFAULTS = {
@@ -141,8 +143,9 @@ class OpenAIResponses:
     URL = "https://api.openai.com/v1/responses"
 
     def __init__(self, key: str, model: str, effort: str = "high", timeout: float = 600,
-                 post: Callable[[str, dict, dict, float], dict] = _post):
+                 post: Callable[[str, dict, dict, float], dict] = _post, stage: str = ""):
         self._key, self.model, self.effort, self.timeout, self._post = key, model, effort, timeout, post
+        self.stage = stage                      # for the count of tokens per recording (usage_log)
         self._history: list | None = None       # the conversation of the last call, and how much of it
         self._sent = 0                          # the provider already holds (with the reply)
         self._last_id = ""
@@ -153,7 +156,15 @@ class OpenAIResponses:
     def create(self, body: dict) -> dict:
         """A raw request, for callers that need the API's own features (e.g. the summary's schema)."""
         body = {"model": self.model, "reasoning": {"effort": self.effort}, **body}
-        return self._post(self.URL, body, {"Authorization": f"Bearer {self._key}"}, self.timeout)
+        r = self._post(self.URL, body, {"Authorization": f"Bearer {self._key}"}, self.timeout)
+        usage_log.note_tokens(self.stage, self.model, self._usage(r).as_dict())
+        return r
+
+    @staticmethod
+    def _usage(r: dict) -> "Usage":
+        u = r.get("usage") or {}
+        return Usage(u.get("input_tokens", 0), (u.get("input_tokens_details") or {}).get("cached_tokens", 0),
+                     u.get("output_tokens", 0), (u.get("output_tokens_details") or {}).get("reasoning_tokens", 0))
 
     def complete(self, instructions: str, messages: list[Message], tools: list[Tool]) -> Reply:
         body = {"instructions": instructions, "tools": [self._tool(t) for t in tools]}
@@ -169,10 +180,7 @@ class OpenAIResponses:
                  for o in out if o.get("type") == "function_call"]
         text = " ".join(c.get("text", "") for o in out if o.get("type") == "message"
                         for c in o.get("content", []) if c.get("type") == "output_text").strip()
-        u = r.get("usage") or {}
-        return Reply(text, calls, Usage(u.get("input_tokens", 0), (u.get("input_tokens_details") or {}).get("cached_tokens", 0),
-                                        u.get("output_tokens", 0),
-                                        (u.get("output_tokens_details") or {}).get("reasoning_tokens", 0)))
+        return Reply(text, calls, self._usage(r))
 
     @staticmethod
     def _tool(t: Tool) -> dict:
@@ -214,9 +222,9 @@ class OpenAIResponses:
 class OpenAIChat:
     def __init__(self, key: str | None, model: str, base_url: str = "https://api.openai.com/v1",
                  effort: str | None = None, timeout: float = 600,
-                 post: Callable[[str, dict, dict, float], dict] = _post):
+                 post: Callable[[str, dict, dict, float], dict] = _post, stage: str = ""):
         self._key, self.model, self.base_url, self.effort = key, model, base_url.rstrip("/"), effort
-        self.timeout, self._post = timeout, post
+        self.timeout, self._post, self.stage = timeout, post, stage
 
     def __repr__(self) -> str:
         return f"OpenAIChat({self.model} at {self.base_url})"
@@ -234,10 +242,10 @@ class OpenAIChat:
         calls = [ToolCall(c["id"], c["function"]["name"], json.loads(c["function"].get("arguments") or "{}"))
                  for c in msg.get("tool_calls") or []]
         u = r.get("usage") or {}
-        return Reply((msg.get("content") or "").strip(), calls,
-                     Usage(u.get("prompt_tokens", 0), (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0),
-                           u.get("completion_tokens", 0),
-                           (u.get("completion_tokens_details") or {}).get("reasoning_tokens", 0)))
+        usage = Usage(u.get("prompt_tokens", 0), (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0),
+                      u.get("completion_tokens", 0), (u.get("completion_tokens_details") or {}).get("reasoning_tokens", 0))
+        usage_log.note_tokens(self.stage, self.model, usage.as_dict())
+        return Reply((msg.get("content") or "").strip(), calls, usage)
 
     @staticmethod
     def _messages(messages: list[Message]) -> list[dict]:
@@ -273,7 +281,7 @@ class OpenAIChat:
 
 def stage_config(stage: str, overrides: dict | None = None) -> dict:
     """The model of a stage: the default, with what the server's configuration sets for it."""
-    return {**DEFAULTS.get(stage, DEFAULTS["cut"]), **((overrides or {}).get(stage) or {})}
+    return {**DEFAULTS.get(stage, DEFAULTS["cut"]), **((overrides or {}).get(stage) or {}), "stage": stage}
 
 
 def make(config: dict, key: Callable[[str], str | None]):
@@ -283,9 +291,10 @@ def make(config: dict, key: Callable[[str], str | None]):
         k = key("openai")
         if not k:
             raise ModelError("Kein OpenAI-Schlüssel")
-        return OpenAIResponses(k, config["model"], config.get("effort", "high"))
+        return OpenAIResponses(k, config["model"], config.get("effort", "high"), stage=config.get("stage", ""))
     if adapter == "openai-chat":
         service = config.get("key")              # a local server needs none
         return OpenAIChat(key(service) if service else None, config["model"],
-                          config.get("base_url", "https://api.openai.com/v1"), config.get("effort"))
+                          config.get("base_url", "https://api.openai.com/v1"), config.get("effort"),
+                          stage=config.get("stage", ""))
     raise ModelError(f"Unbekannter Adapter {adapter}")

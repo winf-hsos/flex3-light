@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 from pipeline import cut_review, cut_rules, edit, files, languages, locks, outline, products, publish, render, review
+from pipeline import usage_log
 from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
@@ -190,7 +191,8 @@ def detail(folder: Path, queued: bool | None = None) -> dict:
             "rated": any("confidence" in w for w in transcript.get("words", [])),
             "cut": cut_view(folder), "content": content_view(folder),
             "publish": {**publish.published(folder), "current": publish.current(folder)},
-            "message": _read(folder / "pipeline.json").get("steps", {}).get("transcribe", {}).get("message", "")}
+            "message": _read(folder / "pipeline.json").get("steps", {}).get("transcribe", {}).get("message", ""),
+            "usage": usage_log.view(folder)}
 
 
 def content_view(folder: Path) -> dict:

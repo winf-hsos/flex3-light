@@ -16,7 +16,7 @@ class Ear:
     def __init__(self, words):
         self.words, self.calls = words, 0
 
-    def transcribe_file(self, mp3, language, terms, speakers=False):
+    def transcribe_file(self, mp3, language, terms, speakers=False, purpose="transcribe"):
         self.calls += 1
         assert mp3.exists() and mp3.stat().st_size > 0
         return {"text": "", "words": self.words, "segments": []}

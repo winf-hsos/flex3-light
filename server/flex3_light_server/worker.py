@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import pipeline_runner  # noqa: E402
-from pipeline import binaries, cut_rules, edit, files, publish  # noqa: E402
+from pipeline import binaries, cut_rules, edit, files, publish, usage_log  # noqa: E402
 from pipeline import style as styles  # noqa: E402
 
 from .profiles import Store  # noqa: E402
@@ -50,6 +50,7 @@ class Worker:
             sound_dir=Path(data_dir) / "sounds", keys=keys or (lambda service: None), models=self._models,
             style_dir=self.style_dir)
         self.models_file = Path(data_dir) / "models.json"
+        usage_log.price_file = Path(data_dir) / "prices.json"   # the server's own prices, if it has any
 
     def start(self) -> "Worker":
         self.runner.video_args = binaries.video_args()      # NVENC with an NVIDIA card, x264 otherwise

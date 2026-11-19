@@ -27,7 +27,7 @@ try:
 except (ImportError, OSError, AttributeError):   # not on Windows: the server passes its own keys
     services = None
 from pipeline import (cut_agent, cut_review, cut_stages, edit, files, languages, llm, outline, products, render,
-                      screening, sounds, subtitles, summary, transcribe)
+                      screening, sounds, subtitles, summary, transcribe, usage_log)
 from pipeline import style as styles
 
 STEPS = ("transcribe", "subtitles", "cut", "render", "topics", "languages", "summary")
@@ -257,7 +257,8 @@ class PipelineRunner:
                     if todo and self.can_run():
                         self.active = todo[0]
                 if self.active:
-                    worked = self._process(Path(self.active))
+                    with usage_log.working_on(Path(self.active)):     # what the step spends, per recording
+                        worked = self._process(Path(self.active))
             except Exception:
                 logging.getLogger("flex3-light").exception("pipeline")
             finally:
@@ -424,7 +425,8 @@ class PipelineRunner:
                     return False
                 self._set(folder, "summary", "running", "Die Zusammenfassung entsteht …")
                 model = llm.stage_config("summary", self.models())     # the summary needs the Responses API
-                result = summary.run(folder, llm.OpenAIResponses(key, model["model"], model.get("effort", "medium")),
+                result = summary.run(folder, llm.OpenAIResponses(key, model["model"], model.get("effort", "medium"),
+                                                                 stage="summary"),
                                      progress=lambda text: self._set(folder, "summary", "running", text))
                 data = read_state(folder)
                 data.pop("summary_requested", None)

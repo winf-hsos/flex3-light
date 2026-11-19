@@ -344,7 +344,7 @@ def run(folder: Path, listener=None, settings: dict | None = None,
                                stdin=subprocess.DEVNULL, capture_output=True, creationflags=binaries.flags(low=True))
             if r.returncode != 0:
                 raise RuntimeError("ffmpeg: " + r.stderr.decode("utf-8", "replace")[-300:])
-            heard = listener.transcribe_file(mp3, language, [], speakers=True)["words"]
+            heard = listener.transcribe_file(mp3, language, [], speakers=True, purpose="screening")["words"]
             room = voices(heard, words, level, lecturer_level)
             checked["sound"] = True
             checked["speakers"] = len({w.get("speaker") for w in heard})

@@ -26,6 +26,8 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+from pipeline import usage_log
+
 from . import audio
 
 PROMPT_LIMIT = 800          # characters; whisper-1 takes at most 224 tokens of prompt
@@ -91,6 +93,7 @@ class OpenAIWhisper:
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:300]
             raise TranscriptionError(f"OpenAI antwortet mit Fehler {e.code}: {detail}") from None
+        usage_log.note_audio("transcribe", self.name, body.get("duration") or 0)
         return {"text": body.get("text", ""), "words": body.get("words", []), "segments": body.get("segments", [])}
 
 
@@ -121,9 +124,11 @@ class AssemblyAI:
             detail = e.read().decode("utf-8", "replace")[:300]
             raise TranscriptionError(f"AssemblyAI antwortet mit Fehler {e.code}: {detail}") from None
 
-    def transcribe_file(self, mp3: Path, language: str, terms: list[str], speakers: bool = False) -> dict:
+    def transcribe_file(self, mp3: Path, language: str, terms: list[str], speakers: bool = False,
+                        purpose: str = "transcribe") -> dict:
         """{"text", "words": [{"word", "start", "end", "confidence"}], "segments": [{"start", "end", "text"}]},
-        times in seconds, confidence from 0 to 1 as the service rates each word."""
+        times in seconds, confidence from 0 to 1 as the service rates each word. purpose: the step
+        the hour of audio is counted for (usage_log)."""
         upload = self._call("POST", "/v2/upload", raw=mp3.read_bytes())
         request = {"audio_url": upload["upload_url"], "language_code": language, "speech_models": [self.MODEL],
                    "punctuate": True, "format_text": True}
@@ -144,6 +149,8 @@ class AssemblyAI:
             if job["status"] == "error":
                 raise TranscriptionError(f"AssemblyAI meldet: {job.get('error', 'unbekannter Fehler')}"[:300])
             sentences = self._call("GET", f"/v2/transcript/{job['id']}/sentences").get("sentences", [])
+            usage_log.note_audio(purpose, self.name, job.get("audio_duration") or 0, terms=bool(keyterms),
+                                 speakers=speakers)
         finally:
             try:
                 self._call("DELETE", f"/v2/transcript/{job['id']}")    # nothing stays with the service

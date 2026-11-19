@@ -125,10 +125,11 @@ def test_a_passing_server_error_is_tried_again(monkeypatch):
 
 
 def test_the_server_chooses_the_model_of_a_stage():
-    assert llm.stage_config("cut") == llm.DEFAULTS["cut"]
+    assert llm.stage_config("cut") == {**llm.DEFAULTS["cut"], "stage": "cut"}      # the stage, for usage_log
     chosen = llm.stage_config("cut", {"cut": {"model": "gpt-6.1-mini"}, "summary": {"model": "x"}})
-    assert chosen == {**llm.DEFAULTS["cut"], "model": "gpt-6.1-mini"}
-    assert isinstance(llm.make(chosen, lambda s: "k"), llm.OpenAIResponses)
+    assert chosen == {**llm.DEFAULTS["cut"], "model": "gpt-6.1-mini", "stage": "cut"}
+    made = llm.make(chosen, lambda s: "k")
+    assert isinstance(made, llm.OpenAIResponses) and made.stage == "cut"
     local = llm.make({"adapter": "openai-chat", "model": "qwen", "base_url": "http://127.0.0.1:11434/v1"},
                      lambda s: pytest.fail("a local server needs no key"))
     assert isinstance(local, llm.OpenAIChat) and local.base_url == "http://127.0.0.1:11434/v1"

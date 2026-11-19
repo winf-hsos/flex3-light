@@ -220,7 +220,7 @@ def listen_at(wav_path: Path, total: float, js: list[dict], listener, language: 
     mp3 = work / "junctions.mp3"
     subprocess.run([binaries.ffmpeg(), "-y", "-v", "error", "-i", str(joined), "-c:a", "libmp3lame", "-b:a", "64k",
                     str(mp3)], stdin=subprocess.DEVNULL, capture_output=True, check=True, creationflags=binaries.flags())
-    heard = listener.transcribe_file(mp3, language, [])
+    heard = listener.transcribe_file(mp3, language, [], purpose="review")
     out: dict[int, list[dict]] = {no: [] for *_, no in offsets}
     starts = [o[0] for o in offsets]
     for w in heard.get("words", []):
