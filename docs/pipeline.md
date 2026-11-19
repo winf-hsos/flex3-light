@@ -197,7 +197,7 @@ Streaming speech recognition during the lecture, shown in a transparent subtitle
 
 Every call to a language model or a transcription service made while the pipeline works on a recording goes to `usage.jsonl` in its folder: the step, the model, the tokens (input, of it from the cache, output) or the seconds of audio (`pipeline/usage_log.py`). The adapters of `pipeline/llm.py` count each call themselves, the transcription services count the audio length they report, and the pipeline sets which recording is in work, so the four sections of the cut that run at once are counted too. The step "Aufnahme" on the recording's page shows a table per step and model with the cost in US dollars, from the providers' prices (OpenAI 2026-11-11, AssemblyAI 2026-10-27); a server can set its own in `prices.json` in its data folder. Recordings from before have no list: the table rebuilds what it can from the rounds in `edit.log.jsonl`, the agents in `outline.json` and `review.json` and the lengths of transcript and screening, and names what the steps did not record (the summary, feedback on topic videos).
 
-Measured on the eight recordings on Nicolas' machine until 2026-11-19: a lecture of three hours costs about 3 USD, of which the cut is about half and transcription and screening with AssemblyAI about 0.80 USD together.
+Measured on the eight recordings on Nicolas' machine until 2026-11-19: a lecture of three hours costs about 3 USD, of which the cut is about half and transcription and screening with AssemblyAI about 1.60 USD together (about 0.80 each).
 
 ## How it is built
 
