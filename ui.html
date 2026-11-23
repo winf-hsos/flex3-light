@@ -182,10 +182,6 @@
   .rec-item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; text-align: left; padding: 11px 12px; border-radius: 12px; background: var(--surface);
     border: 1px solid var(--line); }
   .rec-item:hover { border-color: var(--line-strong); }
-  .rec-search { display: flex; gap: 8px; }
-  .rec-search input { flex: 1; min-width: 0; }
-  .rec-search .btn { flex: none; }
-  .rec-search .btn[aria-pressed="true"] { border-color: var(--blue); color: var(--deep); background: rgba(0, 158, 227, .08); }
   .rec-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .rec-group + .rec-group { margin-top: 6px; }
   .rec-group-head { display: flex; align-items: center; gap: 8px; padding: 6px 4px; text-align: left; font-weight: 600; font-size: 13px;
@@ -661,9 +657,7 @@
       <iframe class="server-frame" id="serverFrame" title="Meine Aufnahmen auf dem Server"></iframe>
       <div class="library" id="library">
         <div class="rec-list">
-          <div class="field rec-search"><input id="search" placeholder="Aufnahmen durchsuchen" oninput="renderRecordings()">
-            <button class="btn" id="groupToggle" onclick="toggleGrouping()" title="Aufnahmen nach Modul gruppieren"
-                    aria-pressed="true">Nach Modul</button></div>
+          <div class="field"><input id="search" placeholder="Aufnahmen durchsuchen" oninput="renderRecordings()"></div>
           <div class="rec-items" id="recItems"></div>
         </div>
         <div class="detail" id="detail"></div>
@@ -1039,23 +1033,15 @@
     if (recordings.length && !recordings.some(r => r.id === selectedId)) selectRecording(recordings[0].id);
     else if (selectedId) refreshDetail();
   }
-  // the list, grouped by module or as one list; grouping and the folded modules are remembered in this
-  // browser. A search shows every match, folded modules included.
-  let groupByModule = true, closedModules = new Set();
-  try {
-    groupByModule = localStorage.getItem("flex3.groupByModule") !== "0";
-    closedModules = new Set(JSON.parse(localStorage.getItem("flex3.closedModules") || "[]"));
-  } catch (e) { /* storage blocked: grouped, all open */ }
-  function rememberList() {
-    try {
-      localStorage.setItem("flex3.groupByModule", groupByModule ? "1" : "0");
-      localStorage.setItem("flex3.closedModules", JSON.stringify([...closedModules]));
-    } catch (e) { /* only a convenience */ }
-  }
-  function toggleGrouping() { groupByModule = !groupByModule; rememberList(); renderRecordings(); }
+  // the list, always grouped by module; the folded modules are remembered in this browser.
+  // A search shows every match, folded modules included.
+  let closedModules = new Set();
+  try { closedModules = new Set(JSON.parse(localStorage.getItem("flex3.closedModules") || "[]")); }
+  catch (e) { /* storage blocked: all open */ }
   function toggleModule(name) {
     if (closedModules.has(name)) closedModules.delete(name); else closedModules.add(name);
-    rememberList(); renderRecordings();
+    try { localStorage.setItem("flex3.closedModules", JSON.stringify([...closedModules])); } catch (e) { /* only a convenience */ }
+    renderRecordings();
   }
   function recItem(r) {
     const b = document.createElement("button");
@@ -1063,7 +1049,7 @@
     b.onclick = () => selectRecording(r.id);
     const title = document.createElement("b"); title.textContent = r.title;
     const meta = document.createElement("small");
-    const mod = document.createElement("span"); mod.textContent = groupByModule ? "" : r.module;
+    const mod = document.createElement("span");                // the module stands in the group's head
     const when = document.createElement("span"); when.className = "tabular"; when.textContent = fmtShort(r.recorded_at);
     meta.append(mod, when);
     const way = document.createElement("div"); way.className = "mini-way";
@@ -1074,9 +1060,7 @@
   function renderRecordings() {
     const q = $("search").value.trim().toLowerCase(), box = $("recItems");
     const shown = recordings.filter(r => !q || (r.title + " " + r.module).toLowerCase().includes(q));
-    $("groupToggle").setAttribute("aria-pressed", groupByModule ? "true" : "false");
     box.innerHTML = "";
-    if (!groupByModule) { for (const r of shown) box.appendChild(recItem(r)); return; }
     // modules in the order of their newest recording, as the list comes newest first; without a module last
     const groups = new Map(), NONE = "Ohne Modul";
     for (const r of shown) {
