@@ -182,6 +182,20 @@
   .rec-item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; text-align: left; padding: 11px 12px; border-radius: 12px; background: var(--surface);
     border: 1px solid var(--line); }
   .rec-item:hover { border-color: var(--line-strong); }
+  .rec-search { display: flex; gap: 8px; }
+  .rec-search input { flex: 1; min-width: 0; }
+  .rec-search .btn { flex: none; }
+  .rec-search .btn[aria-pressed="true"] { border-color: var(--blue); color: var(--deep); background: rgba(0, 158, 227, .08); }
+  .rec-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .rec-group + .rec-group { margin-top: 6px; }
+  .rec-group-head { display: flex; align-items: center; gap: 8px; padding: 6px 4px; text-align: left; font-weight: 600; font-size: 13px;
+    color: var(--deep); background: none; border: 0; cursor: pointer; }
+  .rec-group-head::before { content: "▾"; width: 10px; color: var(--slate); }
+  .rec-group.closed .rec-group-head::before { content: "▸"; }
+  .rec-group-head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rec-group-head .count { color: var(--slate); font-weight: 400; font-size: 12px; }
+  .rec-group.closed .rec-item { display: none; }
+  .rec-group.holds-selected .rec-group-head .name { color: var(--blue); }
   .rec-item.selected { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0, 158, 227, .12); }
   .rec-item b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rec-item small { color: var(--slate); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
@@ -647,7 +661,9 @@
       <iframe class="server-frame" id="serverFrame" title="Meine Aufnahmen auf dem Server"></iframe>
       <div class="library" id="library">
         <div class="rec-list">
-          <div class="field"><input id="search" placeholder="Aufnahmen durchsuchen" oninput="renderRecordings()"></div>
+          <div class="field rec-search"><input id="search" placeholder="Aufnahmen durchsuchen" oninput="renderRecordings()">
+            <button class="btn" id="groupToggle" onclick="toggleGrouping()" title="Aufnahmen nach Modul gruppieren"
+                    aria-pressed="true">Nach Modul</button></div>
           <div class="rec-items" id="recItems"></div>
         </div>
         <div class="detail" id="detail"></div>
@@ -1023,22 +1039,67 @@
     if (recordings.length && !recordings.some(r => r.id === selectedId)) selectRecording(recordings[0].id);
     else if (selectedId) refreshDetail();
   }
+  // the list, grouped by module or as one list; grouping and the folded modules are remembered in this
+  // browser. A search shows every match, folded modules included.
+  let groupByModule = true, closedModules = new Set();
+  try {
+    groupByModule = localStorage.getItem("flex3.groupByModule") !== "0";
+    closedModules = new Set(JSON.parse(localStorage.getItem("flex3.closedModules") || "[]"));
+  } catch (e) { /* storage blocked: grouped, all open */ }
+  function rememberList() {
+    try {
+      localStorage.setItem("flex3.groupByModule", groupByModule ? "1" : "0");
+      localStorage.setItem("flex3.closedModules", JSON.stringify([...closedModules]));
+    } catch (e) { /* only a convenience */ }
+  }
+  function toggleGrouping() { groupByModule = !groupByModule; rememberList(); renderRecordings(); }
+  function toggleModule(name) {
+    if (closedModules.has(name)) closedModules.delete(name); else closedModules.add(name);
+    rememberList(); renderRecordings();
+  }
+  function recItem(r) {
+    const b = document.createElement("button");
+    b.className = "rec-item" + (r.id === selectedId ? " selected" : "");
+    b.onclick = () => selectRecording(r.id);
+    const title = document.createElement("b"); title.textContent = r.title;
+    const meta = document.createElement("small");
+    const mod = document.createElement("span"); mod.textContent = groupByModule ? "" : r.module;
+    const when = document.createElement("span"); when.className = "tabular"; when.textContent = fmtShort(r.recorded_at);
+    meta.append(mod, when);
+    const way = document.createElement("div"); way.className = "mini-way";
+    for (const [key] of STATIONS) { const i = document.createElement("i"); i.className = r.stations[key]; way.appendChild(i); }
+    b.append(title, meta, way);
+    return b;
+  }
   function renderRecordings() {
     const q = $("search").value.trim().toLowerCase(), box = $("recItems");
+    const shown = recordings.filter(r => !q || (r.title + " " + r.module).toLowerCase().includes(q));
+    $("groupToggle").setAttribute("aria-pressed", groupByModule ? "true" : "false");
     box.innerHTML = "";
-    for (const r of recordings.filter(r => !q || (r.title + " " + r.module).toLowerCase().includes(q))) {
-      const b = document.createElement("button");
-      b.className = "rec-item" + (r.id === selectedId ? " selected" : "");
-      b.onclick = () => selectRecording(r.id);
-      const title = document.createElement("b"); title.textContent = r.title;
-      const meta = document.createElement("small");
-      const mod = document.createElement("span"); mod.textContent = r.module;
-      const when = document.createElement("span"); when.className = "tabular"; when.textContent = fmtShort(r.recorded_at);
-      meta.append(mod, when);
-      const way = document.createElement("div"); way.className = "mini-way";
-      for (const [key] of STATIONS) { const i = document.createElement("i"); i.className = r.stations[key]; way.appendChild(i); }
-      b.append(title, meta, way);
-      box.appendChild(b);
+    if (!groupByModule) { for (const r of shown) box.appendChild(recItem(r)); return; }
+    // modules in the order of their newest recording, as the list comes newest first; without a module last
+    const groups = new Map(), NONE = "Ohne Modul";
+    for (const r of shown) {
+      const name = (r.module || "").trim() || NONE;
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(r);
+    }
+    const order = [...groups].sort(([a], [b]) => (a === NONE) - (b === NONE));
+    for (const [name, list] of order) {
+      const closed = !q && closedModules.has(name);
+      const g = document.createElement("div");
+      g.className = "rec-group" + (closed ? " closed" : "") + (list.some(r => r.id === selectedId) ? " holds-selected" : "");
+      const head = document.createElement("button");
+      head.className = "rec-group-head";
+      head.setAttribute("aria-expanded", closed ? "false" : "true");
+      head.title = closed ? "Aufklappen" : "Einklappen";
+      head.onclick = () => toggleModule(name);
+      const n = document.createElement("span"); n.className = "name"; n.textContent = name;
+      const c = document.createElement("span"); c.className = "count tabular"; c.textContent = list.length;
+      head.append(n, c);
+      g.appendChild(head);
+      for (const r of list) g.appendChild(recItem(r));
+      box.appendChild(g);
     }
   }
   // a video or subtitle file of a recording: from the app's media server, or from the FLEX3 server,
