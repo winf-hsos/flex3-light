@@ -171,6 +171,22 @@ def change(folder: Path, pid: str, changes: dict) -> str:
     return ""
 
 
+def choose(folder: Path, pids: list[str], wanted: bool) -> str:
+    """Tick or untick several products at once, e.g. all of them or the parts of one block; one write,
+    and like every change it asks for a new approval."""
+    folder = Path(folder)
+    data = load(folder)
+    chosen = set(pids or [])
+    hit = [x for x in (data or {}).get("products", []) if x["id"] in chosen]
+    if not hit:
+        return "Diese Themenvideos gibt es nicht mehr."
+    for x in hit:
+        x["state"] = "accepted" if wanted else "rejected"
+    data["approved"] = None
+    files.write_json(folder / FILE, data)
+    return ""
+
+
 def add(folder: Path, start: float, end: float, title: str, description: str = "") -> str:
     """A topic video the lecturer adds, e.g. from a chapter; accepted, as they chose it."""
     folder = Path(folder)

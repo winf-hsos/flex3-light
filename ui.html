@@ -392,6 +392,8 @@
   .tv-num { font-size: 11px; font-weight: 600; color: var(--slate); padding: 0 7px; }
   .tv-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 0 7px; }
   .tv-meta .link { padding: 0; font-size: 12px; }
+  .check.tv-all { display: flex; align-items: center; gap: 10px; padding: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
+  .check.tv-all .hint { font-weight: 400; }
   .topics-feedback { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
   .topics-feedback textarea { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line);
                               border-radius: 8px; background: var(--surface); color: var(--ink); resize: vertical; }
@@ -2105,6 +2107,14 @@
       + "unabhängig vom Block. Die Nummern kannst du in deiner Rückmeldung unten verwenden."));
     const done = Object.fromEntries((t.videos || []).map(v => [v.id, v]));
     const kids = id => t.products.filter(y => y.parent === id);
+    if (t.products.length > 1) {                // tick or untick every topic video with one click
+      const ticked = t.products.filter(x => x.state !== "rejected").length;
+      const head = el("label", "check tv-all"), cb = el("input");
+      cb.type = "checkbox"; cb.checked = ticked === t.products.length; cb.indeterminate = ticked > 0 && !cb.checked;
+      cb.onchange = () => chooseTopics(t.products.map(x => x.id), cb.checked);
+      head.append(cb, el("span", "", "Alle"), el("span", "hint tabular", `${ticked} von ${t.products.length} angehakt`));
+      g.appendChild(head);
+    }
     const node = x => {
       const row = el("div", "tv" + (x.state === "rejected" ? " off" : "") + (x.kind === "block" ? " block" : ""));
       const cb = el("input"); cb.type = "checkbox"; cb.checked = x.state !== "rejected";
@@ -2123,8 +2133,13 @@
       meta.append(el("span", "tv-num", `Nr. ${x.id.replace(/^t/, "")}`),
                   el("span", "hint tabular", (origin ? origin + ", " : "") + `${fmtClock(x.start)}–${fmtClock(x.end)} der Aufnahme, `
                     + `nach dem Schnitt ${fmtLength(x.kept)}`));
-      if (parts) meta.appendChild(button("link", (openTopics.has(x.id) ? "▾ " : "▸ ") + `${parts} ${parts === 1 ? "Teil" : "Teile"}`,
-        () => { openTopics.has(x.id) ? openTopics.delete(x.id) : openTopics.add(x.id); resetSteps(); refreshDetail(); }));
+      if (parts) {
+        meta.appendChild(button("link", (openTopics.has(x.id) ? "▾ " : "▸ ") + `${parts} ${parts === 1 ? "Teil" : "Teile"}`,
+          () => { openTopics.has(x.id) ? openTopics.delete(x.id) : openTopics.add(x.id); resetSteps(); refreshDetail(); }));
+        const all = kids(x.id).every(y => y.state !== "rejected");      // every part ticked: the link unticks them
+        meta.appendChild(button("link", all ? "alle Teile abwählen" : "alle Teile anwählen",
+          () => chooseTopics(kids(x.id).map(y => y.id), !all)));
+      }
       body.append(title, meta, desc);
       const v = done[x.id];
       const look = v ? button("btn", playing === v.file ? "Läuft im Player" : "Ansehen", () => play(v.file))
@@ -2204,6 +2219,7 @@
   const openTopics = new Set();          // the blocks whose parts are unfolded
   const proposeTopics = async () => cutResult(await api().propose_topics(selectedId));
   const changeTopic = async (id, changes) => cutResult(await api().change_topic(selectedId, id, changes));
+  const chooseTopics = async (ids, wanted) => cutResult(await api().choose_topics(selectedId, ids, wanted));
   const approveTopics = async approved => cutResult(await api().approve_topics(selectedId, approved));
 
   function play(file) {

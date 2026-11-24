@@ -214,6 +214,29 @@ def test_a_block_is_a_video_of_its_own_above_the_videos_of_its_pieces(tmp_path, 
         ("t3", "Teil zwei", "piece", "t1"), ("t4", "Für sich", "piece", None)]
 
 
+def test_several_topic_videos_are_ticked_or_unticked_at_once(tmp_path, monkeypatch):
+    from shelf import shelf
+    monkeypatch.setattr(products, "SHORTEST", 5.0)
+    folder = _folder(tmp_path, inputs=[])
+    (folder / "outline.json").write_text(json.dumps({
+        "pieces": [{"start": 2.0, "end": 12.0, "kind": "lecture", "title": "Teil eins", "summary": ""},
+                   {"start": 12.0, "end": 24.0, "kind": "lecture", "title": "Teil zwei", "summary": ""},
+                   {"start": 28.0, "end": 38.0, "kind": "demo", "title": "Für sich", "summary": ""}],
+        "blocks": [{"start": 2.0, "end": 24.0, "title": "Der ganze Foliensatz", "summary": ""}]}), encoding="utf-8")
+    products.propose(folder, {})
+    r = shelf(tmp_path, {"x": folder})
+    assert r.approve_topics("x") == ""
+    assert r.choose_topics("x", ["t2", "t3"], False) == ""               # the parts of the block
+    data = products.load(folder)
+    assert [x["state"] for x in data["products"]] == ["accepted", "rejected", "rejected", "accepted"]
+    assert data["approved"] is None                                      # a change asks for a new approval
+    assert r.choose_topics("x", ["t1", "t2", "t3", "t4"], True) == ""     # all of them
+    assert {x["state"] for x in products.load(folder)["products"]} == {"accepted"}
+    assert r.choose_topics("x", ["t9"], True) == "Diese Themenvideos gibt es nicht mehr."
+    from flex3_light_server import my_recordings
+    assert "choose_topics" in my_recordings.CALLS
+
+
 def test_a_part_that_fills_its_block_is_not_proposed_twice(tmp_path, monkeypatch):
     monkeypatch.setattr(products, "SHORTEST", 5.0)
     folder = _folder(tmp_path, inputs=[])

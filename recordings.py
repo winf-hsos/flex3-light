@@ -273,6 +273,11 @@ class Recordings:
         folder, error = self._topics_of(sid)
         return error or products.change(folder, pid, changes or {})
 
+    def choose_topics(self, sid: str, pids: list, wanted: bool) -> str:
+        """Tick or untick several topic videos at once: all of them, or the parts of one block."""
+        folder, error = self._topics_of(sid)
+        return error or products.choose(folder, [str(p) for p in pids or []], bool(wanted))
+
     def add_topic(self, sid: str, start: float, end: float, title: str) -> str:
         folder, error = self._topics_of(sid)
         return error or products.add(folder, start, end, title)
