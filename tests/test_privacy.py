@@ -86,6 +86,44 @@ def test_voices_of_the_room_and_the_lecturer_split_by_the_labels():
     assert loud[0]["lock"] is False                                  # as loud as the lecturer and in the transcript
 
 
+def test_with_two_lecturers_the_two_speakers_with_most_words_are_no_room():
+    said = lambda speaker, t0, text: [{"word": w, "start": t0 + i * 0.5, "end": t0 + i * 0.5 + 0.4, "speaker": speaker}
+                                      for i, w in enumerate(text.split())]
+    heard = (said("A", 0, "eins zwei drei vier fünf sechs sieben acht") + said("B", 10, "jetzt übernehme ich und zeige das")
+             + said("C", 20, "können Sie das wiederholen"))
+    alone = screening.voices(heard, [], lambda a, b: -40.0, -20.0)
+    assert [(v["text"], v["lock"]) for v in alone] == [("jetzt übernehme ich und zeige das", True),
+                                                      ("können Sie das wiederholen", True)]
+    two = screening.voices(heard, [], lambda a, b: -40.0, -20.0, lecturers=2)
+    assert [v["text"] for v in two] == ["können Sie das wiederholen"]          # the colleague is no voice of the room
+    assert screening.lecturers({}) == 1 and screening.lecturers({"lecturers": "2"}) == 2
+    assert screening.lecturers({"lecturers": 9}) == screening.MOST_LECTURERS and screening.lecturers({"lecturers": "x"}) == 1
+
+
+def test_the_lecturer_sets_how_many_teach_and_the_agent_is_told(tmp_path):
+    from shelf import shelf
+    from pipeline import outline
+    folder = tmp_path / "2026-11-24 - Zu zweit"
+    folder.mkdir()
+    (folder / "session.json").write_text(json.dumps({"session_id": "x", "course_name": "Modul"}), encoding="utf-8")
+    r = shelf(tmp_path, {"x": folder})
+    assert screening.screened_for(folder) is None
+    assert r.set_lecturers("x", 5) == "Es können eine bis 4 Lehrende sein."
+    assert r.set_lecturers("x", 2) == ""
+    meta = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    assert meta == {"session_id": "x", "course_name": "Modul", "lecturers": 2}
+    (folder / "privacy.json").write_text(json.dumps({"checked": {}, "locks": [], "candidates": []}), encoding="utf-8")
+    assert screening.screened_for(folder) == 1                           # screened before the field existed: one
+    assert "Lecturers: 2" in outline.material({"duration": 60, "blocks": []}, meta, "de")
+    bench = cut_tools.Workbench.__new__(cut_tools.Workbench)
+    bench.meta = meta
+    assert bench.teaching()["lecturers"] == 2 and "not voices from the room" in bench.teaching()["lecturers_note"]
+    bench.meta = {}
+    assert bench.teaching() == {"lecturers": 1}                          # one lecturer: no note at all
+    from flex3_light_server import my_recordings
+    assert "set_lecturers" in my_recordings.CALLS
+
+
 def test_the_privacy_key_and_a_mailbox_lock_their_spans():
     found = screening.activity_locks([[0, 10, "POWERPNT.EXE", ""], [10, 14, "msedge.exe", "posteingang"],
                                       [14.5, 20, "msedge.exe", "posteingang"], [20, 20.5, "OUTLOOK.EXE", "inbox"]],

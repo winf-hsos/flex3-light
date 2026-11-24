@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from . import audio, binaries, cut_rules, edit, files, locks, ocr
+from . import audio, binaries, cut_rules, edit, files, locks, ocr, screening
 
 TRACKS = {"program": "recording.mp4", "screen": "screen.mp4", "camera": "camera.mp4"}
 
@@ -80,7 +80,17 @@ class Workbench:
                 "duration_seconds": round(self.duration, 1), "tracks": sorted(self.tracks),
                 "terms": self.transcript.get("terms", []), "words": len(self.words),
                 "programs": cut_rules.program_summary(self.activity),
-                "privacy_key_spans": [[round(a, 1), round(b, 1)] for a, b in self.private]}
+                "privacy_key_spans": [[round(a, 1), round(b, 1)] for a, b in self.private],
+                **self.teaching()}
+
+    def teaching(self) -> dict:
+        """How many lecturers teach, with a note for the model when it is more than one."""
+        n = screening.lecturers(self.meta)
+        if n == 1:
+            return {"lecturers": 1}
+        return {"lecturers": n, "lecturers_note": f"{n} lecturers teach this session together. The {n} speakers who "
+                "speak most are all lecturers, not voices from the room: never mute or cut what they say for privacy, "
+                "and treat a handover between them like any other part of the lecture."}
 
     def sentences(self) -> str:
         return "\n".join(f"[{_clock(s['start'])} {s['start']:.1f}-{s['end']:.1f}] {s['text']}" for s in self.segments)

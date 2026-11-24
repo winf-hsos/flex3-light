@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 
 import library
-from pipeline import cut_rules, edit, files, languages, locks, products, publish, review
+from pipeline import cut_rules, edit, files, languages, locks, products, publish, review, screening
 from pipeline import style as styles
 
 
@@ -267,6 +267,26 @@ class Recordings:
         if error:
             return error
         self.pipeline.apply_languages(folder)
+        return ""
+
+    def set_lecturers(self, sid: str, n: int) -> str:
+        """How many lecturers teach in a recording (session.json, "lecturers"). The screening counts the
+        speakers with the most words as lecturers; it runs anew with the next cut proposal."""
+        folder = getattr(self, "_library", {}).get(sid)
+        if folder is None or not folder.exists():
+            return "Die Aufnahme ist nicht mehr in der Ablage."
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            n = 0
+        if not 1 <= n <= screening.MOST_LECTURERS:
+            return f"Es können eine bis {screening.MOST_LECTURERS} Lehrende sein."
+        with self.pipeline.lock:
+            if self.pipeline.active == str(folder):
+                return "An dieser Aufnahme wird gerade gearbeitet. Versuch es gleich noch einmal."
+            meta = files.read_json(folder / "session.json")
+            meta["lecturers"] = n
+            files.write_json(folder / "session.json", meta)
         return ""
 
     def change_topic(self, sid: str, pid: str, changes: dict) -> str:

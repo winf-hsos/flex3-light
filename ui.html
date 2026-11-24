@@ -221,6 +221,7 @@
   .step-intro { margin: 0; color: var(--slate); font-size: 13px; max-width: 72ch; }
   .step-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; margin: 0; }
   .step-facts dt { color: var(--slate); } .step-facts dd { margin: 0; }
+  .step-facts select.lecturers { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; }
   .step-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .station { position: relative; display: grid; justify-items: center; gap: 5px; text-align: center; }
   /* the connector runs from the previous circle's center to this one's; the circles sit above it */
@@ -1256,15 +1257,35 @@
   const skeleton = box => { for (const w of [88, 72, 80]) { const b = el("div", "skeleton"); b.style.width = `calc(${w}% - 74px)`; box.appendChild(b); } };
 
   // step 1: the recording itself
+  const LECTURERS = ["", "eine Person", "zwei Personen", "drei Personen", "vier Personen"];
   function renderRecorded(d) {
-    const box = stepBox("recordedStep", JSON.stringify([d.id, d.duration, d.module, playing]));
+    const box = stepBox("recordedStep", JSON.stringify([d.id, d.duration, d.module, playing, d.lecturers, d.screened_for]));
     if (!box) return;
     stepHead(box, "Aufnahme");
     const facts = el("dl", "step-facts");
     for (const [k, v] of [["Modul", d.module], ["Aufgenommen", fmtDate(d.recorded_at)], ["Länge", fmtLength(d.duration)],
                           ["Sprache", d.language === "en" ? "Englisch" : "Deutsch"]])
       facts.append(el("dt", "", k), el("dd", "", v));
-    box.appendChild(facts);
+    // who teaches: with more than one, the screening counts the voices of all of them as lecturers
+    const who = el("select", "lecturers");
+    who.setAttribute("aria-label", "Es unterrichten");
+    LECTURERS.forEach((t, n) => { if (n) { const o = el("option", "", t); o.value = n; who.appendChild(o); } });
+    who.value = d.lecturers || 1;
+    who.onchange = async () => {
+      const error = await api().set_lecturers(selectedId, +who.value);
+      if (error) { who.value = d.lecturers || 1; whoError.textContent = error; whoError.hidden = false; return; }
+      resetSteps(); refreshDetail();
+    };
+    const dd = el("dd"); dd.appendChild(who);
+    facts.append(el("dt", "", "Es unterrichten"), dd);
+    const whoError = el("p", "hint error");
+    whoError.hidden = true;
+    box.append(facts, whoError);
+    if (d.screened_for != null && d.screened_for !== (d.lecturers || 1)) {
+      const p = el("p", "hint", `Die Sichtung hat noch mit ${d.screened_for === 1 ? "einer Person" : LECTURERS[d.screened_for]} gezählt und alle anderen Stimmen `
+        + "als Stimmen aus dem Raum gemeldet. Sie läuft neu, samt Gliederung, wenn du den Schnitt neu vorschlagen lässt.");
+      box.append(p, button("btn", "Schnitt neu vorschlagen lassen", () => redoCut()));
+    }
     box.appendChild(el("p", "step-intro", "Darauf folgen Transkription, Gliederung und Schnitt-Vorschlag; danach entstehen "
       + "nach deinen Freigaben die Langfassung und die Themenvideos. Klick oben auf einen Schritt, um ihn anzusehen."));
     if (playing !== "original") box.appendChild(button("link", "Wieder das Original abspielen", () => play("original")));

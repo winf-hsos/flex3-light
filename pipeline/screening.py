@@ -12,7 +12,8 @@ not depend on any model:
   for mail addresses, keys and passwords, student numbers, lists of numbers and of names;
 - the sound: the whole recording again, loudness-normalised and with speaker labels
   (AssemblyAI), so that quiet voices from the room come out; spans of another speaker than
-  the lecturer become locks;
+  the lecturer become locks (with several lecturers in session.json, "lecturers", the
+  speakers with the most words are all lecturers);
 - the activity: spans marked with the privacy key, and mailboxes in front (the window
   titles of the lecturer's title list).
 Without Windows the picture is not read, without the AssemblyAI key the sound is not
@@ -44,6 +45,7 @@ PAUSE = 1.5                  # seconds without words that count as a pause
 VOICE_GAP = 2.0              # words of the room closer than this form one span
 VOICE_WORDS = 3              # a span of the room with at least this many words is a lock, shorter a candidate
 QUIETER = 6.0                # dB below the lecturer: a voice from the room, not the lecturer misattributed
+MOST_LECTURERS = 4           # a session taught by more people than this is not a lecture recording
 
 # a mail address ends in a country code or a common ending; "x@data.numeric" in R code is no address
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+ ?@ ?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\."
@@ -204,18 +206,33 @@ def _db(data: np.ndarray, rate: int, a: float, b: float) -> float | None:
     return float(20 * np.log10(np.sqrt(np.mean(chunk ** 2)) + 1e-9))
 
 
+def lecturers(meta: dict) -> int:
+    """How many lecturers teach in a recording (session.json, "lecturers"), 1 unless said otherwise."""
+    try:
+        n = int(meta.get("lecturers") or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return max(1, min(MOST_LECTURERS, n))
+
+
+def screened_for(folder: Path) -> int | None:
+    """The number of lecturers the screening of a recording counted with, None before a screening."""
+    p = files.read_json(Path(folder) / "privacy.json")
+    return p.get("checked", {}).get("lecturers", 1) if p else None
+
+
 def voices(heard: list[dict], words: list[dict], level: Callable[[float, float], float | None],
-           lecturer_level: float | None) -> list[dict]:
-    """Spans of the room from a transcription with speaker labels: the lecturer is the speaker with
-    the most words, everyone else is the room. A span with at least VOICE_WORDS words is a lock,
-    unless it is as loud as the lecturer and the main transcript has the same words there (then the
-    labels probably split the lecturer: a candidate)."""
+           lecturer_level: float | None, lecturers: int = 1) -> list[dict]:
+    """Spans of the room from a transcription with speaker labels: the lecturers are the speakers
+    with the most words (one unless the session says more), everyone else is the room. A span with
+    at least VOICE_WORDS words is a lock, unless it is as loud as the lecturer and the main transcript
+    has the same words there (then the labels probably split the lecturer: a candidate)."""
     if not heard:
         return []
-    lecturer = Counter(w.get("speaker", "?") for w in heard).most_common(1)[0][0]
+    teaching = {s for s, _ in Counter(w.get("speaker", "?") for w in heard).most_common(max(1, lecturers))}
     spans: list[list] = []
     for w in heard:
-        if w.get("speaker", "?") == lecturer:
+        if w.get("speaker", "?") in teaching:
             continue
         if spans and w["start"] - spans[-1][1] <= VOICE_GAP and spans[-1][2] == w.get("speaker"):
             spans[-1][1] = w["end"]
@@ -312,7 +329,7 @@ def run(folder: Path, listener=None, settings: dict | None = None,
         raise RuntimeError("Keine Aufnahme im Sitzungsordner.")
     duration = float(transcript.get("duration") or meta.get("duration_sec") or audio.duration(video))
     work = Path(tempfile.mkdtemp(prefix="flex3-screen-"))
-    checked: dict = {"grid": GRID}
+    checked: dict = {"grid": GRID, "lecturers": lecturers(meta)}
     try:
         say("Sichtung: die Bilder der Aufnahme …")
         samples = sample(video, work)
@@ -345,7 +362,7 @@ def run(folder: Path, listener=None, settings: dict | None = None,
             if r.returncode != 0:
                 raise RuntimeError("ffmpeg: " + r.stderr.decode("utf-8", "replace")[-300:])
             heard = listener.transcribe_file(mp3, language, [], speakers=True, purpose="screening")["words"]
-            room = voices(heard, words, level, lecturer_level)
+            room = voices(heard, words, level, lecturer_level, lecturers(meta))
             checked["sound"] = True
             checked["speakers"] = len({w.get("speaker") for w in heard})
         else:

@@ -48,7 +48,7 @@ CALLS = ("data", "recordings", "recording", "start_transcription", "redo_transcr
          "set_cut_metadata",
          "set_cut_cards", "set_cut_settings", "approve_cut", "recheck", "rerender", "make_summary", "publish_plan", "publish",
          "propose_topics", "change_topic", "choose_topics", "add_topic", "approve_topics", "redo_outline", "revise_topics",
-         "set_languages", "delete_recording", "video_style", "set_video_style", "set_video_logo")
+         "set_languages", "set_lecturers", "delete_recording", "video_style", "set_video_style", "set_video_logo")
 ADMINS = "admins.txt"
 
 

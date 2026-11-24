@@ -203,7 +203,9 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
 
     def fake_screening(f, listener, settings, progress):
         screened.append(f)
-        (f / "privacy.json").write_text('{"locks": [], "candidates": []}', encoding="utf-8")
+        n = json.loads((f / "session.json").read_text(encoding="utf-8")).get("lecturers", 1)
+        (f / "privacy.json").write_text(json.dumps({"checked": {"lecturers": n}, "locks": [], "candidates": []}),
+                                        encoding="utf-8")
     monkeypatch.setattr(pipeline_runner.cut_agent, "run", fake_run)
     monkeypatch.setattr(pipeline_runner.screening, "run", fake_screening)
     outlined = []
@@ -242,6 +244,10 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
     assert r.redo_cut(folder, 2) and pipeline_runner.read_state(folder)["cut_version"] == 2   # the lecturer's wish
     assert r._process(folder) and staged == [folder] and len(calls) == 1                     # version 2, not 1
     assert r.redo_cut(folder) and "cut_version" not in pipeline_runner.read_state(folder)    # back to the default
+    assert r._process(folder) and len(screened) == 1 and len(outlined) == 1                 # screening and outline reused
+    (folder / "session.json").write_text(json.dumps({"session_id": "x", "lecturers": 2}), encoding="utf-8")
+    assert r.redo_cut(folder) and r._process(folder)
+    assert len(screened) == 2 and len(outlined) == 2                # two lecturers now: screened and outlined anew
 
 
 def test_the_lecturer_approves_moves_and_remembers_programs(tmp_path):

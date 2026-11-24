@@ -47,7 +47,7 @@ the outline, in a step of their own after the approval.
 
 Work from coarse to fine: read the transcript and the rule proposals, get the structure and chapters, then check
 edges and pauses, then privacy (programs in front, what is on screen, quiet voices from the room: compare loudness
-and listen), then polish. Look before you judge: use contact sheets to scan long spans and single frames for detail.
+and listen; when the recording names several lecturers, their voices are not the room), then polish. Look before you judge: use contact sheets to scan long spans and single frames for detail.
 Never place a blur or a zoom by eye: find the text with locate_text (an empty query lists everything readable, which
 is also how you scan a suspicious frame for names, mail addresses or student numbers), take its region, and look at it
 with check_region before you propose it. Where the content moves during the span (scrolling, a window moved), check

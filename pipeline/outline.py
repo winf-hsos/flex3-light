@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import files, llm
+from . import files, llm, screening
 
 VERSION = 4                  # 2: topic pieces of any kind, 3: topic blocks, 4: a block is a whole deck (2026-11-12)
 SNAP = 15.0                  # seconds a boundary may move to the start or end of a sentence
@@ -158,7 +158,9 @@ def current(folder: Path) -> bool:
 def material(overview: dict, meta: dict, language: str) -> str:
     """The overview as text for the model: a head, the long pauses and one paragraph per block."""
     programs = ", ".join(f"{p['program']} {round(p['seconds'] / 60)} min" for p in overview.get("programs", []))
+    n = screening.lecturers(meta)
     head = [f"Module: {meta.get('course_name', '')}", f"Language of the lecture: {language}",
+            *([f"Lecturers: {n}, teaching together; what they say is the lecture, not voices from the room"] if n > 1 else []),
             f"Duration: {_clock(overview.get('duration', 0))} ({overview.get('duration', 0)} s)",
             "Programs in front: " + (programs or "unknown")]
     long = [f"{_clock(a)}–{_clock(b)} ({round(b - a)} s)" for a, b in overview.get("pauses", []) if b - a >= 30]

@@ -311,11 +311,14 @@ class PipelineRunner:
                 base = aai and transcribe.assemblyai_base(aai)
                 if base:
                     listener = transcribe.AssemblyAI(aai, base)
-                if not (folder / "privacy.json").exists():   # stages A and B, once; a new proposal reuses them
+                # stages A and B, once; a new proposal reuses them, unless the number of lecturers changed since
+                screened = screening.screened_for(folder)
+                anew = screened is not None and screened != screening.lecturers(files.read_json(folder / "session.json"))
+                if screened is None or anew:
                     self._set(folder, "cut", "running", "Sichtung der Aufnahme …")
                     screening.run(folder, listener, settings, progress=lambda text: self._set(
                         folder, "cut", "running", text))
-                if not outline.current(folder):                # stage C, once; a failed try is repeated next time
+                if anew or not outline.current(folder):        # stage C, once; a failed try is repeated next time
                     self._set(folder, "cut", "running", "Gliederung der Aufnahme …")
                     outline.run(folder, self.key, settings, progress=lambda text: self._set(
                         folder, "cut", "running", text), config=llm.stage_config("outline", self.models()))

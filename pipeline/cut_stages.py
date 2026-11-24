@@ -54,7 +54,8 @@ Standards: no clipped word; no transition that refers to something cut away ("as
 sound like one thought. Explanations, examples, reasons and summaries stay complete; demos are shortened, not removed
 (goal, the steps that carry it, result); false starts and repetitions stay where a cut would be bumpier than the
 original. Arriving, technical trouble, waiting, silent work and breaks are out or replaced by a pause card. No voice
-from the room is audible unless the lecturer repeats the question; no readable name, mail address, key, chat or
+from the room is audible unless the lecturer repeats the question (when the recording names several lecturers, each of
+them is a lecturer, not the room); no readable name, mail address, key, chat or
 mailbox in the picture; for a voice in the middle of the lecturer's speech, a mute is better than a cut. The
 recording is watched first by students of this term who missed the session: what they need to take part stays (the
 plan of the session, what to do for an assignment or a challenge, how to register for it); what only concerned the

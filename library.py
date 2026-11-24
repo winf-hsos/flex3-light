@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 
 from pipeline import cut_review, cut_rules, edit, files, languages, locks, outline, products, publish, render, review
-from pipeline import usage_log
+from pipeline import screening, usage_log
 from pipeline import summary as summary_step     # library.summary() is the list entry of a recording
 
 STATIONS = ("recorded", "transcript", "cut", "content", "publish")
@@ -175,6 +175,7 @@ def summary(folder: Path, queued: bool | None = None) -> dict:
             "term": term, "recorded_at": meta.get("recorded_at", ""),
             "duration": meta.get("duration_sec", 0), "language": meta.get("language", "de"),
             "camera": any(t.get("kind") == "camera" for t in meta.get("tracks", [])),
+            "lecturers": screening.lecturers(meta), "screened_for": screening.screened_for(folder),
             "stations": stations(folder, queued)}
 
 
