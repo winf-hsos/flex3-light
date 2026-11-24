@@ -28,15 +28,15 @@ from pipeline import usage_log
 # The models of the stages, unless the server's configuration says otherwise (models.json in its
 # data folder): {"cut": {"adapter": ..., "model": ..., "effort": ...}, ...}
 DEFAULTS = {
-    "cut": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "high"},
-    "outline": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "high"},
-    "section": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "high"},     # version 2 of the cut
+    "cut": {"adapter": "openai-responses", "model": "gpt-6.2-sol", "effort": "high"},
+    "outline": {"adapter": "openai-responses", "model": "gpt-6.2-sol", "effort": "high"},
+    "section": {"adapter": "openai-responses", "model": "gpt-6.2-sol", "effort": "high"},     # version 2 of the cut
     "section_light": {"adapter": "openai-responses", "model": "gpt-6-luna", "effort": "medium"},
-    "closing": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},
-    "review": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},     # transitions, cut_review.py
-    "summary": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},
-    "topics": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "medium"},   # feedback, products.py
-    "translate": {"adapter": "openai-responses", "model": "gpt-6.1-sol", "effort": "low"},   # subtitles, languages.py
+    "closing": {"adapter": "openai-responses", "model": "gpt-6.2-sol", "effort": "medium"},
+    "review": {"adapter": "openai-responses", "model": "gpt-6.2-sol", "effort": "medium"},     # transitions, cut_review.py
+    "summary": {"adapter": "openai-responses", "model": "gpt-6.2-sol", "effort": "medium"},
+    "topics": {"adapter": "openai-responses", "model": "gpt-6.2-sol", "effort": "medium"},   # feedback, products.py
+    "translate": {"adapter": "openai-responses", "model": "gpt-6.2-sol", "effort": "low"},   # subtitles, languages.py
 }
 
 

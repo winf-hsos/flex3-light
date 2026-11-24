@@ -6,7 +6,7 @@ finished proposal with a short summary and changes only what he wants to. It nev
 renders; the lecturer approves the list first. Every tool call is logged in edit.log.jsonl.
 
 The model sits behind pipeline/llm.py (since 2026-11-10): the stage "cut" of the server's
-configuration says which adapter and model, by default OpenAI gpt-6.1-sol with reasoning
+configuration says which adapter and model, by default OpenAI gpt-6.2-sol with reasoning
 effort "high" over the Responses API. There is no budget of rounds or pictures (decision of
 2026-11-10); every run measures its rounds, pictures, tokens and time instead, and only an
 emergency stop ends a loop that goes nowhere. When the agent is done, its list is kept as

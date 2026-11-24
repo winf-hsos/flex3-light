@@ -96,7 +96,7 @@ class Worker:
 
     def _models(self) -> dict:
         """The model per stage, if the server's configuration sets one (models.json in the data folder,
-        e.g. {"cut": {"model": "gpt-6.1-sol", "effort": "high"}}); the defaults of pipeline/llm.py otherwise."""
+        e.g. {"cut": {"model": "gpt-6.2-sol", "effort": "high"}}); the defaults of pipeline/llm.py otherwise."""
         return files.read_json(self.models_file, {})
 
     # ---------------------------------------------------------- the lecturer behind a folder

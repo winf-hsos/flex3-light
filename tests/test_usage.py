@@ -28,7 +28,7 @@ def test_calls_are_counted_for_the_recording_in_work_in_every_thread(tmp_path):
         t.start(); t.join()                                              # a section runs in its own thread
         usage_log.note_audio("transcribe", "assemblyai/universal-3-pro", 3600, terms=True)
     lines = [json.loads(x) for x in (tmp_path / usage_log.FILE).read_text(encoding="utf-8").splitlines()]
-    assert [(x["step"], x["model"]) for x in lines] == [("section", "gpt-6.1-sol"),
+    assert [(x["step"], x["model"]) for x in lines] == [("section", "gpt-6.2-sol"),
                                                        ("transcribe", "assemblyai/universal-3-pro")]
     v = usage_log.view(tmp_path)
     cut, audio = [r for r in v["rows"] if r["step"] == "cut"][0], [r for r in v["rows"] if r["step"] == "transcribe"][0]

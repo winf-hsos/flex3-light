@@ -25,9 +25,11 @@ from pathlib import Path
 
 FILE = "usage.jsonl"
 
-# Per million tokens (input / from the cache / output), as OpenAI listed them on 2026-11-11; per hour
+# Per million tokens (input / from the cache / output), as OpenAI listed them on 2026-11-11 and
+# 2026-11-24 (gpt-6.2-sol, at the price of gpt-6.1-sol, which older recordings still name); per hour
 # of audio as AssemblyAI and OpenAI listed them on 2026-10-27 ("terms": extra for a word list).
 PRICES: dict[str, dict] = {
+    "gpt-6.2-sol": {"input": 2.00, "cached": 0.10, "output": 10.00},
     "gpt-6.1-sol": {"input": 2.00, "cached": 0.10, "output": 10.00},
     "gpt-6.1-terra": {"input": 1.00, "cached": 0.05, "output": 5.00},
     "gpt-5.4-mini": {"input": 0.75, "cached": 0.075, "output": 4.50},
@@ -35,7 +37,7 @@ PRICES: dict[str, dict] = {
     "assemblyai/universal-3-pro": {"hour": 0.21, "terms": 0.05},
     "openai/whisper-1": {"hour": 0.36},
 }
-PRICE_DATE = "Preise der Anbieter vom 27.10. und 11.11.2026"
+PRICE_DATE = "Preise der Anbieter vom 27.10., 11.11. und 24.11.2026"
 price_file: Path | None = None              # set by the server: prices.json in its data folder
 
 # The steps as the page names them, in the order of the pipeline.

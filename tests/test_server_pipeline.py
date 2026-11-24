@@ -154,7 +154,7 @@ def test_the_pipeline_runs_on_the_server_for_its_lecturer(tmp_path, monkeypatch)
     client.post(f"/sessions/{sid}/pipeline", headers=AUTH, json={"action": "cut"})
     state = work()
     assert seen["cut"] == ("openai-key", 90.0, False)                        # the project's key, the lecturer's settings
-    assert seen["model"]["model"] == "gpt-6.1-sol"                            # no models.json: the default
+    assert seen["model"]["model"] == "gpt-6.2-sol"                            # no models.json: the default
     (data / "models.json").write_text(json.dumps({"cut": {"model": "gpt-6.1-mini"}}), encoding="utf-8")
     assert worker.runner.models()["cut"]["model"] == "gpt-6.1-mini"           # the server's choice, read anew
     assert state["status"] == "Schnitt vorgeschlagen, wartet auf deine Freigabe"

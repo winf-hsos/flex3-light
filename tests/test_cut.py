@@ -193,7 +193,7 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
 
     def fake_run(f, key, listener, settings, progress, config=None):
         calls.append((key("openai"), settings["pause_mode"]))
-        assert config["model"] == "gpt-6.1-sol"                        # the default of the stage
+        assert config["model"] == "gpt-6.2-sol"                        # the default of the stage
         progress("Schnitt-Agent: propose (Runde 1)")
         e = edit.new(60)
         e["agent"] = {"model": "fake"}
@@ -224,7 +224,7 @@ def test_runner_proposes_the_cut_after_the_subtitles(tmp_path, monkeypatch):
     assert r._process(folder) and calls == []                    # switched off: nothing proposed
     settings["auto"] = True
     r.enqueue(folder)
-    assert r._process(folder) and calls == [("sk", "card")] and screened == [folder] and outlined == ["gpt-6.1-sol"]   # screening first, once
+    assert r._process(folder) and calls == [("sk", "card")] and screened == [folder] and outlined == ["gpt-6.2-sol"]   # screening first, once
     assert pipeline_runner.read_state(folder)["steps"]["cut"]["state"] == "done" and reviewed == [folder]
     assert r.describe(folder) == "Schnitt vorgeschlagen, wartet auf deine Freigabe"
     assert r.redo_check(folder) and r._process(folder) and reviewed[-1] == ("again", folder)   # after the lecturer's changes
