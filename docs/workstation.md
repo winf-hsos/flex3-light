@@ -95,7 +95,9 @@ Record a few minutes with the app connected to the server, let it transcribe and
 
 ## Updates
 
-New code reaches the workstation from GitHub, so a change is first committed and pushed. Then, on the workstation:
+New code reaches the workstation from GitHub, so a change is first committed and pushed. Since 2026-11-25 the workstation takes it by itself: the task "FLEX3 Light Update" (set up by `setup.ps1`) runs `update.ps1 -Auto -WaitMinutes 10` every quarter of an hour, without a window. With nothing new it does nothing and writes nothing; with a new commit on `main` it waits up to ten minutes for an idle server (the next run tries again) and then swaps the code, noting what it did in `logs\update.log`. Should the new code not answer within a minute, it goes back to the commit before and writes the new one to `update-failed.txt`, so it is not tried again until a newer commit is pushed. A push to `main` is therefore a release to the workstation within a quarter of an hour.
+
+By hand, for instance to go back to an older version (then switch the task off first, or it takes `main` again):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\flex3-light\code\tools\workstation\update.ps1

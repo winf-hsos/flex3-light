@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
 Sets up the FLEX3 Light server on a Windows workstation: code, Python environment, config,
-firewall rule and a scheduled task that starts the server at boot and restarts it on failure.
+firewall rule, a scheduled task that starts the server at boot and restarts it on failure, and
+one that takes every new commit from GitHub by itself once the server is idle.
 
 .DESCRIPTION
 Run once, in an elevated Windows PowerShell, as the account the server shall run under
@@ -29,6 +30,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Task = "FLEX3 Light Server"
 $BackupTask = "FLEX3 Light Backup"
+$UpdateTask = "FLEX3 Light Update"
 
 function Step($text) { Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
 function Note($text) { Write-Host "   $text" }
@@ -143,6 +145,19 @@ $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName $Task -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Note "runs as $User at startup, started again within five minutes if it ends"
+
+Step "Scheduled task '$UpdateTask'"
+# every quarter of an hour: a new commit of -Ref is taken once the server is idle (update.ps1 -Auto);
+# conhost --headless keeps the console of PowerShell from opening on the desktop
+$updater = Join-Path $Code "tools\workstation\update.ps1"
+$uAction = New-ScheduledTaskAction -Execute "conhost.exe" `
+    -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$updater`" -Root `"$Root`" -Ref $Ref -Auto -WaitMinutes 10"
+$uTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(15) -RepetitionInterval (New-TimeSpan -Minutes 15)
+$uSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 1) -MultipleInstances IgnoreNew `
+    -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName $UpdateTask -Action $uAction -Trigger $uTrigger -Principal $principal `
+    -Settings $uSettings -Force | Out-Null
+Note "every 15 minutes: takes a new commit of $Ref once the server is idle, log in $Logs\update.log"
 
 if ($BackupTarget) {
     Step "Scheduled task '$BackupTask'"
