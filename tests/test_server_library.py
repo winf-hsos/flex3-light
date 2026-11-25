@@ -129,6 +129,11 @@ def test_the_cut_is_approved_and_published_as_a_package(tmp_path):
     assert package.status_code == 200 and "attachment" in package.headers["content-disposition"]
     with zipfile.ZipFile(io.BytesIO(package.content)) as z:
         assert sorted(z.namelist()) == sorted(plan["files"])
+        for name in plan["files"]:                                        # one by one, for a browser that unpacks
+            one = client.get(f"/library/package/{MINE}/{name}?s={session}")
+            assert one.status_code == 200 and one.content == z.read(name)
+    assert client.get(f"/library/package/{MINE}/..%2Fsession.json?s={session}").status_code == 404
+    assert client.get(f"/library/package/{MINE}/{plan['files'][0]}", headers=AUTH2).status_code == 404
     d = call("recording", MINE)
     assert d["stations"]["publish"] == "done" and d["publish"]["package"]
     assert (folder / "edited.mp4").exists()                               # nothing moved on the server

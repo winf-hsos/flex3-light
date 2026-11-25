@@ -17,6 +17,7 @@
     POST   /library/api/{call}                 [arguments]: an action of the page (my_recordings.CALLS)
     GET    /library/media/{id}/{file}          a video, subtitles, thumbnail or the summary, with range requests
     GET    /library/package/{id}               the zip file of a published recording
+    GET    /library/package/{id}/{file}        one file of it, for a browser that unpacks it itself
 
 Every other request carries "Authorization: Bearer <token>"; the page "Meine Aufnahmen"
 uses a page session instead (my_recordings.py), which media addresses carry as ?s=. The token decides the
@@ -48,10 +49,11 @@ import shutil
 import subprocess
 import threading
 import time
+import zipfile
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from . import consent, profiles
 from .accounts import Accounts, InvalidKey
@@ -470,6 +472,27 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
         if path is None:
             raise HTTPException(404, "no package of what is published now")
         return FileResponse(path, media_type="application/zip", filename=r.package_name(sid))
+
+    @app.get("/library/package/{sid}/{name}")
+    def library_package_file(sid: str, name: str, who: dict = Depends(viewer)):
+        """One file of the package, for a browser that unpacks it into the lecturer's folder for uploads
+        itself (since 2026-11-25); the package is stored, so the file streams out of it as it is."""
+        path = mine(who).package(sid)
+        if path is None:
+            raise HTTPException(404, "no package of what is published now")
+        z = zipfile.ZipFile(path)
+        try:
+            info = z.getinfo(name)
+        except KeyError:
+            z.close()
+            raise HTTPException(404, "no such file in the package") from None
+
+        def chunks():
+            with z, z.open(info) as f:
+                while block := f.read(1 << 20):
+                    yield block
+        return StreamingResponse(chunks(), media_type="application/octet-stream",
+                                 headers={"Content-Length": str(info.file_size)})
 
     return app
 

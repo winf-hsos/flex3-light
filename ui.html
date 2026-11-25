@@ -710,7 +710,7 @@
       <div class="empty app-only" id="inBrowser" style="display:none">
         <h2>Meine Aufnahmen öffnen sich im Browser</h2>
         <p>Was nach der Aufnahme kommt, also Transkription, Schnitt, Themenvideos und Veröffentlichung, zeigt der FLEX3-Server im Browser, angemeldet als du. FLEX3 Light selbst nimmt nur auf.</p>
-        <button class="btn primary" onclick="openOnServer('library')">Im Browser öffnen</button>
+        <button class="btn primary" onclick="openInBrowser('library')">Im Browser öffnen</button>
         <span class="hint" id="inBrowserNote"></span>
       </div>
       <div class="library" id="library">
@@ -823,7 +823,7 @@
           <div class="panel section app-only">
             <div class="panel-head"><h2>Schnitt und Videos</h2></div>
             <div class="section-note">Wie der Server schneidet, welche Untertitel entstehen und wie die Videos aussehen, stellst du auf dem FLEX3-Server im Browser ein, dort, wo du auch deine Aufnahmen siehst.</div>
-            <div class="key-actions"><button class="btn" onclick="openOnServer('settings')"><svg class="i"><use href="#i-out"/></svg>Im Browser einstellen</button><span class="hint" id="settingsNote"></span></div>
+            <div class="key-actions"><button class="btn" onclick="openInBrowser('settings')"><svg class="i"><use href="#i-out"/></svg>Im Browser einstellen</button><span class="hint" id="settingsNote"></span></div>
           </div>
           <div class="panel section server-only">
             <div class="panel-head"><h2>Aussehen der Videos</h2><span class="hint" id="styleMsg"></span></div>
@@ -959,7 +959,7 @@
     $("pageTitle").textContent = PAGES[name][0];
     $("pageText").textContent = PAGES[name][1];
     if (name === "library" && SERVER) loadRecordings();
-    if (name === "library" && !SERVER && $("inBrowser").style.display !== "none") openOnServer("library");
+    if (name === "library" && !SERVER && $("inBrowser").style.display !== "none") openInBrowser("library");
     if (name === "modules") renderModules();
     if (name === "settings" && SERVER) loadServerSettings();
     if (name !== "library" && $("player")) $("player").pause();
@@ -1637,22 +1637,23 @@
       return;
     }
     const foot = el("div", "cut-foot");
-    const embedded = window.top !== window;
+    const intoFolder = window.top !== window || UNPACKS;        // the old app's frame, or a browser that can
+    const change = () => UNPACKS ? [button("link", "Ordner zum Hochladen wählen", chooseUploadFolder)] : [];
     if (SERVER && st === "done") {
-      note.textContent = `Am ${fmtDate(p.published)} heruntergeladen` + (embedded ? ", in deinen Ordner zum Hochladen." : " als Paket.")
+      note.textContent = `Am ${fmtDate(p.published)} heruntergeladen` + (intoFolder ? ", in deinen Ordner zum Hochladen." : " als Paket.")
         + " Damit ist die Aufnahme zum Veröffentlichen im Kurs freigegeben.";
       box.appendChild(list(Object.values(p.files || {}).sort()));
-      foot.append(button("btn primary", "Erneut herunterladen", () => publishOnServer(false)));
+      foot.append(button("btn primary", "Erneut herunterladen", () => publishOnServer(false)), ...change());
     } else if (SERVER) {
       note.textContent = (p.signature ? "Das Video wurde seit dem letzten Herunterladen neu gerendert. " : "")
-        + (!plan ? "…" : embedded ? `Diese Dateien legt FLEX3 Light in deinen Ordner zum Hochladen, unter ${plan.term}\\${plan.module}:`
-                                  : `Diese Dateien kommen in die Datei ${plan.name}:`);
+        + (!plan ? "…" : intoFolder ? `Diese Dateien kommen in deinen Ordner zum Hochladen, unter ${plan.term}\\${plan.module}:`
+                                    : `Diese Dateien kommen in die Datei ${plan.name}:`);
       if (plan) box.appendChild(list(plan.files));
       if (d.content && !d.content.current)
         box.appendChild(el("p", "hint", "Die Zusammenfassung ist noch nicht fertig. Sie kommt dazu, wenn du danach erneut herunterlädst."));
       box.appendChild(el("p", "hint", "Mit dem Herunterladen gibst du diese Aufnahme zum Veröffentlichen im Kurs frei. "
         + "Vorher bleibt sie unveröffentlicht, auch wenn sie später an den FLEX3-Server geht."));
-      foot.append(button("btn primary", "Herunterladen", () => publishOnServer(true)));
+      foot.append(button("btn primary", "Herunterladen", () => publishOnServer(true)), ...change());
     } else if (st === "done") {
       const names = Object.values(p.files || {}).map(f => f.split(/[\\/]/).pop()).sort();
       note.textContent = `Am ${fmtDate(p.published)} verschoben nach ${p.folder}.`;
@@ -1669,19 +1670,67 @@
     }
     box.appendChild(foot);
   }
-  // on the server nothing moves: it packs the files, and the app takes them into its folder for
-  // uploads (asked through the frame's parent), while a browser downloads the zip file
+  // on the server nothing moves: it packs the files, and the browser writes them one by one into the
+  // lecturer's folder for uploads, under term and module (Edge and Chrome, since 2026-11-25); a browser
+  // without access to folders downloads the zip file, and the app of before 2026-11-25 is asked
+  // through its frame
+  const UNPACKS = SERVER && window.top === window && "showDirectoryPicker" in window;
   async function publishOnServer(pack) {
     const id = selectedId, hint = $("publishHint");
-    hint.className = "cut-status"; hint.textContent = pack ? "Das Paket entsteht …" : "Wird heruntergeladen …";
-    let error = "";
+    let error = "", done = "", root = null;
     try {
+      if (UNPACKS) root = await uploadFolder(false);    // first, while the click still counts for the browser
+      hint.className = "cut-status"; hint.textContent = pack ? "Das Paket entsteht …" : "Wird heruntergeladen …";
       error = pack ? await api().publish(id) : "";
-      if (!error) error = await fetchPackage(id);
-    } catch (e) { error = e.message; }
+      if (!error && root) done = await unpackPackage(id, root, text => { $("publishHint").textContent = text; });
+      else if (!error) error = await fetchPackage(id);
+    } catch (e) { error = e.name === "AbortError" ? "" : e.message; }  // AbortError: the folder dialog was closed
     $("publish").dataset.sig = ""; publishPlan.sig = "";
     await refreshDetail();
-    if (error) { $("publishHint").textContent = error; $("publishHint").className = "hint error"; }
+    const h = $("publishHint");
+    h.textContent = error || done; h.className = error ? "hint error" : "hint";
+  }
+  // the folder for uploads: chosen once, kept by the browser in IndexedDB; it asks again only when it
+  // forgot the permission. The page never learns the whole path, only the folder's name.
+  function handles(mode, work) {
+    return new Promise((resolve, reject) => {
+      const open = indexedDB.open("flex3-light", 1);
+      open.onupgradeneeded = () => open.result.createObjectStore("handles");
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const tx = open.result.transaction("handles", mode), req = work(tx.objectStore("handles"));
+        tx.oncomplete = () => resolve(req.result); tx.onerror = () => reject(tx.error);
+      };
+    });
+  }
+  async function uploadFolder(choose) {
+    let dir = null;
+    if (!choose) try { dir = await handles("readonly", s => s.get("upload")); } catch (e) { }
+    if (dir && await dir.queryPermission({mode: "readwrite"}) !== "granted"
+        && await dir.requestPermission({mode: "readwrite"}) !== "granted") dir = null;
+    if (!dir) {
+      dir = await window.showDirectoryPicker({id: "flex3-upload", mode: "readwrite", startIn: "documents"});
+      try { await handles("readwrite", s => s.put(dir, "upload")); } catch (e) { }
+    }
+    return dir;
+  }
+  async function chooseUploadFolder() {
+    const h = $("publishHint");
+    try { const dir = await uploadFolder(true); h.className = "hint"; h.textContent = `Ordner zum Hochladen: ${dir.name}`; }
+    catch (e) { if (e.name !== "AbortError") { h.className = "hint error"; h.textContent = e.message; } }
+  }
+  async function unpackPackage(id, root, progress) {
+    const plan = await api().publish_plan(id);
+    const term = await root.getDirectoryHandle(plan.term, {create: true});
+    const target = await term.getDirectoryHandle(plan.module, {create: true});
+    for (const [k, name] of plan.files.entries()) {
+      progress(`Datei ${k + 1} von ${plan.files.length} …`);
+      const r = await fetch(`package/${encodeURIComponent(id)}/${encodeURIComponent(name)}?s=${encodeURIComponent(pageSession)}`);
+      if (!r.ok) throw new Error(`${name} ließ sich nicht holen (Fehler ${r.status}).`);
+      const file = await target.getFileHandle(name, {create: true});
+      await r.body.pipeTo(await file.createWritable());   // written beside it and swapped in at the end
+    }
+    return `Entpackt in deinen Ordner zum Hochladen: ${root.name}\\${plan.term}\\${plan.module}`;
   }
   function fetchPackage(id) {
     if (window.top === window) {
@@ -3107,7 +3156,7 @@
     $("noServer").style.display = on ? "none" : "";
     for (const id of ["library", "libraryEmpty"]) $(id).style.display = "none";
   }
-  async function openOnServer(target) {
+  async function openInBrowser(target) {
     const note = $(target === "settings" ? "settingsNote" : "inBrowserNote");
     note.className = "hint"; note.textContent = "Wird im Browser geöffnet …";
     const error = await api().open_on_server(target);
