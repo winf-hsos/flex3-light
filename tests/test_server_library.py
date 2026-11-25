@@ -167,30 +167,31 @@ def test_a_deleted_recording_goes_to_the_servers_trash(tmp_path):
     assert json.loads(next((data / "trash").iterdir()).joinpath("session.json").read_text(encoding="utf-8"))["topic"]
 
 
-def test_the_app_takes_the_package_into_its_folder_for_uploads(tmp_path, monkeypatch):
+def test_the_app_opens_the_page_in_the_browser_signed_in(monkeypatch):
     import core
     from types import SimpleNamespace
 
     class Client:
         url = "http://127.0.0.1:8765"
 
-        def library_call(self, call, sid):
-            assert (call, sid) == ("publish_plan", MINE)
-            return {"files": ["a.mp4"], "term": "2026-27 - WS", "module": "Digitization and Programming"}
-
-        def download(self, path, target):
-            assert path == f"/library/package/{MINE}"
-            with zipfile.ZipFile(target, "w") as z:
-                z.writestr("2026-11-09 - Digitization and Programming - Bits.mp4", b"video")
-                z.writestr("../outside.mp4", b"no")                     # never written outside the folder
-                z.writestr("sub/inside.mp4", b"no")
+        def library_ticket(self):
+            return {"ticket": "t1", "path": "/library/#ticket=t1"}
 
     opened = []
-    monkeypatch.setattr(core.os, "startfile", opened.append, raising=False)
+    monkeypatch.setattr(core.webbrowser, "open", opened.append)
     c = core.Core.__new__(core.Core)
-    c.delivery, c.settings, c.archive = SimpleNamespace(client=Client()), {"publish_dir": str(tmp_path / "up")}, tmp_path
-    assert c.fetch_package(MINE) == ""
-    target = tmp_path / "up" / "2026-27 - WS" / "Digitization and Programming"
-    assert sorted(p.name for p in target.iterdir()) == ["2026-11-09 - Digitization and Programming - Bits.mp4"]
-    assert not (tmp_path / "up" / "2026-27 - WS" / "outside.mp4").exists() and opened == [target]
-    assert c.open_server_url("https://elsewhere.example/library/x") != ""
+    c.delivery = SimpleNamespace(client=Client())
+    assert c.open_on_server() == "" and c.open_on_server("settings") == ""
+    assert opened == ["http://127.0.0.1:8765/library/#ticket=t1", "http://127.0.0.1:8765/library/#ticket=t1&page=settings"]
+    c.delivery.client = None
+    assert c.open_on_server() != "" and len(opened) == 2
+
+
+def test_what_follows_a_recording_is_set_on_the_page(tmp_path):
+    data, client = server(tmp_path)
+    auth, _ = signed_in(client)
+    assert client.post("/library/api/data", json=[], headers=auth).json()["after_recording"] == "nothing"
+    client.post("/library/api/set_after_recording", json=["cut"], headers=auth)
+    d = client.post("/library/api/data", json=[], headers=auth).json()
+    assert d["after_recording"] == "cut" and d["cut"]["auto"] is True
+    assert client.post("/library/api/set_after_recording", json=["everything"], headers=auth).status_code == 422

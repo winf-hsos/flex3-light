@@ -92,8 +92,7 @@ class Api:
         self._core.delete_module(eid)
 
     def folder(self, kind):
-        current = {"archive_dir": self._core.archive, "raw_dir": self._core.raw_dir,
-                   "publish_dir": self._core.publish_dir()}[kind]
+        current = {"archive_dir": self._core.archive, "raw_dir": self._core.raw_dir}[kind]
         picked = self._window.create_file_dialog(webview.FOLDER_DIALOG, directory=str(current))
         if picked:
             self._core.set_folder(kind, picked[0] if isinstance(picked, (list, tuple)) else picked)
@@ -119,9 +118,6 @@ class Api:
     def open_result(self):
         self._core.open_result()
 
-    def set_after_recording(self, value):
-        self._core.set_after_recording(value)
-
     def connect_server(self, code):
         return self._core.connect_server(code)
 
@@ -134,32 +130,8 @@ class Api:
     def await_server(self):
         return self._core.await_server()
 
-    def server_library(self, browser=False):
-        return self._core.server_library(bool(browser))
-
-    def fetch_package(self, sid):
-        return self._core.fetch_package(str(sid))
-
-    def open_server_url(self, url):
-        return self._core.open_server_url(str(url))
-
-    def set_cut_settings(self, values):
-        self._core.set_cut_settings(values or {})
-
-    def video_style(self):
-        return self._core.video_style()
-
-    def set_video_style(self, changes):
-        return self._core.set_video_style(changes or {})
-
-    def pick_logo(self):
-        picked = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Bilder (*.png;*.jpg;*.jpeg)",))
-        if not picked:
-            return None
-        return self._core.set_video_logo(picked[0] if isinstance(picked, (list, tuple)) else picked)
-
-    def remove_logo(self):
-        return self._core.set_video_logo(None)
+    def open_on_server(self, page="library"):
+        return self._core.open_on_server(str(page))
 
     def view(self, mode):
         """Switch the window between "full" (setup), "bar" (recording) and "ask" (save question).

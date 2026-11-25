@@ -8,7 +8,6 @@ run in different threads.
 """
 from __future__ import annotations
 
-import base64
 import datetime as dt
 import json
 import math
@@ -16,11 +15,9 @@ import os
 import queue
 import re
 import subprocess
-import shutil
 import threading
 import time
 import webbrowser
-import zipfile
 from pathlib import Path
 
 import activity
@@ -37,7 +34,7 @@ import local_server
 from delivery import Delivery, recycle
 from hotkeys import HOTKEY_PAUSE, HOTKEY_PRIVATE, GlobalKeys
 from lecturer_profile import Profile, seed_entries
-from pipeline import cut_rules, publish
+from pipeline import cut_rules
 from preview import PreviewServer
 import server_client as server_api
 from server_client import ServerClient
@@ -299,7 +296,6 @@ class Core:
                 "module": self.module,
                 "devices": {k: [n for n, _ in v] for k, v in self.devices.items()},
                 "choice": dict(self.choice), "archive_dir": str(self.archive), "raw_dir": str(self.raw_dir),
-                "publish_dir": str(self.publish_dir()),
                 "options": dict(self.options), "cut": self.cut_settings(), "after_recording": self.after_recording(),
                 "server": self.server_info()}
 
@@ -380,8 +376,6 @@ class Core:
             return
         if kind == "archive_dir":
             self.archive = Path(path)
-        elif kind == "publish_dir":
-            self.settings["publish_dir"] = str(Path(path))
         elif kind == "raw_dir":
             self.raw_dir = self.delivery.root = Path(path)
             with self.lock:
@@ -722,104 +716,23 @@ class Core:
         if self.profile.set_preferences(cut_rules.cut_preferences(self.profile.preferences("cut."), values)):
             self.delivery.wake.set()
 
-    # ---------------------------------------------------------- publishing
-
-    def publish_dir(self) -> Path:
-        """Root of the folders the lecturer uploads from; next to the recordings unless chosen."""
-        return Path(self.settings.get("publish_dir") or self.archive / "Veröffentlichen")
-
-    # ---------------------------------------------------------- the look of all videos, kept by the server
-
-    def _server_call(self, call: str, *args) -> dict:
-        """A call of the server's page that answers with a dict; {"error": text} if it cannot."""
-        client = self.delivery.client
-        if client is None:
-            return {"error": "Kein Server verbunden."}
-        try:
-            return client.library_call(call, *args)
-        except server_api.ServerError as e:
-            return {"error": str(e.detail) if e.status == 422 else f"Der Server antwortet mit Fehler {e.status}."}
-        except OSError as e:
-            return {"error": f"Der Server ist gerade nicht erreichbar: {e}"}
-
-    def video_style(self) -> dict:
-        return self._server_call("video_style")
-
-    def set_video_style(self, changes: dict) -> dict:
-        return self._server_call("set_video_style", changes or {})
-
-    def set_video_logo(self, path: str | None) -> dict:
-        """Send a picture file as the logo of all videos, or remove the logo with None."""
-        if not path:
-            return self._server_call("set_video_logo", "", "png")
-        p = Path(path)
-        try:
-            data = p.read_bytes()
-        except OSError as e:
-            return {"error": f"Das Bild ließ sich nicht lesen: {e}"}
-        if len(data) > 2_000_000:
-            return {"error": "Das Logo ist größer als 2 MB."}
-        kind = "jpg" if p.suffix.lower() in (".jpg", ".jpeg") else "png"
-        return self._server_call("set_video_logo", base64.b64encode(data).decode(), kind)
-
     # ---------------------------------------------------------- "Meine Aufnahmen" on the server (phase 4)
+    # Since 2026-11-25 the app only records (Nicolas): everything after the recording, the recordings
+    # and the settings of cut and videos, is the server's page in the browser.
 
-    def server_library(self, browser: bool = False) -> dict:
-        """{"url"} of the page "Meine Aufnahmen" on the server with a one-time ticket, for the frame in
-        the window, or opened in the default browser (browser=True); {"error"} when that fails."""
-        client = self.delivery.client
-        if client is None:
-            return {"error": "Kein Server verbunden."}
-        try:
-            url = client.url + client.library_ticket()["path"]
-        except (server_api.ServerError, OSError, KeyError):
-            return {"error": "Der Server ist gerade nicht erreichbar. Deine Aufnahmen dort erscheinen, sobald er wieder da ist."}
-        if browser:
-            webbrowser.open(url)
-            return {"url": ""}
-        return {"url": url}
-
-    def open_server_url(self, url: str) -> str:
-        """Open a page of "Meine Aufnahmen" on the server in the browser, e.g. the summary; nothing else."""
-        client = self.delivery.client
-        if client is None or not url.startswith(client.url + "/library/"):
-            return "Diese Adresse öffnet FLEX3 Light nicht."
-        webbrowser.open(url)
-        return ""
-
-    def fetch_package(self, sid: str) -> str:
-        """Take the package of a recording published on the server into the folder for uploads, under
-        <term>\\<module> with the names Opencast expects, as publishing on this computer does; then show
-        the folder. Files of an earlier package with the same names are replaced. Returns an error or ''."""
+    def open_on_server(self, page: str = "library") -> str:
+        """Open the server's page in the default browser, signed in as this lecturer with a one-time
+        ticket: "library" (Meine Aufnahmen) or "settings" (cut, videos, their look). Returns an error or ''."""
         client = self.delivery.client
         if client is None:
             return "Kein Server verbunden."
         try:
-            plan = client.library_call("publish_plan", sid)
-        except (server_api.ServerError, OSError) as e:
-            return f"Der Server ist gerade nicht erreichbar: {e}"
-        term, module = str(plan.get("term", "")), publish.clean(str(plan.get("module", "")))
-        if not plan.get("files") or not library.TERM.match(term) or not module:
-            return "Für diese Aufnahme gibt es kein Paket."
-        target = self.publish_dir() / term / module
-        target.mkdir(parents=True, exist_ok=True)
-        package = target / f".download-{sid}.zip"
-        try:
-            client.download(f"/library/package/{sid}", package)
-            with zipfile.ZipFile(package) as z:
-                for info in z.infolist():
-                    name = info.filename
-                    if not publish.flat_name(name):                # only plain names, never a path
-                        continue
-                    part = target / (name + ".part")
-                    with z.open(info) as src, open(part, "wb") as dst:
-                        shutil.copyfileobj(src, dst, 1 << 20)
-                    os.replace(part, target / name)
-        except (server_api.ServerError, OSError, zipfile.BadZipFile) as e:
-            return f"Das Paket ließ sich nicht holen: {e}"
-        finally:
-            package.unlink(missing_ok=True)
-        os.startfile(target)
+            url = client.url + client.library_ticket()["path"]
+        except (server_api.ServerError, OSError, KeyError):
+            return "Der Server ist gerade nicht erreichbar. Versuch es gleich noch einmal."
+        if page == "settings":
+            url += "&page=settings"
+        webbrowser.open(url)
         return ""
 
     def open_result(self) -> None:

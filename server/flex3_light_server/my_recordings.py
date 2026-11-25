@@ -46,7 +46,7 @@ SESSION_SECONDS = 12 * 3600
 CALLS = ("data", "recordings", "recording", "start_transcription", "redo_transcription", "review_word",
          "redo_cut", "change_cut_item", "decide_cut_items", "add_cut_item", "remove_cut_item", "cover_lock", "lift_lock", "set_program_rule",
          "set_cut_metadata",
-         "set_cut_cards", "set_cut_settings", "approve_cut", "recheck", "rerender", "make_summary", "publish_plan", "publish",
+         "set_cut_cards", "set_cut_settings", "set_after_recording", "approve_cut", "recheck", "rerender", "make_summary", "publish_plan", "publish",
          "propose_topics", "change_topic", "choose_topics", "add_topic", "approve_topics", "redo_outline", "revise_topics",
          "set_languages", "set_lecturers", "delete_recording", "video_style", "set_video_style", "set_video_logo")
 ADMINS = "admins.txt"
@@ -124,6 +124,17 @@ class MyRecordings(Recordings):
             modules, prefs = self.store.load(self.user_id)
             current = {k[4:]: v["value"] for k, v in prefs.items() if k.startswith("cut.")}
             prefs, changed = profiles.stamp(prefs, cut_rules.cut_preferences(current, values or {}))
+            if changed:
+                self.store.save(self.user_id, modules, prefs)
+
+    def set_after_recording(self, value: str) -> None:
+        """What the server starts by itself once a recording of this lecturer is here; since 2026-11-25
+        set on this page, no longer in the app."""
+        if value not in cut_rules.AFTER_RECORDING:
+            raise ValueError(f"unknown value {value!r}")
+        with self.lock("profile:" + self.user_id):
+            modules, prefs = self.store.load(self.user_id)
+            prefs, changed = profiles.stamp(prefs, {"after_recording": value})
             if changed:
                 self.store.save(self.user_id, modules, prefs)
 

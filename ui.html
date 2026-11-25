@@ -48,6 +48,8 @@
     color: var(--slate); font-weight: 500; text-align: left; transition: background .12s, color .12s; }
   .nav:hover { background: var(--hover); color: var(--ink); }
   .nav.active { background: var(--sky); color: var(--deep); font-weight: 600; }
+  .nav { white-space: nowrap; }
+  .nav .out { margin-left: auto; width: 12px; height: 12px; opacity: .6; }
   .nav .count { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--slate); }
   .nav .busy { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--blue);
     animation: breathe 1.8s ease-in-out infinite; }
@@ -596,15 +598,22 @@
   .pill-btn.discard:hover, .pill-btn.discard.confirm { background: var(--red); color: #fff; }
 
   /* ------------------------------------------------------------- my recordings on the server (phase 4) */
-  .lib-source { display: none; align-items: center; gap: 12px; margin-bottom: 12px; }
-  .lib-source.on { display: flex; }
-  .lib-source .link { margin-left: auto; }
-  .server-frame { display: none; flex: 1; min-height: 0; width: 100%; border: 0; background: var(--paper); }
   /* the same file as a page of the server: only "Meine Aufnahmen", no window frame */
   body.server-page { border: 0; }
-  body.server-page .app { grid-template-columns: minmax(0, 1fr); }
-  body.server-page .sidebar, body.server-page .win-btn, body.server-page .grip, body.server-page .bar,
+  body:not(.server-page) .server-only { display: none !important; }
+  body.server-page .win-btn, body.server-page .grip, body.server-page .bar,
   body.server-page .app-only { display: none !important; }
+  body.embedded .app { grid-template-columns: minmax(0, 1fr); }      /* in the frame of an app before 2026-11-25 */
+  body.embedded .sidebar { display: none; }
+  /* the server's page is a page of the browser: narrow windows get one column and the menu on top */
+  @media (max-width: 900px) { body.server-page .settings-grid { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 760px) {
+    body.server-page:not(.embedded) .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    body.server-page .sidebar { flex-direction: row; align-items: center; padding: 8px 12px; border-right: 0;
+      border-bottom: 1px solid var(--line); }
+    body.server-page .sidebar .nav { width: auto; }
+    body.server-page .brand { padding: 4px 12px 4px 4px; }
+  }
   body.embedded .topbar { display: none; }
   body.embedded #page-library { padding: 0 2px 8px; }
 </style>
@@ -627,6 +636,7 @@
   <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
   <symbol id="i-maximize" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5"/></symbol>
   <symbol id="i-restore" viewBox="0 0 24 24"><rect x="5" y="8" width="11" height="11" rx="1.5"/><path d="M8.5 5H19v10.5"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 6h5l2 2h9v10H4z"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24"><path d="M18.76 10.19 L21.48 10.50 L21.48 13.50 L18.76 13.81 L18.06 15.50 L19.77 17.64 L17.64 19.77 L15.50 18.06 L13.81 18.76 L13.50 21.48 L10.50 21.48 L10.19 18.76 L8.50 18.06 L6.36 19.77 L4.23 17.64 L5.94 15.50 L5.24 13.81 L2.52 13.50 L2.52 10.50 L5.24 10.19 L5.94 8.50 L4.23 6.36 L6.36 4.23 L8.50 5.94 L10.19 5.24 L10.50 2.52 L13.50 2.52 L13.81 5.24 L15.50 5.94 L17.64 4.23 L19.77 6.36 L18.06 8.50Z"/><circle cx="12" cy="12" r="3"/></symbol>
 </svg>
@@ -636,11 +646,11 @@
 <div class="app">
   <aside class="sidebar">
     <div class="brand pywebview-drag-region"><span class="mark pywebview-drag-region"></span><span class="brand-name pywebview-drag-region">FLEX3 <span class="pywebview-drag-region">Light</span></span></div>
-    <button class="nav active" data-page="record" onclick="showPage('record')"><svg class="i"><use href="#i-record"/></svg>Neue Aufnahme</button>
-    <button class="nav" data-page="library" onclick="showPage('library')"><svg class="i"><use href="#i-film"/></svg>Meine Aufnahmen<span id="libraryBadge"></span></button>
-    <button class="nav" data-page="modules" onclick="showPage('modules')"><svg class="i"><use href="#i-book"/></svg>Module</button>
+    <button class="nav active app-only" data-page="record" onclick="showPage('record')"><svg class="i"><use href="#i-record"/></svg>Neue Aufnahme</button>
+    <button class="nav" data-page="library" onclick="showPage('library')"><svg class="i"><use href="#i-film"/></svg>Meine Aufnahmen<span id="libraryBadge"></span><svg class="i app-only out" aria-label="öffnet im Browser"><use href="#i-out"/></svg></button>
+    <button class="nav app-only" data-page="modules" onclick="showPage('modules')"><svg class="i"><use href="#i-book"/></svg>Module</button>
     <button class="nav" data-page="settings" onclick="showPage('settings')"><svg class="i"><use href="#i-gear"/></svg>Einstellungen</button>
-    <div class="sidebar-foot">
+    <div class="sidebar-foot app-only">
       <span class="conn" id="conn"></span>
     </div>
   </aside>
@@ -697,11 +707,12 @@
 
     <!-- my recordings: list on the left, the chosen one on the right -->
     <section class="page" id="page-library">
-      <div class="lib-source" id="libSource">
-        <span class="hint" id="libSourceNote"></span>
-        <button class="link" id="openInBrowser" onclick="openServerLibrary()">Im Browser öffnen</button>
+      <div class="empty app-only" id="inBrowser" style="display:none">
+        <h2>Meine Aufnahmen öffnen sich im Browser</h2>
+        <p>Was nach der Aufnahme kommt, also Transkription, Schnitt, Themenvideos und Veröffentlichung, zeigt der FLEX3-Server im Browser, angemeldet als du. FLEX3 Light selbst nimmt nur auf.</p>
+        <button class="btn primary" onclick="openOnServer('library')">Im Browser öffnen</button>
+        <span class="hint" id="inBrowserNote"></span>
       </div>
-      <iframe class="server-frame" id="serverFrame" title="Meine Aufnahmen auf dem Server"></iframe>
       <div class="library" id="library">
         <div class="rec-list">
           <div class="field"><input id="search" placeholder="Aufnahmen durchsuchen" oninput="renderRecordings()"></div>
@@ -716,12 +727,12 @@
       </div>
       <div class="empty" id="noServer" style="display:none">
         <h2>Deine Aufnahmen liegen auf dem FLEX3-Server</h2>
-        <p>Dort werden sie transkribiert, geschnitten und veröffentlicht, und hier siehst du sie, sobald FLEX3 Light mit dem Server verbunden ist. Bis dahin legt die App jede Aufnahme auf diesem Rechner ab.</p>
+        <p>Dort werden sie transkribiert, geschnitten und veröffentlicht, und du siehst sie im Browser, sobald FLEX3 Light mit dem Server verbunden ist. Bis dahin legt die App jede Aufnahme auf diesem Rechner ab.</p>
         <button class="btn primary" onclick="showPage('settings')">Mit dem Server verbinden</button>
       </div>
       <div class="empty" id="signedOut" style="display:none">
         <h2>Die Anmeldung ist abgelaufen</h2>
-        <p>Öffne „Meine Aufnahmen“ in FLEX3 Light, dann meldet dich die App wieder an. Im Browser öffnest du die Seite von dort mit „Im Browser öffnen“.</p>
+        <p>Klick in FLEX3 Light auf „Meine Aufnahmen“, dann öffnet die App diese Seite neu und meldet dich dabei wieder an.</p>
       </div>
     </section>
 
@@ -758,14 +769,17 @@
     <section class="page" id="page-settings">
       <div class="settings-grid">
         <div class="settings-col">
-          <div class="panel section">
+          <div class="panel section app-only">
             <div class="panel-head"><h2>Aufnahme</h2></div>
             <label class="toggle"><input type="checkbox" id="hide_taskbar" onchange="setOption(this)"><span class="knob"></span><span><b>Taskleiste nicht aufnehmen</b><small>Der Bildschirm wird ohne die Windows-Taskleiste aufgezeichnet.</small></span></label>
             <label class="toggle"><input type="checkbox" id="hide_alttab" onchange="setOption(this)"><span class="knob"></span><span><b>Fensterwechsel ausblenden</b><small>Bei Alt+Tab und den Vorschaubildern der Taskleiste bleibt das Bild der Aufnahme kurz stehen.</small></span></label>
-            <div class="setting-row"><span>Nach der Aufnahme</span><select id="after_recording" onchange="setAfterRecording(this.value)"><option value="nothing">nur speichern</option><option value="transcribe">transkribieren</option><option value="cut">transkribieren und Schnitt vorschlagen</option></select></div>
-            <div class="section-note">Das macht der FLEX3-Server, sobald die Aufnahme bei ihm angekommen ist. Was nicht von selbst startet, startest du unter „Meine Aufnahmen“ bei der Aufnahme.</div>
           </div>
-          <div class="panel section">
+          <div class="panel section server-only">
+            <div class="panel-head"><h2>Nach der Aufnahme</h2></div>
+            <div class="setting-row"><span>Sobald sie da ist</span><select id="after_recording" onchange="setAfterRecording(this.value)"><option value="nothing">nur speichern</option><option value="transcribe">transkribieren</option><option value="cut">transkribieren und Schnitt vorschlagen</option></select></div>
+            <div class="section-note">Das macht der FLEX3-Server, sobald eine Aufnahme bei ihm angekommen ist. Was nicht von selbst startet, startest du unter „Meine Aufnahmen“ bei der Aufnahme.</div>
+          </div>
+          <div class="panel section server-only">
             <div class="panel-head"><h2>Schnitt</h2></div>
             <div class="setting-row"><span>Lange Pausen ab</span><span><input type="number" id="cut_pause_min" min="10" max="600" onchange="saveCutSettings()"> Sekunden</span></div>
             <label class="toggle"><input type="checkbox" id="cut_title_card" onchange="saveCutSettings()"><span class="knob"></span><span><b>Titeltafel und Abspann</b><small>Am Anfang Titel, Modul, Datum und Name, am Ende ein kurzer Abspann. Die Texte änderst du vor der Freigabe.</small></span></label>
@@ -781,7 +795,7 @@
             <div class="cut-group"><h3>Immer behalten</h3><div class="chips" id="keepPrograms"></div></div>
             <div class="section-note">Programme legst du in „Meine Aufnahmen“ beim Schnitt einer Aufnahme fest.</div>
           </div>
-          <div class="panel section">
+          <div class="panel section server-only">
             <div class="panel-head"><h2>Videos</h2></div>
             <label class="text-row"><b>Name in den Videos</b>
               <input type="text" id="cut_lecturer_name" maxlength="80" placeholder="z. B. Prof. Dr. Erika Mustermann" onchange="saveCutSettings()"></label>
@@ -790,28 +804,32 @@
             <label class="toggle"><input type="checkbox" id="cut_burned_captions" onchange="saveCutSettings()"><span class="knob"></span><span><b>Untertitel im Bild</b><small>Jedes Video zusätzlich als Fassung mit Untertiteln im Bild, das gesprochene Wort hervorgehoben.</small></span></label>
             <div class="section-note">Gilt für neue Aufnahmen. Bei einer einzelnen Aufnahme änderst du es unter „Meine Aufnahmen“ im Schritt „Sprachen“, auch für jedes Themenvideo.</div>
           </div>
-          <div class="panel section">
+          <div class="panel section app-only">
             <div class="panel-head"><h2>Ablage</h2></div>
             <div class="folders">
               <span>Aufnahmen</span><span class="path" id="archive_dir"></span><button class="link" onclick="pickFolder('archive_dir')">Ändern</button>
               <span>Rohdateien</span><span class="path" id="raw_dir"></span><button class="link" onclick="pickFolder('raw_dir')">Ändern</button>
-              <span>Veröffentlichen</span><span class="path" id="publish_dir"></span><button class="link" onclick="pickFolder('publish_dir')">Ändern</button>
             </div>
           </div>
         </div>
         <div class="settings-col">
-          <div class="panel section" id="serverPanel">
+          <div class="panel section app-only" id="serverPanel">
             <div class="panel-head"><h2>Server</h2><span class="key-state" id="serverState"></span></div>
             <div class="section-note" id="serverNote"></div>
             <div class="setting-row" id="serverPick"><span>Verbindung</span><select id="serverChoice" onchange="useServer(this.value)"></select></div>
             <div class="key-edit" id="serverConnect"><div class="field"><input type="text" id="serverCode" autocomplete="off" spellcheck="false" placeholder="FLX3-…@https://…"></div><button class="btn primary" id="serverButton" onclick="connectServer()">Verbinden</button></div>
             <div class="key-actions"><button class="link" id="serverAdd" onclick="showServerCode()">Weiteren Server verbinden</button><button class="link danger" id="serverDisconnect" onclick="disconnectServer()">Trennen</button><span class="hint" id="serverMsg"></span></div>
           </div>
-          <div class="panel section">
+          <div class="panel section app-only">
+            <div class="panel-head"><h2>Schnitt und Videos</h2></div>
+            <div class="section-note">Wie der Server schneidet, welche Untertitel entstehen und wie die Videos aussehen, stellst du auf dem FLEX3-Server im Browser ein, dort, wo du auch deine Aufnahmen siehst.</div>
+            <div class="key-actions"><button class="btn" onclick="openOnServer('settings')"><svg class="i"><use href="#i-out"/></svg>Im Browser einstellen</button><span class="hint" id="settingsNote"></span></div>
+          </div>
+          <div class="panel section server-only">
             <div class="panel-head"><h2>Aussehen der Videos</h2><span class="hint" id="styleMsg"></span></div>
             <div id="styleBody" class="cut-group"></div>
           </div>
-          <div class="panel section">
+          <div class="panel section app-only">
             <div class="panel-head"><h2>KI-Dienste</h2></div>
             <div class="section-note">Für Transkription, Untertitel und Inhalte nach der Vorlesung. Die Schlüssel liegen in der Windows-Anmeldeinformationsverwaltung und werden hier nie wieder angezeigt.</div>
             <div class="key-row">
@@ -893,6 +911,10 @@
     library: ["Meine Aufnahmen", "Was du aufgenommen hast, und wie weit es auf dem Weg zur Veröffentlichung ist."],
     modules: ["Module", "Deine Lehrveranstaltungen, auf allen deinen Geräten gleich."],
     settings: ["Einstellungen", "Aufnahme, Ablage und KI-Dienste."]};
+  if (SERVER) {
+    PAGES.library[1] = "Deine Aufnahmen auf dem FLEX3-Server, und wie weit sie auf dem Weg zur Veröffentlichung sind.";
+    PAGES.settings[1] = "Was nach der Aufnahme geschieht, wie geschnitten wird und wie die Videos aussehen.";
+  }
   const CONNECTION = {
     local: ["Nur auf diesem Rechner", "Kein Server eingerichtet: alles bleibt auf diesem Rechner"],
     connecting: ["Verbinde …", "Der Server wird gesucht"],
@@ -930,16 +952,16 @@
 
   // ---------------------------------------------------------------- pages
   function showPage(name) {
-    if (SERVER && name !== "library") return;               // the server's page has nothing else
+    if (SERVER && !["library", "settings"].includes(name)) return;   // the server's page has nothing else
     page = name;
     for (const b of document.querySelectorAll(".nav")) b.classList.toggle("active", b.dataset.page === name);
     for (const s of document.querySelectorAll(".page")) s.classList.toggle("active", s.id === "page-" + name);
     $("pageTitle").textContent = PAGES[name][0];
     $("pageText").textContent = PAGES[name][1];
     if (name === "library" && SERVER) loadRecordings();
-    if (name === "library" && !SERVER && serverOrigin && !frameSignedIn) signInFrame();
+    if (name === "library" && !SERVER && $("inBrowser").style.display !== "none") openOnServer("library");
     if (name === "modules") renderModules();
-    if (name === "settings" && !SERVER) loadVideoStyle();
+    if (name === "settings" && SERVER) loadServerSettings();
     if (name !== "library" && $("player")) $("player").pause();
     updatePreview();
   }
@@ -992,15 +1014,12 @@
     fillModules(d, d.module || "");
     for (const kind of ["screen", "camera", "microphone"]) fillSelect(kind, d.devices[kind], d.choice[kind]);
     for (const k in d.options) $(k).checked = d.options[k];
-    $("after_recording").value = d.after_recording || "nothing";
     fillServer(d.server);
     fillLibrarySource(d);
-    for (const k of ["archive_dir", "raw_dir", "publish_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
+    for (const k of ["archive_dir", "raw_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
     previewUrl = d.preview_url || "";
     mediaBase = d.media_base || "";
     fillKeys(d.api_keys);
-    cutSettings = d.cut || {};
-    fillCutSettings();
     updatePreview();
     updateReady();
   }
@@ -1042,7 +1061,7 @@
     if (error) showHint(error, "error");
   }
   function showHint(text, kind) { const h = $("hint"); h.textContent = text; h.className = "hint " + (kind || ""); }
-  const showLatest = () => showPage("library");
+  const showLatest = () => showPage("library");             // opens the server's page in the browser
 
   // ---------------------------------------------------------------- my recordings
   let recordings = [], selectedId = null, shownMedia = "";
@@ -2716,6 +2735,26 @@
     videoStyle = await api().video_style();
     renderVideoStyle();
   }
+  function pickLogo() {
+    const input = el("input"); input.type = "file"; input.accept = "image/png,image/jpeg";
+    input.onchange = () => {
+      const file = input.files[0];
+      if (!file) return;
+      if (file.size > 2_000_000) { $("styleMsg").className = "hint error"; $("styleMsg").textContent = "Das Logo ist größer als 2 MB."; return; }
+      const reader = new FileReader();
+      reader.onload = () => changeStyle("set_video_logo", String(reader.result).split(",", 2)[1],
+                                        /jpe?g$/i.test(file.type) ? "jpg" : "png");
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }
+  // the settings of the server's page: what follows a recording, the cut, the videos and their look
+  async function loadServerSettings() {
+    const d = await api().data();
+    cutSettings = d.cut || {}; fillCutSettings();
+    $("after_recording").value = d.after_recording || "nothing";
+    loadVideoStyle();
+  }
   async function changeStyle(call, ...args) {
     $("styleMsg").className = "hint"; $("styleMsg").textContent = "Wird gespeichert …";
     let r;
@@ -2744,8 +2783,8 @@
     }
     const row = (label, control) => { const r = el("div", "style-row"); r.append(el("span", "", label), control); box.appendChild(r); };
     const actions = el("span", "actions");
-    actions.appendChild(button("btn", s.logo ? "Anderes Logo" : "Logo wählen", () => changeStyle("pick_logo")));
-    if (s.logo) actions.appendChild(button("link danger", "Entfernen", () => changeStyle("remove_logo")));
+    actions.appendChild(button("btn", s.logo ? "Anderes Logo" : "Logo wählen", pickLogo));
+    if (s.logo) actions.appendChild(button("link danger", "Entfernen", () => changeStyle("set_video_logo", "", "png")));
     row(s.logo ? "Logo auf den Tafeln" : "Logo (ohne: das FLEX3-Zeichen)", actions);
     const color = (value, apply) => { const c = el("input"); c.type = "color"; c.value = value; c.onchange = () => apply(c.value); return c; };
     row("Grundfarbe der Tafeln", color(s.colors.background, v => changeStyle("set_video_style", {colors: {background: v}})));
@@ -2865,7 +2904,6 @@
     const veil = $("switching"), app = document.querySelector(".app");
     $("switchText").textContent = text;
     veil.classList.add("open"); app.inert = true;
-    $("serverFrame").src = "about:blank"; frameSignedIn = false; lastSignIn = 0;
     try { return await work(); }
     finally {
       veil.classList.remove("open"); app.inert = false;
@@ -3027,8 +3065,6 @@
         if (!first && !st.recording) {                        // modules and the preferences of the profile
           const d = await api().data();
           fillModules(d);
-          $("after_recording").value = d.after_recording || "nothing";
-          if (document.activeElement !== $("cut_pause_min")) { cutSettings = d.cut || {}; fillCutSettings(); }
         }
       }
       document.body.classList.toggle("paused", st.recording && st.paused && !st.asking);
@@ -3062,49 +3098,29 @@
     setTimeout(tick, 250);
   }
   // ---------------------------------------------------------------- my recordings on the server
-  // Since phase 5 the app only records. "Meine Aufnahmen" shows the server's page in a frame (this
-  // file in its server mode), signed in with a one-time ticket the app gets with its device token;
-  // without a server it says where the recordings will be.
-  let serverOrigin = "", frameSignedIn = false, lastSignIn = 0;
+  // Since 2026-11-25 the app only records (Nicolas). Everything after the recording, "Meine Aufnahmen"
+  // and the settings of cut and videos, is the server's page (this file in its server mode), opened in
+  // the browser and signed in with a one-time ticket the app gets with its device token.
   function fillLibrarySource(d) {
     const on = !!(d.server && d.server.url);
-    const origin = on ? new URL(d.server.url).origin : "";
-    if (origin !== serverOrigin) { serverOrigin = origin; frameSignedIn = false; }
-    $("libSource").classList.toggle("on", on);
-    $("serverFrame").style.display = on ? "block" : "none";
+    $("inBrowser").style.display = on ? "" : "none";
     $("noServer").style.display = on ? "none" : "";
     for (const id of ["library", "libraryEmpty"]) $(id).style.display = "none";
-    if (on && !frameSignedIn && page === "library") signInFrame();
   }
-  async function signInFrame() {
-    if (Date.now() - lastSignIn < 20000) return;               // never a loop of tickets
-    lastSignIn = Date.now();
-    const r = await api().server_library(false);
-    $("libSourceNote").textContent = r.error || "";
-    $("libSourceNote").className = "hint" + (r.error ? " error" : "");
-    if (r.error) return;
-    frameSignedIn = true;
-    $("serverFrame").src = r.url;
+  async function openOnServer(target) {
+    const note = $(target === "settings" ? "settingsNote" : "inBrowserNote");
+    note.className = "hint"; note.textContent = "Wird im Browser geöffnet …";
+    const error = await api().open_on_server(target);
+    note.className = "hint" + (error ? " error" : "");
+    note.textContent = error || "Im Browser geöffnet.";
   }
-  async function openServerLibrary() {
-    const r = await api().server_library(true);
-    if (r.error) { $("libSourceNote").textContent = r.error; $("libSourceNote").className = "hint error"; }
-  }
-  if (!SERVER) window.addEventListener("message", async e => {
-    const m = e.data, frame = $("serverFrame").contentWindow;
-    if (!serverOrigin || e.origin !== serverOrigin || e.source !== frame || !m || !m.flex3) return;
-    if (m.flex3 === "signin") { frameSignedIn = false; if (page === "library") signInFrame(); return; }
-    let error = "Das kann FLEX3 Light nicht.";
-    if (m.flex3 === "package") error = await api().fetch_package(String(m.id));
-    if (m.flex3 === "open") error = await api().open_server_url(String(m.url));
-    frame.postMessage({request: m.request, error}, serverOrigin);
-  });
 
   // ---------------------------------------------------------------- the page on the server
   async function startServerPage() {
     document.body.classList.add("server-page");
     if (window.top !== window) document.body.classList.add("embedded");
-    const ticket = new URLSearchParams(location.hash.slice(1)).get("ticket");
+    const hash = new URLSearchParams(location.hash.slice(1));
+    const ticket = hash.get("ticket"), first = hash.get("page") === "settings" ? "settings" : "library";
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // the ticket leaves the address
     if (ticket) {
       const r = await fetch("session", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ticket})});
@@ -3116,15 +3132,15 @@
     if (!pageSession) try { pageSession = sessionStorage.getItem("flex3-page") || ""; } catch (e) { }
     if (!pageSession) return signedOut();
     mediaBase = "media/";
-    PAGES.library[1] = "Deine Aufnahmen auf dem FLEX3-Server, und wie weit sie auf dem Weg zur Veröffentlichung sind.";
     try { cutSettings = (await api().data()).cut || {}; } catch (e) { return; }
-    showPage("library");
+    showPage(first);
     setInterval(() => { if (!document.hidden && pageSession) loadRecordings().catch(() => {}); }, 5000);
   }
   function signedOut() {
     pageSession = "";
     try { sessionStorage.removeItem("flex3-page"); } catch (e) { }
     for (const id of ["library", "libraryEmpty"]) $(id).style.display = "none";
+    for (const s of document.querySelectorAll(".page")) s.classList.toggle("active", s.id === "page-library");
     $("signedOut").style.display = "";
     if (window.top !== window) window.parent.postMessage({flex3: "signin"}, "*");
   }
