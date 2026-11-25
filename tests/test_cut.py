@@ -438,3 +438,25 @@ def test_spans_stay_inside_the_recording_without_slivers(tmp_path):
         assert b.propose("mute", 59.5, 61.0, "Stimme", 0.8, category="privacy")["end"] == 59.97
     finally:
         b.close()
+
+
+def test_every_item_of_one_kind_is_rejected_at_once(tmp_path):
+    from shelf import shelf
+    folder = tmp_path / "2026-11-25 - Test"
+    folder.mkdir()
+    (folder / "session.json").write_text(json.dumps({"session_id": "x"}), encoding="utf-8")
+    e = edit.new(60)
+    for k, (kind, state) in enumerate([("blur", "accepted"), ("blur", "proposed"), ("cut", "accepted")]):
+        edit.add(e, edit.item(kind, 10 * k, 10 * k + 5, "", "agent", 0.9, state, **({"region": [0, 0, .1, .1]} if kind == "blur" else {})))
+    e["approved"] = "2026-11-25T10:00:00+01:00"
+    edit.save(folder, e)
+    r = shelf(tmp_path, {"x": folder})
+    blurs = [x["id"] for x in e["items"] if x["kind"] == "blur"]
+    assert r.decide_cut_items("x", blurs, "rejected") == ""
+    after = edit.load(folder)
+    assert [(x["kind"], x["state"]) for x in after["items"]] == [("blur", "rejected"), ("blur", "rejected"), ("cut", "accepted")]
+    assert not after.get("approved") and all(x.get("by_lecturer") for x in after["items"] if x["kind"] == "blur")
+    assert r.decide_cut_items("x", blurs, "maybe") == "Unbekannter Zustand."
+    assert r.decide_cut_items("x", ["nope"], "rejected") == "Diese Vorschläge gibt es nicht mehr."
+    from flex3_light_server import my_recordings
+    assert "decide_cut_items" in my_recordings.CALLS

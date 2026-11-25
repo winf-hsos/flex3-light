@@ -342,6 +342,14 @@
   .decide button.on.yes { background: var(--green-soft); color: #1e7e34; font-weight: 600; }
   .decide button.on.no { background: #fdecea; color: #b3261e; font-weight: 600; }
   .cut-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .kind-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12.5px;
+    color: var(--slate); background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
+  .chip small { font-size: 11px; color: var(--mist); }
+  .chip:hover { border-color: var(--line-strong); }
+  .chip.on { color: var(--deep); border-color: var(--blue); background: rgba(0, 158, 227, .08); font-weight: 600; }
+  .chip.on small { color: var(--deep); }
+  .kind-chips .kind-reject { margin-left: auto; padding: 4px 10px; font-size: 12.5px; }
   .cut-tools .marks { font-size: 12px; color: var(--slate); }
   .cut-group { display: grid; gap: 8px; padding-top: 4px; }
   .cut-group h3 { margin: 0; font-size: 13px; font-weight: 600; }
@@ -1784,7 +1792,7 @@
   }
 
   // ---------------------------------------------------------------- the cut: approval of the edit list
-  let cutPreview = false, cutTab = "cuts", cutItems = [], cutDuration = 0, cutSettings = {};
+  let cutPreview = false, cutTab = "cuts", cutKind = "", cutItems = [], cutDuration = 0, cutSettings = {};
   let markIn = null, markOut = null, selectedItem = null, listening = false, cardUntil = 0, detailsOpen = false;
   let playing = "original";                                   // or edited.mp4, clip-01.mp4 ...
   const CUT_KINDS = {cut: "Schnitt", pause: "Pause", mute: "Ton aus", freeze: "Bild anhalten", blur: "Verpixeln",
@@ -1802,7 +1810,7 @@
   function renderCut(d) {
     const box = $("cut"), st = d.stations.edit, view = d.cut || {}, e = view.edit;
     const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
-    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.review, view.render, view.topics, cutTab, markIn, markOut, selectedItem,
+    const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.review, view.render, view.topics, cutTab, cutKind, markIn, markOut, selectedItem,
                                 cutPreview, cutSettings, playing]);
     if (box.dataset.sig === sig || typing) return;
     box.dataset.sig = sig;
@@ -1889,14 +1897,39 @@
     const tabs = el("div", "tabs");
     for (const [key, name, kinds] of CUT_TABS) {
       const n = e.items.filter(x => kinds.includes(x.kind) && x.state === "proposed").length;
-      const t = button("tab" + (cutTab === key ? " active" : ""), name, () => { cutTab = key; renderCut(d); });
+      const t = button("tab" + (cutTab === key ? " active" : ""), name, () => { cutTab = key; cutKind = ""; renderCut(d); });
       if (n) t.appendChild(el("small", "", `${n} offen`));
       tabs.appendChild(t);
     }
     det.appendChild(tabs);
     const kinds = CUT_TABS.find(t => t[0] === cutTab)[2];
+    const inTab = e.items.filter(x => kinds.includes(x.kind));
+    // quick filter by kind within the tab, with how many of each there are
+    const present = kinds.filter(k => inTab.some(x => x.kind === k));
+    if (!present.includes(cutKind)) cutKind = "";
+    if (present.length) {
+      const chips = el("div", "kind-chips");
+      const chip = (k, name, n) => {
+        const c = button("chip" + (cutKind === k ? " on" : ""), name, () => { cutKind = k; renderCut(d); });
+        c.setAttribute("aria-pressed", cutKind === k ? "true" : "false");
+        c.appendChild(el("small", "tabular", String(n)));
+        return c;
+      };
+      chips.appendChild(chip("", "Alle", inTab.length));
+      for (const k of present) chips.appendChild(chip(k, CUT_KINDS[k], inTab.filter(x => x.kind === k).length));
+      det.appendChild(chips);
+    }
+    const mine = inTab.filter(x => !cutKind || x.kind === cutKind);
+    if (cutKind && mine.some(x => x.state !== "rejected")) {     // every item of one kind, whatever was decided
+      const name = CUT_KINDS[cutKind];
+      det.lastChild.appendChild(button("btn danger kind-reject", `Alle ${mine.length} „${name}“ verwerfen`, async () => {
+        if (!await ask({title: `Alle „${name}“ verwerfen?`, confirm: "Verwerfen", danger: true,
+                        text: `Alle ${mine.length} Vorschläge der Art „${name}“ werden verworfen, auch die schon übernommenen. `
+                              + "Einzelne nimmst du danach wieder auf, indem du sie übernimmst."})) return;
+        cutResult(await api().decide_cut_items(selectedId, mine.map(x => x.id), "rejected"));
+      }));
+    }
     const list = el("div", "cut-items");
-    const mine = e.items.filter(x => kinds.includes(x.kind));
     for (const x of mine) list.appendChild(cutRow(x));
     if (!mine.length) list.appendChild(el("div", "hint", "Hier gibt es nichts."));
     det.appendChild(list);
@@ -2475,11 +2508,8 @@
     if (await addOwn("cut", markIn, markOut)) { markIn = markOut = null; resetSteps(); }
   }
   async function decideAll(items, state) {
-    for (const x of items.filter(i => i.state === "proposed")) {
-      const error = await api().change_cut_item(selectedId, x.id, {state});
-      if (error) return cutResult(error);
-    }
-    cutResult("");
+    const open = items.filter(i => i.state === "proposed").map(i => i.id);
+    if (open.length) cutResult(await api().decide_cut_items(selectedId, open, state));
   }
   async function approve(on) { cutResult(await api().approve_cut(selectedId, on)); }
   async function startCut(version) { cutResult(await api().redo_cut(selectedId, version || null)); }

@@ -102,6 +102,24 @@ class Recordings:
         self._save_edit(folder, e)
         return ""
 
+    def decide_cut_items(self, sid: str, item_ids: list, state: str) -> str:
+        """Accept or reject several items at once, e.g. every blur; one write. Returns an error or ''."""
+        if state not in edit.STATES:
+            return "Unbekannter Zustand."
+        found, error = self._edit_of(sid)
+        if error:
+            return error
+        folder, e = found
+        chosen = {str(i) for i in item_ids or []}
+        hit = [x for x in e["items"] if x["id"] in chosen]
+        if not hit:
+            return "Diese Vorschläge gibt es nicht mehr."
+        for x in hit:
+            x["state"] = state
+            x["by_lecturer"] = True
+        self._save_edit(folder, e)
+        return ""
+
     def add_cut_item(self, sid: str, kind: str, start: float, end: float | None, params: dict | None = None) -> str:
         found, error = self._edit_of(sid)
         if error:

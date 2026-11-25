@@ -44,7 +44,7 @@ SESSION_SECONDS = 12 * 3600
 
 # what the page may call, by the names ui.html uses with the app (api().<name>(...))
 CALLS = ("data", "recordings", "recording", "start_transcription", "redo_transcription", "review_word",
-         "redo_cut", "change_cut_item", "add_cut_item", "remove_cut_item", "cover_lock", "lift_lock", "set_program_rule",
+         "redo_cut", "change_cut_item", "decide_cut_items", "add_cut_item", "remove_cut_item", "cover_lock", "lift_lock", "set_program_rule",
          "set_cut_metadata",
          "set_cut_cards", "set_cut_settings", "approve_cut", "recheck", "rerender", "make_summary", "publish_plan", "publish",
          "propose_topics", "change_topic", "choose_topics", "add_topic", "approve_topics", "redo_outline", "revise_topics",
