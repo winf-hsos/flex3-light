@@ -484,6 +484,30 @@ class Core:
         self._use_server(kind)
         return ""
 
+    def await_server(self, timeout: float = 45) -> str:
+        """After a change of connection, wait until the server in use answers and the profile came
+        from it, so the window shows that server's modules and recordings and not the last one's.
+        The test server on this computer may need several seconds to start. Returns '' or why the
+        server is not there yet; the app then keeps trying in the background as always."""
+        client = self.delivery.client
+        if client is None:
+            return ""
+        end = time.monotonic() + timeout
+        while True:
+            try:
+                client.health()
+                break
+            except (OSError, server_api.ServerError):
+                if time.monotonic() >= end:
+                    return "Der Server antwortet noch nicht. FLEX3 Light versucht es im Hintergrund weiter."
+                time.sleep(0.5)
+        self.delivery.server_down_until = 0.0
+        self.delivery.wake.set()                  # the profile from this server right away
+        while (self.profile.status == "local" and self.delivery.reachable is not False
+               and self.delivery.client is client and time.monotonic() < end):
+            time.sleep(0.2)
+        return ""
+
     def disconnect_server(self) -> str:
         """Forget the connection in use and record locally only; the server keeps what it has, and the
         other connection stays to be chosen again."""

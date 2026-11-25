@@ -107,6 +107,25 @@
   .modal-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
   @keyframes fade { from { opacity: 0; } }
   @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  /* while the connection changes the whole window waits: this computer, a line with a travelling
+     signal, the server */
+  .switching { position: fixed; inset: 0; z-index: 60; display: none; place-items: center; padding: 24px;
+    background: rgba(27, 39, 51, .45); animation: fade .15s ease-out; cursor: progress; }
+  .switching.open { display: grid; }
+  .switch-card { width: min(380px, 100%); background: var(--surface); border-radius: 16px; padding: 26px 24px 22px;
+    box-shadow: 0 18px 50px rgba(20, 40, 60, .25); display: grid; gap: 8px; justify-items: center; text-align: center;
+    animation: rise .15s ease-out; }
+  .switch-card h2 { margin: 6px 0 0; font-family: var(--display); font-size: 16px; font-weight: 600; }
+  .switch-card p { margin: 0; color: var(--slate); font-size: 13px; line-height: 1.5; }
+  .link-anim { display: flex; align-items: center; gap: 10px; }
+  .link-anim .end { width: 30px; height: 22px; border: 2px solid var(--deep); border-radius: 5px; }
+  .link-anim .end.server { width: 22px; height: 28px; border-radius: 4px;
+    background: repeating-linear-gradient(to bottom, transparent 0 6px, var(--deep) 6px 8px); }
+  .link-anim .wire { position: relative; width: 92px; height: 2px; background: var(--line); overflow: hidden; }
+  .link-anim .wire::after { content: ""; position: absolute; top: -2px; left: -24px; width: 24px; height: 6px;
+    border-radius: 3px; background: var(--blue); animation: travel 1.1s ease-in-out infinite; }
+  @keyframes travel { to { left: 100%; } }
+  @media (prefers-reduced-motion: reduce) { .link-anim .wire { background: var(--blue); } }
   .hint { min-height: 17px; font-size: 12.5px; color: var(--slate); }
   .hint.error, .cut-summary.error { color: #c62828; } .hint.ok { color: #1e7e34; }
   .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
@@ -196,7 +215,7 @@
   .rec-item b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rec-item small { color: var(--slate); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
   .rec-item small span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mini-way { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; }
+  .mini-way { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
   .mini-way i { height: 4px; border-radius: 2px; background: #e6ebf0; }
   .mini-way i.done { background: var(--green); } .mini-way i.running, .mini-way i.queued { background: var(--blue); }
   .mini-way i.waiting, .mini-way i.failed, .mini-way i.missing { background: var(--amber); }
@@ -207,7 +226,7 @@
   .player { width: min(100%, calc((100vh - 260px) * 16 / 9)); justify-self: center; aspect-ratio: 16 / 9; border-radius: 14px; background: var(--stage); display: block; }
   .player::cue { font-family: var(--text); font-size: 18px; background: rgba(16, 24, 32, .72); }
   /* the way of a recording: a real sequence, so the stations are numbered */
-  .way { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); padding: 12px 8px 10px; }
+  .way { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); padding: 12px 8px 10px; }
   button.station { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 4px 2px 6px;
                    border-radius: 10px; }
   button.station:hover { background: var(--hover); }
@@ -223,6 +242,23 @@
   .step-facts dt { color: var(--slate); } .step-facts dd { margin: 0; }
   .step-facts select.lecturers { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 2px 6px; }
   .step-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  /* the stages of the cut proposal, a small numbered line under its heading */
+  .stages { list-style: none; margin: 2px 0 4px; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+    counter-reset: stage; font-size: 12.5px; }
+  .stages li { display: flex; align-items: center; gap: 6px; counter-increment: stage; }
+  .stages li + li::before { content: ""; width: 14px; height: 2px; background: var(--line); }
+  .stages li.done + li::before { background: var(--green); }
+  .stages li > * { display: flex; align-items: center; gap: 6px; padding: 3px 9px 3px 3px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--slate); font: inherit; background: none; }
+  .stages li > *::before { content: counter(stage); width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 11px; font-weight: 700; background: var(--hover); color: var(--slate); }
+  .stages b { font-weight: 600; color: var(--ink); } .stages small { font-size: 11.5px; }
+  .stages li.done > *::before { content: "✓"; background: var(--green); color: #fff; }
+  .stages li.running > * { border-color: var(--blue); } .stages li.running small { color: var(--deep); }
+  .stages li.running > *::before { background: var(--blue); color: #fff; animation: breathe 1.8s ease-in-out infinite; }
+  .stages li.review > *, .stages li.missing > *, .stages li.failed > * { border-color: var(--amber); }
+  .stages li.review small, .stages li.missing small, .stages li.failed small { color: #8a6200; }
+  .stages .stage-link { cursor: pointer; } .stages .stage-link:hover { background: var(--hover); }
   .station { position: relative; display: grid; justify-items: center; gap: 5px; text-align: center; }
   /* the connector runs from the previous circle's center to this one's; the circles sit above it */
   .station::before { content: ""; position: absolute; z-index: 0; top: 13px; left: -50%; right: 50%; height: 2px; background: var(--line); }
@@ -816,6 +852,14 @@
   <button class="pill-btn discard ask" id="discardButton" onclick="discard()">Verwerfen</button>
 </div>
 
+<div class="switching" id="switching" role="alertdialog" aria-modal="true" aria-busy="true" aria-labelledby="switchTitle" aria-describedby="switchText">
+  <div class="switch-card">
+    <div class="link-anim" aria-hidden="true"><span class="end"></span><span class="wire"></span><span class="end server"></span></div>
+    <h2 id="switchTitle">Verbindung wird aufgebaut</h2>
+    <p id="switchText"></p>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="modal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <h2 id="modalTitle"></h2>
@@ -1002,8 +1046,10 @@
 
   // ---------------------------------------------------------------- my recordings
   let recordings = [], selectedId = null, shownMedia = "";
-  // the way of a recording in nine steps (library.STEPS); each step shows only what belongs to it
-  const STATIONS = [["recorded", "Aufnahme"], ["transcript", "Transkrip­tion"], ["outline", "Gliede­rung"], ["edit", "Schnitt"],
+  // the way of a recording in the steps the lecturer starts or approves, in the order they run; each shows
+  // only what belongs to it. The outline is a stage of the cut proposal and stands on the page of the cut
+  // (since 2026-11-25, Nicolas), with the screening before it and the proposal after it
+  const STATIONS = [["recorded", "Aufnahme"], ["transcript", "Transkrip­tion"], ["edit", "Schnitt"],
                     ["longversion", "Lang­fassung"], ["topics", "Themen­videos"], ["languages", "Spra­chen"], ["content", "Inhalte"],
                     ["publish", "Veröffent­lichen"]];         // soft hyphens: a narrow window breaks the names there
   let activeStep = null;                       // the step clicked; null: the one that needs the lecturer
@@ -1139,8 +1185,8 @@
           <button class="link" id="redoButton" onclick="redoTranscription()">Erneut transkribieren</button>
           <button class="link" id="startTranscription" onclick="startTranscription()">Transkription starten</button></div>
           <div class="hint" id="dTerms"></div><div class="lines" id="lines"></div></div>
-        <div class="panel cutpanel step-panel" data-step="outline" id="outlineStep"></div>
         <div class="panel cutpanel step-panel" data-step="edit" id="cut"></div>
+        <div class="panel cutpanel step-panel" data-step="edit" id="outlineStep"></div>
         <div class="panel cutpanel step-panel" data-step="longversion" id="longStep"></div>
         <div class="panel cutpanel step-panel" data-step="topics" id="topicsStep"></div>
         <div class="panel cutpanel step-panel" data-step="languages" id="languagesStep"></div>
@@ -1295,8 +1341,9 @@
         + "als Stimmen aus dem Raum gemeldet. Sie läuft neu, samt Gliederung, wenn du den Schnitt neu vorschlagen lässt.");
       box.append(p, button("btn", "Schnitt neu vorschlagen lassen", () => redoCut()));
     }
-    box.appendChild(el("p", "step-intro", "Darauf folgen Transkription, Gliederung und Schnitt-Vorschlag; danach entstehen "
-      + "nach deinen Freigaben die Langfassung und die Themenvideos. Klick oben auf einen Schritt, um ihn anzusehen."));
+    box.appendChild(el("p", "step-intro", "Darauf folgen die Transkription und der Schnitt-Vorschlag, der die Aufnahme erst sichtet "
+      + "und gliedert; danach entstehen nach deinen Freigaben die Langfassung und die Themenvideos. Klick oben auf einen Schritt, "
+      + "um ihn anzusehen."));
     if (playing !== "original") box.appendChild(button("link", "Wieder das Original abspielen", () => play("original")));
   }
   // tokens per model and the cost of every step so far (pipeline/usage_log.py), shown with every step;
@@ -1346,9 +1393,15 @@
     return wrap;
   }
 
-  // step 3: the outline (stage C), made with the cut proposal or anew for a recording cut before it existed
+  // the outline (stage C) on the page of the cut, below it: made with the cut proposal, or anew for a
+  // recording cut before it existed. Before there is one, and while the whole proposal runs, the stages
+  // at the head of the cut say all there is
+  const showOutline = () => { goStep("edit"); requestAnimationFrame(() => $("outlineStep").scrollIntoView({behavior: "smooth", block: "start"})); };
   function renderOutlineStep(d) {
     const st = d.stations.outline, view = d.cut || {};
+    const quiet = st === "soon" || (st === "open" && !view.edit) || (st === "running" && d.stations.edit === "running");
+    $("outlineStep").style.display = quiet ? "none" : "";
+    if (quiet) { $("outlineStep").dataset.sig = ""; return; }
     const box = stepBox("outlineStep", JSON.stringify([st, view.outline, d.stations.longversion, st === "running" && d.status]));
     if (!box) return;
     const hint = stepHead(box, "Gliederung");
@@ -1365,19 +1418,6 @@
       box.appendChild(el("p", "step-intro", "Ein Sprachmodell liest die Übersicht der Aufnahme, Minute für Minute, und teilt sie in "
         + "Phasen, Kapitel, Foliensätze und Themenstücke."));
       skeleton(box);
-      return;
-    }
-    if (st === "soon") {
-      box.appendChild(el("p", "step-intro", "Die Gliederung entsteht mit dem Schnitt-Vorschlag: Ein Sprachmodell liest die Übersicht "
-        + "der Aufnahme und teilt sie in Phasen, Kapitel, Foliensätze und Themenstücke. Aus den Foliensätzen und Themenstücken "
-        + "werden später die Themenvideos."));
-      return;
-    }
-    if (st === "open" && !view.edit) {
-      box.appendChild(el("p", "step-intro", "Die Gliederung ist die erste Stufe des Schnitt-Vorschlags: Bevor der Schnitt-Agent "
-        + "schneidet, teilt ein Sprachmodell die Aufnahme in Phasen, Kapitel, Foliensätze und Themenstücke, und der Schnitt "
-        + "folgt dieser Gliederung. Sie entsteht also, sobald du den Schnitt vorschlagen lässt."));
-      box.appendChild(button("btn primary", "Zum Schnitt", () => goStep("edit")));
       return;
     }
     if (st === "open") {
@@ -1808,11 +1848,39 @@
   const fine = t => { const s = Math.max(0, t); return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0").replace(".", ",")}`; };
   const span = x => fine(x.start) + (x.end != null ? "–" + fine(x.end) : "");
 
+  // the stages of one cut proposal in the order they run: screening (privacy in picture and sound), outline,
+  // the proposal itself, then the lecturer's approval. Read from the files the stages leave, so the one
+  // running is the first without its file
+  const STAGE_TEXT = {done: "erledigt", running: "läuft", review: "wartet auf dich", failed: "gestoppt", missing: "fehlt"};
+  function cutStages(d) {
+    const st = d.stations.edit, view = d.cut || {}, e = view.edit, running = st === "running";
+    const outlined = d.stations.outline === "done" && !(view.outline && view.outline.error);
+    const screened = !!view.privacy, proposed = !!e && !running;
+    const next = running ? (!screened ? "screen" : !outlined ? "outline" : "propose") : "";
+    const stages = [
+      ["screen", "Sichtung", screened ? "done" : next === "screen" ? "running" : ""],
+      ["outline", "Gliederung", outlined ? "done" : next === "outline" || d.stations.outline === "running" ? "running"
+        : d.stations.outline === "failed" ? "failed" : proposed ? "missing" : ""],
+      ["propose", "Vorschlag", proposed ? "done" : next === "propose" ? "running" : st === "failed" ? "failed" : ""],
+      ["approve", "Freigabe", e && e.approved ? "done" : proposed ? "review" : ""]];
+    const ol = el("ol", "stages");
+    ol.setAttribute("aria-label", "Stufen des Schnitts");
+    for (const [key, name, state] of stages) {
+      const li = el("li", state);
+      const inner = key === "outline" && $("outlineStep").style.display !== "none"
+        ? button("stage-link", "", showOutline, "Zur Gliederung weiter unten") : el("span");
+      inner.append(el("b", "", name));
+      if (STAGE_TEXT[state]) inner.append(el("small", "", STAGE_TEXT[state]));
+      li.appendChild(inner);
+      ol.appendChild(li);
+    }
+    return ol;
+  }
   function renderCut(d) {
     const box = $("cut"), st = d.stations.edit, view = d.cut || {}, e = view.edit;
     const typing = box.contains(document.activeElement) && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
     const sig = JSON.stringify([st, d.status, e, view.programs, view.privacy, view.outline, view.review, view.render, view.topics, cutTab, cutKind, markIn, markOut, selectedItem,
-                                cutPreview, cutSettings, playing]);
+                                cutPreview, cutSettings, playing, d.stations.outline]);
     if (box.dataset.sig === sig || typing) return;
     box.dataset.sig = sig;
     cutItems = e ? e.items : [];
@@ -1824,6 +1892,7 @@
     const hint = el("span", "hint"); hint.id = "cutHint";
     head.appendChild(hint);
     box.appendChild(head);
+    if (st !== "soon") box.appendChild(cutStages(d));
     if (st === "running") {                        // like the transcription: what it does now, and placeholders
       hint.className = "cut-status"; hint.textContent = d.status || "Der Schnitt-Agent arbeitet …";
       box.appendChild(el("p", "cut-summary", "Der Schnitt-Agent sieht sich die Aufnahme an. Seine Vorschläge erscheinen hier, "
@@ -2260,7 +2329,7 @@
       go.disabled = !n;
       foot.append(el("span", "hint", "Gerendert wird erst nach dieser Freigabe. Was in der Langfassung geschnitten, stumm oder verpixelt ist, gilt auch hier."), go);
     }
-    foot.appendChild(button("link", "Zur Gliederung", () => goStep("outline")));
+    foot.appendChild(button("link", "Zur Gliederung", showOutline));
     foot.appendChild(button("link", "Neu vorschlagen", async () => {
       if (await ask({title: "Themenvideos neu vorschlagen?", confirm: "Neu vorschlagen",
                      text: "Die Vorschläge entstehen neu aus den Themenstücken der Gliederung; deine Titel, Beschreibungen und hinzugefügten Kapitel gehen dabei verloren."}))
@@ -2790,23 +2859,41 @@
   function showServerCode() {
     $("serverConnect").style.display = ""; $("serverAdd").style.display = "none"; $("serverCode").focus();
   }
+  // while the connection changes the whole window waits, until the new server answers and its profile
+  // is here; the page "Meine Aufnahmen" of the last server goes at once, so it is never seen again
+  async function whileConnecting(text, work) {
+    const veil = $("switching"), app = document.querySelector(".app");
+    $("switchText").textContent = text;
+    veil.classList.add("open"); app.inert = true;
+    $("serverFrame").src = "about:blank"; frameSignedIn = false; lastSignIn = 0;
+    try { return await work(); }
+    finally {
+      veil.classList.remove("open"); app.inert = false;
+      const d = await api().data();
+      fillServer(d.server); fillLibrarySource(d);
+    }
+  }
   async function useServer(kind) {
     if (!kind) return;
-    const error = await api().use_server(kind);
-    serverMessage(error || "Gewechselt.", error ? "error" : "ok");
-    const d = await api().data();
-    fillServer(d.server); fillLibrarySource(d);
+    const label = $("serverChoice").selectedOptions[0].textContent;
+    await whileConnecting(`Zu ${label}. Gleich siehst du die Aufnahmen und Module dieses Servers.`, async () => {
+      const error = await api().use_server(kind);
+      if (error) { serverMessage(error, "error"); return; }
+      const late = await api().await_server();
+      serverMessage(late || "Gewechselt.", late ? "error" : "ok");
+    });
   }
   function serverMessage(text, kind) { const m = $("serverMsg"); m.textContent = text; m.className = "hint " + (kind || ""); }
   async function connectServer() {
-    const b = $("serverButton"); b.disabled = true; serverMessage("Verbinde …");
+    const b = $("serverButton"); b.disabled = true; serverMessage("");
     try {
-      const error = await api().connect_server($("serverCode").value);
-      if (error) { serverMessage(error, "error"); return; }
-      $("serverCode").value = "";
-      serverMessage("Verbunden.", "ok");
-      const d = await api().data();
-      fillServer(d.server); fillLibrarySource(d);
+      await whileConnecting("Dieser Rechner meldet sich mit dem Verbindungscode beim Server an.", async () => {
+        const error = await api().connect_server($("serverCode").value);
+        if (error) { serverMessage(error, "error"); return; }
+        $("serverCode").value = "";
+        const late = await api().await_server();
+        serverMessage(late || "Verbunden.", late ? "error" : "ok");
+      });
     } finally { b.disabled = false; }
   }
   async function disconnectServer() {

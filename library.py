@@ -3,10 +3,12 @@
 A recording is a session folder <archive>\\<term>\\<module>\\<date> - <topic>\\ with a
 session.json; older recordings filed as two loose videos are not listed. On the server a
 session folder is named by its session id, so topic and term come from session.json. For
-each recording the page shows its way through the pipeline as nine steps, in order (STEPS):
+each recording the page shows its way through the pipeline in steps, in order (STEPS):
 recorded, transcript, outline, edit (the proposal and its approval), longversion (the
 rendered long version), topics (the topic videos), languages (subtitles in more languages and
-captions in the picture, since 2026-11-13), content, publish. The station "cut" spans
+captions in the picture, since 2026-11-13), content, publish. Since 2026-11-25 the way shows
+only the steps the lecturer starts or approves; outline is a stage of the cut proposal and
+stands on the page of the cut, so its state is still given here. The station "cut" spans
 edit and longversion, as before 2026-11-12, for the badge and older callers.
 """
 from __future__ import annotations

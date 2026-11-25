@@ -80,6 +80,39 @@ def test_no_switch_while_a_recording_is_partly_on_the_server(app):
     assert c.use_server("main") == ""                     # the one in use: nothing changes
 
 
+class Starting:
+    """A server that answers only after a few tries, like the test server while it starts."""
+
+    def __init__(self, tries, profile=None):
+        self.tries, self.profile = tries, profile
+
+    def health(self):
+        self.tries -= 1
+        if self.tries > 0:
+            raise OSError("connection refused")
+        if self.profile is not None:              # the uploader syncs the profile once the server answers
+            self.profile.status = "online"
+
+
+def test_after_a_switch_the_window_waits_for_the_server_and_its_profile(app, monkeypatch):
+    c = app.core
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    c.delivery.client = Starting(3, c.profile)
+    assert c.await_server() == "" and c.profile.status == "online"
+    assert c.delivery.wake.is_set() and c.delivery.client.tries == 0
+
+
+def test_a_server_that_never_answers_ends_the_wait(app, monkeypatch):
+    c = app.core
+    clock = iter(range(0, 1000, 10))
+    monkeypatch.setattr(core.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    c.delivery.client = Starting(10 ** 6)
+    assert "antwortet noch nicht" in c.await_server(timeout=45)
+    c.delivery.client = None
+    assert c.await_server() == ""                         # nothing to wait for without a server
+
+
 def test_disconnecting_forgets_only_the_connection_in_use(app):
     c = app.core
     c.connect_server(f"FLX3-a@{TEST}")

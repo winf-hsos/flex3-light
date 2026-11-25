@@ -131,6 +131,9 @@ class Api:
     def use_server(self, kind):
         return self._core.use_server(str(kind))
 
+    def await_server(self):
+        return self._core.await_server()
+
     def server_library(self, browser=False):
         return self._core.server_library(bool(browser))
 
