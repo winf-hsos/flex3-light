@@ -214,6 +214,22 @@ def test_a_block_is_a_video_of_its_own_above_the_videos_of_its_pieces(tmp_path, 
         ("t3", "Teil zwei", "piece", "t1"), ("t4", "Für sich", "piece", None)]
 
 
+def test_the_step_is_approved_without_topic_videos(tmp_path, monkeypatch):
+    import library
+    monkeypatch.setattr(products, "SHORTEST", 10.0)
+    folder = _folder(tmp_path, inputs=[])
+    render.run(folder)
+    assert library.stations(folder)["topics"] == "open"                # nothing proposed, e.g. switched off
+    assert products.approve(folder, False) == "" and not (folder / products.FILE).exists()
+    assert products.approve(folder) == "" and library.stations(folder)["topics"] == "done"
+    assert products.view(folder)["approved"] and not products.due(folder)
+    assert products.approve(folder, False) == "" and library.stations(folder)["topics"] == "review"
+    assert products.add(folder, 20.0, 40.0, "Mitte bis Schluss") == ""
+    assert products.change(folder, "t1", {"state": "rejected"}) == ""   # every proposal unticked
+    assert products.approve(folder) == "" and library.stations(folder)["topics"] == "done"
+    assert products.accepted(products.load(folder)) == [] and products.render(folder)["videos"] == []
+
+
 def test_several_topic_videos_are_ticked_or_unticked_at_once(tmp_path, monkeypatch):
     from shelf import shelf
     monkeypatch.setattr(products, "SHORTEST", 5.0)

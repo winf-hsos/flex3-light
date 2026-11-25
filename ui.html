@@ -2291,7 +2291,10 @@
       g.appendChild(el("p", "hint", off
         ? "Aus den Themenstücken dieser Vorlesung können eigene kurze Videos werden. In deinen Einstellungen schlägt FLEX3 Light sie nicht von selbst vor."
         : "Die Themenvideos werden gleich vorgeschlagen."));
-      g.appendChild(button("btn", "Themenvideos vorschlagen", proposeTopics));
+      const foot = el("div", "topics-foot");
+      foot.append(button("btn", "Themenvideos vorschlagen", proposeTopics),
+                  button(off ? "btn primary" : "link", "Ohne Themenvideos freigeben", () => approveTopics(true)));
+      g.appendChild(foot);
       return g;
     }
     for (const n of t.notes || []) g.appendChild(el("p", "hint", n));
@@ -2389,13 +2392,16 @@
     const foot = el("div", "topics-foot");
     const n = t.products.filter(x => x.state !== "rejected").length;
     if (t.approved) {
-      foot.append(el("span", "hint", t.due ? "Freigegeben, die Themenvideos werden gerendert."
-                                          : `Freigegeben am ${fmtDate(t.approved)}, ${t.videos.length} gerendert.`),
+      foot.append(el("span", "hint", !n ? `Ohne Themenvideos freigegeben am ${fmtDate(t.approved)}.`
+                                     : t.due ? "Freigegeben, die Themenvideos werden gerendert."
+                                     : `Freigegeben am ${fmtDate(t.approved)}, ${t.videos.length} gerendert.`),
                   button("btn", "Freigabe zurücknehmen", () => approveTopics(false)));
     } else {
-      const go = button("btn primary", n === 1 ? "Ein Themenvideo freigeben" : `${n} Themenvideos freigeben`, () => approveTopics(true));
-      go.disabled = !n;
-      foot.append(el("span", "hint", "Gerendert wird erst nach dieser Freigabe. Was in der Langfassung geschnitten, stumm oder verpixelt ist, gilt auch hier."), go);
+      // with nothing ticked the approval says that this recording gets no topic videos (since 2026-11-25)
+      const go = button("btn primary", !n ? "Ohne Themenvideos freigeben" : n === 1 ? "Ein Themenvideo freigeben"
+                                                                          : `${n} Themenvideos freigeben`, () => approveTopics(true));
+      foot.append(el("span", "hint", !n ? "Nichts angehakt: Diese Aufnahme bekommt keine Themenvideos, und der Schritt ist damit erledigt."
+        : "Gerendert wird erst nach dieser Freigabe. Was in der Langfassung geschnitten, stumm oder verpixelt ist, gilt auch hier."), go);
     }
     foot.appendChild(button("link", "Zur Gliederung", showOutline));
     foot.appendChild(button("link", "Neu vorschlagen", async () => {

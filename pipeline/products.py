@@ -207,11 +207,15 @@ def add(folder: Path, start: float, end: float, title: str, description: str = "
 
 
 def approve(folder: Path, approved: bool = True) -> str:
-    """The second approval: every proposal still open is accepted with it."""
+    """The second approval: every proposal still open is accepted with it. With every proposal
+    unticked, or none made (switched off, or nothing to propose), it approves the recording without
+    topic videos, so the step is done (Nicolas, 2026-11-25)."""
     folder = Path(folder)
     data = load(folder)
     if not data:
-        return "Es gibt noch keine Themenvideos."
+        if not approved:
+            return ""
+        data = {"version": 1, "created": _now(), "mode": "off", "approved": None, "products": [], "notes": []}
     if approved:
         for x in data["products"]:
             if x["state"] == "proposed":
