@@ -1,8 +1,8 @@
 """Start the FLEX3 Light server on this computer when the app is connected to one here.
 
 Since phase 5 (2026-11-09) the app only records; the server does everything after the
-recording. Until the server moves to the workstation (phase 6) it runs on the lecturer's
-own computer, at the address of the connection code (http://127.0.0.1:8765). The app
+recording. Besides the server on the workstation (phase 6, docs/workstation.md) the app keeps a
+connection to a test server on the lecturer's own computer (http://127.0.0.1:8765). The app
 starts it when it is not running yet (decision of 2026-11-09), as a process of its own
 without a window, so it goes on working when the window is closed; it ends by itself
 once nobody has asked for anything for a while and its pipeline has nothing left to do

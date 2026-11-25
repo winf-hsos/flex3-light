@@ -45,7 +45,9 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import threading
+import time
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
@@ -91,6 +93,16 @@ def clean_activity(body) -> dict | None:
     if any(not (isinstance(p, list) and len(p) == 2 and num(p[0]) and num(p[1])) for p in private):
         raise ValueError("invalid privacy span")
     return {"activity": out, "private": [[float(a), float(b)] for a, b in private]}
+
+
+def code_version(root: Path = ROOT) -> str:
+    """The commit the server runs, as git describes it ("unknown" outside a checkout)."""
+    try:
+        out = subprocess.run(["git", "describe", "--tags", "--always", "--dirty"], cwd=root, capture_output=True,
+                             text=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return out.stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
 def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
@@ -161,9 +173,29 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
             found[track] = sorted(int(p.stem) for p in d.glob("*.mp4")) if d.exists() else []
         return found
 
+    version, started = code_version(), time.strftime("%Y-%m-%dT%H:%M:%S")
+
     @app.get("/health")
     def health():
         return {"ok": True}
+
+    @app.get("/status")
+    def status():
+        """Which code runs and whether it is busy, for the update script on the workstation
+        (tools/workstation/update.ps1), which restarts the server only when nothing would be cut off.
+        Counts only, no recording is named."""
+        runner = worker.runner
+        with runner.lock:
+            queued = len([f for f in runner.queue if f not in runner.failed])
+            active = runner.active is not None
+        assembling = 0
+        for f in incoming.glob("*/state.json"):
+            try:
+                assembling += json.loads(f.read_text(encoding="utf-8")).get("state") == "assembling"
+            except (OSError, ValueError):
+                pass
+        return {"version": version, "started": started, "busy": active or queued > 0 or assembling > 0,
+                "active": active, "queued": queued, "assembling": assembling}
 
     @app.post("/devices/register")
     def register(body: dict):

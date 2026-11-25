@@ -767,8 +767,9 @@
           <div class="panel section" id="serverPanel">
             <div class="panel-head"><h2>Server</h2><span class="key-state" id="serverState"></span></div>
             <div class="section-note" id="serverNote"></div>
+            <div class="setting-row" id="serverPick"><span>Verbindung</span><select id="serverChoice" onchange="useServer(this.value)"></select></div>
             <div class="key-edit" id="serverConnect"><div class="field"><input type="text" id="serverCode" autocomplete="off" spellcheck="false" placeholder="FLX3-…@https://…"></div><button class="btn primary" id="serverButton" onclick="connectServer()">Verbinden</button></div>
-            <div class="key-actions"><button class="link danger" id="serverDisconnect" onclick="disconnectServer()">Trennen</button><span class="hint" id="serverMsg"></span></div>
+            <div class="key-actions"><button class="link" id="serverAdd" onclick="showServerCode()">Weiteren Server verbinden</button><button class="link danger" id="serverDisconnect" onclick="disconnectServer()">Trennen</button><span class="hint" id="serverMsg"></span></div>
           </div>
           <div class="panel section">
             <div class="panel-head"><h2>Aussehen der Videos</h2><span class="hint" id="styleMsg"></span></div>
@@ -2765,16 +2766,36 @@
   // ---------------------------------------------------------------- settings: keys of the AI services
   const SERVICES = ["openai", "elevenlabs", "assemblyai"];
   // ---------------------------------------------------------------- connection to the server
+  // Two connections since 2026-11-25: the server on the workstation and a test server on this computer.
   function fillServer(sv) {
-    const on = !!(sv && sv.url);
+    const on = !!(sv && sv.url), stored = (sv && sv.servers) || [];
     $("serverState").textContent = on ? (CONNECTION[sv.connection] || [""])[0] : "nicht verbunden";
     $("serverState").className = "key-state" + (on && sv.connection === "online" ? " ok" : "");
     $("serverNote").textContent = on
       ? `${sv.url}, als ${sv.user_name || "…"} auf dem Gerät ${sv.device_id}. Aufnahmen gehen an diesen Server; `
         + "Module, Schnitt und „Nach der Aufnahme“ liegen in deinem Profil dort und gelten auf allen deinen Rechnern."
-      : "Mit dem Verbindungscode vom Server meldest du diesen Rechner an. Bis dahin bleibt alles auf diesem Rechner.";
-    $("serverConnect").style.display = on ? "none" : "";
+      : stored.length
+        ? "Gerade bleibt alles auf diesem Rechner. Wähle eine Verbindung, damit neue Aufnahmen an einen Server gehen."
+        : "Mit dem Verbindungscode vom Server meldest du diesen Rechner an. Bis dahin bleibt alles auf diesem Rechner.";
+    const choice = $("serverChoice");
+    choice.replaceChildren();
+    if (!on) choice.append(new Option("keine, nur auf diesem Rechner", ""));
+    for (const c of stored) choice.append(new Option(`${c.label}: ${c.url.replace(/^https?:\/\//, "")}`, c.kind));
+    choice.value = on ? sv.active : "";
+    $("serverPick").style.display = stored.length > 1 || (stored.length && !on) ? "" : "none";
+    $("serverConnect").style.display = on && stored.length ? "none" : "";
+    $("serverAdd").style.display = on && stored.length < 2 ? "" : "none";
     $("serverDisconnect").style.display = on ? "" : "none";
+  }
+  function showServerCode() {
+    $("serverConnect").style.display = ""; $("serverAdd").style.display = "none"; $("serverCode").focus();
+  }
+  async function useServer(kind) {
+    if (!kind) return;
+    const error = await api().use_server(kind);
+    serverMessage(error || "Gewechselt.", error ? "error" : "ok");
+    const d = await api().data();
+    fillServer(d.server); fillLibrarySource(d);
   }
   function serverMessage(text, kind) { const m = $("serverMsg"); m.textContent = text; m.className = "hint " + (kind || ""); }
   async function connectServer() {
@@ -2784,16 +2805,19 @@
       if (error) { serverMessage(error, "error"); return; }
       $("serverCode").value = "";
       serverMessage("Verbunden.", "ok");
-      fillServer((await api().data()).server);
+      const d = await api().data();
+      fillServer(d.server); fillLibrarySource(d);
     } finally { b.disabled = false; }
   }
   async function disconnectServer() {
     if (!await ask({title: "Vom Server trennen?", confirm: "Trennen", danger: true,
                     text: "Neue Aufnahmen und Änderungen an den Modulen bleiben dann auf diesem Rechner. Der Server behält, "
-                          + "was er schon hat. Zum erneuten Verbinden brauchst du einen neuen Verbindungscode."})) return;
+                          + "was er schon hat. Zum erneuten Verbinden brauchst du einen neuen Verbindungscode; "
+                          + "eine zweite Verbindung bleibt bestehen und lässt sich wieder wählen."})) return;
     const error = await api().disconnect_server();
     serverMessage(error || "Getrennt.", error ? "error" : "");
-    fillServer((await api().data()).server);
+    const d = await api().data();
+    fillServer(d.server); fillLibrarySource(d);
   }
 
   function fillKeys(keys) {

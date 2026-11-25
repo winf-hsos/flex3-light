@@ -314,6 +314,13 @@ class Delivery:
         with self.guard:
             return any(s.data["state"] == "stopped" and not s.data["error"] for s in self.sessions)
 
+    def sending(self) -> bool:
+        """True while a recording is only partly on the server: it has to arrive there in full before
+        the connection may change, or its parts would be split over two servers."""
+        with self.guard:
+            return any(s.data["server"]["opened"] and not s.data["server"]["completed"]
+                       and s.data["state"] != "done" for s in self.sessions)
+
     def summary(self, s: Session) -> dict:
         with s.lock:
             segs = s.data["segments"]

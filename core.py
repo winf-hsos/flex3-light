@@ -63,6 +63,16 @@ def clean_name(text: str) -> str:
 
 
 SERVER_SECRET = "server"     # name of the device token in the Windows Credential Manager
+# Two connections since 2026-11-25: the server on the workstation ("main") and a test server on this
+# computer ("test"), to try a change before it goes there. Which one a connection code fills follows
+# from its address. Each keeps its address and device in settings["servers"] and its token under its
+# own name in the Credential Manager; the one in use is mirrored in server_url and device_id.
+SERVERS = {"main": SERVER_SECRET, "test": "server-test"}
+SERVER_LABELS = {"main": "Server", "test": "Testserver (lokal)"}
+
+
+def server_kind(url: str) -> str:
+    return "test" if local_server.is_local(url) else "main"
 
 
 def server_client(settings: dict) -> ServerClient | None:
@@ -70,9 +80,10 @@ def server_client(settings: dict) -> ServerClient | None:
 
     The address is a setting, the device token lives in the Credential Manager (since
     2026-11-06; a token still in settings.json is moved there on start)."""
-    token = services.credentials.get(SERVER_SECRET) if settings.get("server_url") else None
-    if settings.get("server_url") and token:
-        return ServerClient(settings["server_url"], token, settings.get("upload_kbit"))
+    url = settings.get("server_url")
+    token = services.credentials.get(SERVERS[server_kind(url)]) if url else None
+    if url and token:
+        return ServerClient(url, token, settings.get("upload_kbit"))
     return None
 
 
@@ -86,6 +97,22 @@ def _move_token_out_of_settings(settings: dict) -> None:
     if settings.get("server_token"):
         services.credentials.put(SERVER_SECRET, settings.pop("server_token"))
         save_settings(settings)
+
+
+def _move_connection_into_servers(settings: dict) -> None:
+    """One-off (2026-11-25): the one connection of before becomes one of the two. A connection to
+    this computer is the test server, and its token moves to the test server's name."""
+    url = settings.get("server_url")
+    if not url or "servers" in settings:
+        return
+    kind = server_kind(url)
+    settings["servers"] = {kind: {"url": url, "device_id": settings.get("device_id", "")}}
+    if SERVERS[kind] != SERVER_SECRET:
+        token = services.credentials.get(SERVER_SECRET)
+        if token:
+            services.credentials.put(SERVERS[kind], token)
+            services.credentials.delete(SERVER_SECRET)
+    save_settings(settings)
 
 
 PROFILE_SETTINGS = ("after_recording", "language")     # with "cut", the lecturer's and not the device's
@@ -217,6 +244,7 @@ class Core:
             self.profile.seed(seed_entries(self.archive, self.term, self.settings.get("module_file")))
         _move_preferences_to_profile(self.settings, self.profile)
         _move_token_out_of_settings(self.settings)
+        _move_connection_into_servers(self.settings)
         self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
         # Since phase 5 (2026-11-09) the app only records: transcription, cut, rendering and the rest
         # run on the server, and a local server is started here if the connection points to one.
@@ -394,15 +422,36 @@ class Core:
     # ---------------------------------------------------------- server connection
 
     def server_info(self) -> dict:
-        """What the settings show about the connection; never the token."""
+        """What the settings show about the connections; never a token."""
         url = self.settings.get("server_url", "")
+        stored = self.settings.get("servers", {})
         return {"url": url if self.delivery.client else "", "device_id": self.settings.get("device_id", ""),
+                "active": server_kind(url) if url and self.delivery.client else "",
+                "servers": [{"kind": k, "label": SERVER_LABELS[k], "url": stored[k]["url"]}
+                            for k in SERVERS if k in stored],
                 "user_name": self.profile.data.get("user_name", ""), "connection": self.delivery.connection()}
 
-    def connect_server(self, code: str) -> str:
-        """Register this computer with a connection code ("<key>@<address>"); returns an error or ''."""
+    def _changing_server(self, url: str) -> str:
+        """Why the connection cannot change to url now, or ''."""
         if self.session is not None:
             return "Während einer Aufnahme lässt sich die Verbindung nicht ändern."
+        if url != self.settings.get("server_url") and self.delivery.sending():
+            return "Eine Aufnahme ist erst zum Teil beim Server. Wechseln geht, sobald sie ganz angekommen ist."
+        return ""
+
+    def _use_server(self, kind: str) -> None:
+        c = self.settings["servers"][kind]
+        self.settings.update({"server_url": c["url"], "device_id": c["device_id"]})
+        save_settings(self.settings)
+        self.delivery.client = server_client(self.settings)
+        self.delivery.reachable, self.delivery.server_down_until = None, 0.0
+        self.profile.status = "local"
+        self.delivery.wake.set()                 # first sync of the profile right away
+        local_server.ensure(c["url"])
+
+    def connect_server(self, code: str) -> str:
+        """Register this computer with a connection code ("<key>@<address>") and use that server;
+        returns an error or ''. An address on this computer is the test server, any other the server."""
         key, url = server_api_split(code)
         url = url or self.settings.get("server_url", "")
         if not key:
@@ -411,26 +460,40 @@ class Core:
             return "Im Code fehlt die Adresse des Servers (Schlüssel@Adresse)."
         if not url.startswith(("http://", "https://")):
             return "Die Adresse muss mit http:// oder https:// beginnen."
+        if error := self._changing_server(url):
+            return error
         try:
             answer = server_api.register(url, key, os.environ.get("COMPUTERNAME", "Rechner"))
         except server_api.ServerError as e:
             return str(e.detail) if e.status == 403 else f"Der Server lehnt ab: {e}"
         except OSError as e:
             return f"Der Server ist nicht erreichbar: {getattr(e, 'reason', e)}"
-        services.credentials.put(SERVER_SECRET, answer["token"])
-        self.settings.update({"server_url": url, "device_id": answer["device_id"]})
-        save_settings(self.settings)
-        self.delivery.client = server_client(self.settings)
-        self.delivery.reachable, self.delivery.server_down_until = None, 0.0
-        self.profile.status = "local"
-        self.delivery.wake.set()                 # first sync of the profile right away
+        kind = server_kind(url)
+        services.credentials.put(SERVERS[kind], answer["token"])
+        self.settings.setdefault("servers", {})[kind] = {"url": url, "device_id": answer["device_id"]}
+        self._use_server(kind)
+        return ""
+
+    def use_server(self, kind: str) -> str:
+        """Use the other of the two connections; both stay registered. Returns an error or ''."""
+        c = self.settings.get("servers", {}).get(kind)
+        if c is None or not services.credentials.get(SERVERS[kind]):
+            return "Mit diesem Server ist der Rechner nicht verbunden."
+        if error := self._changing_server(c["url"]):
+            return error
+        self._use_server(kind)
         return ""
 
     def disconnect_server(self) -> str:
-        """Back to recording locally only; the server keeps what it has."""
+        """Forget the connection in use and record locally only; the server keeps what it has, and the
+        other connection stays to be chosen again."""
         if self.session is not None:
             return "Während einer Aufnahme lässt sich die Verbindung nicht ändern."
-        services.credentials.delete(SERVER_SECRET)
+        url = self.settings.get("server_url", "")
+        if url:
+            kind = server_kind(url)
+            services.credentials.delete(SERVERS[kind])
+            self.settings.get("servers", {}).pop(kind, None)
         for k in ("server_url", "device_id"):
             self.settings.pop(k, None)
         save_settings(self.settings)

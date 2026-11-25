@@ -26,6 +26,7 @@ Every request except registration carries `Authorization: Bearer <token>`. The t
 | `POST /profile/sync` | `{"modules": [...], "preferences": {...}}`: merges the device's entries and returns all of them |
 | `POST /devices/register` | `{"key", "device_name"}`, no token: exchanges an invitation key for the device token |
 | `GET /me` | the device and lecturer of the token |
+| `GET /status` | no token: the commit that runs (`git describe`), when it started, and whether it is busy (`active`, `queued`, `assembling` as counts) |
 | `GET /library/` | the page "Meine Aufnahmen": the app's `ui.html` in its server mode, no token needed |
 | `POST /library/ticket` | a one-time ticket (two minutes) that opens the page as the lecturer of the token |
 | `POST /library/session` | `{"ticket"}`: a page session of twelve hours, no token needed |
@@ -116,7 +117,7 @@ To try it on your own computer, `python tools/dev_server.py` runs the server on 
 FLEX3_LIGHT_SERVER_DATA=/srv/flex3-light FLEX3_LIGHT_SERVER_SECRETS=/etc/flex3-light/secrets.json uvicorn --app-dir server flex3_light_server.app:app_from_env --factory --host 0.0.0.0 --port 8000
 ```
 
-In production it runs behind a reverse proxy with TLS. The proxy has to allow request bodies of at least 100 MB: in a test on 2026-10-26 one minute came to about 57 MB for the camera track (webcam noise at the inherited quality setting), 9 MB for the program mix and 5 MB for the screen.
+On the workstation it runs as a scheduled task with `tools/workstation/run_server.py`, set up, updated and backed up by the scripts next to it; [docs/workstation.md](../docs/workstation.md) is the guide. `GET /status` says which commit runs and whether the server is busy (counts only, no token needed), so that an update waits for a quiet moment. In production it runs behind a reverse proxy with TLS. The proxy has to allow request bodies of at least 100 MB: in a test on 2026-10-26 one minute came to about 57 MB for the camera track (webcam noise at the inherited quality setting), 9 MB for the program mix and 5 MB for the screen.
 
 ## Tests
 

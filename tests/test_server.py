@@ -226,3 +226,13 @@ def test_a_recording_arrives_unreleased_whatever_the_device_sends(server, clips)
     meta = json.loads(meta_file.read_text(encoding="utf-8"))
     assert meta["consent"] == {"recording": True, "publication": False, "voice_clone": False}
     assert meta["consent_source"] == "register"
+
+
+def test_status_says_which_code_runs_and_whether_it_is_busy(server):
+    client, data = server
+    s = client.get("/status").json()
+    assert s["version"] and s["busy"] is False and s["queued"] == 0 and s["assembling"] == 0
+    (data / "incoming" / SID).mkdir(parents=True)
+    (data / "incoming" / SID / "state.json").write_text('{"state": "assembling"}', encoding="utf-8")
+    s = client.get("/status").json()
+    assert s["busy"] is True and s["assembling"] == 1 and SID not in str(s)
