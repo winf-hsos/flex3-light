@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import secrets
 import shutil
+import uuid
 import sqlite3
 import tempfile
 import threading
@@ -35,6 +37,7 @@ from . import consent, profiles
 from .worker import Worker               # puts the repository root on sys.path
 
 import library  # noqa: E402
+from lecturer_profile import code_for  # noqa: E402
 from pipeline import cards, cut_rules, publish, sounds  # noqa: E402
 from pipeline import style as styles  # noqa: E402
 from recordings import Recordings  # noqa: E402
@@ -48,8 +51,13 @@ CALLS = ("data", "recordings", "recording", "start_transcription", "redo_transcr
          "set_cut_metadata",
          "set_cut_cards", "set_cut_settings", "set_after_recording", "approve_cut", "recheck", "rerender", "make_summary", "publish_plan", "publish",
          "propose_topics", "change_topic", "choose_topics", "add_topic", "approve_topics", "redo_outline", "revise_topics",
-         "set_languages", "set_lecturers", "delete_recording", "video_style", "set_video_style", "set_video_logo")
+         "set_languages", "set_lecturers", "delete_recording", "video_style", "set_video_style", "set_video_logo",
+         "save_module", "delete_module")
 ADMINS = "admins.txt"
+
+
+def _norm(name: str) -> str:
+    return " ".join(name.casefold().split())
 
 
 class Sessions:
@@ -165,7 +173,57 @@ class MyRecordings(Recordings):
     # ---------------------------------------------------------- the page
 
     def data(self) -> dict:
-        return {"cut": self.cut_settings(), "after_recording": cut_rules.after_recording(self.store.values(self.user_id))}
+        modules = self.modules()
+        return {"cut": self.cut_settings(), "after_recording": cut_rules.after_recording(self.store.values(self.user_id)),
+                "profile": modules, "modules": [m["name"] for m in modules]}
+
+    # ---------------------------------------------------------- the lecturer's modules
+    # Since 2026-11-25 the modules are kept on this page (Nicolas): the server has the profile, and the
+    # app takes the changes over on its next sync, as from another of the lecturer's computers.
+
+    def modules(self) -> list[dict]:
+        modules, _ = self.store.load(self.user_id)
+        return sorted((m for m in modules.values() if not m["deleted"]), key=lambda m: _norm(m["name"]))
+
+    def save_module(self, entry: dict) -> str:
+        """Add or change a module, with the app's rules (core.save_module); returns an error or ''."""
+        entry = entry if isinstance(entry, dict) else {}
+        # the name is also a folder in the lecturer's filing: without the characters Windows forbids, as in the app
+        name = " ".join(re.sub(r'[<>:"/\\|?*]', "", str(entry.get("name") or "")).split()).rstrip(".")[:200]
+        if not name:
+            return "Ein Modul braucht einen Namen."
+        eid = str(entry.get("id") or "")
+        raw = entry.get("terms", "")             # one per line or separated by commas, from the editor
+        terms = raw if isinstance(raw, list) else re.split(r"[,;\n]", str(raw or ""))
+        language = str(entry.get("language") or "")
+        fields = {"name": name,
+                  "code": re.sub(r"[^a-z0-9-]+", "-", str(entry.get("code") or "").lower()).strip("-")[:40] or code_for(name),
+                  "language": language if re.fullmatch(r"[a-z]{2}", language) else "de",
+                  "ilias_course_id": str(entry.get("ilias_course_id") or "").strip()[:100],
+                  "opencast_series_id": str(entry.get("opencast_series_id") or "").strip()[:100],
+                  "terms": list(dict.fromkeys(str(t).strip()[:profiles.TERM_LIMIT] for t in terms if str(t).strip()))[:profiles.MAX_TERMS]}
+        with self.lock("profile:" + self.user_id):
+            modules, prefs = self.store.load(self.user_id)
+            if any(_norm(m["name"]) == _norm(name) and m["id"] != eid for m in modules.values() if not m["deleted"]):
+                return "Ein Modul mit diesem Namen gibt es schon."
+            old = modules.get(eid) if eid else None
+            if eid and (old is None or old["deleted"]):
+                return "Dieses Modul gibt es nicht mehr."
+            new = {**(old or {"id": uuid.uuid4().hex, "updated_at": 0.0}), **fields, "deleted": False}
+            new["updated_at"] = max(time.time(), new["updated_at"] + 0.001)
+            modules[new["id"]] = profiles.clean(new)
+            self.store.save(self.user_id, modules, prefs)
+        return ""
+
+    def delete_module(self, eid: str) -> None:
+        """A tombstone, so a computer that still has the module does not bring it back."""
+        with self.lock("profile:" + self.user_id):
+            modules, prefs = self.store.load(self.user_id)
+            old = modules.get(str(eid))
+            if old is None or old["deleted"]:
+                return
+            modules[old["id"]] = {**old, "deleted": True, "updated_at": max(time.time(), old["updated_at"] + 0.001)}
+            self.store.save(self.user_id, modules, prefs)
 
     # ---------------------------------------------------------- the look of all videos
 

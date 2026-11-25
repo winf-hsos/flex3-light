@@ -54,21 +54,51 @@
   .nav .busy { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--blue);
     animation: breathe 1.8s ease-in-out infinite; }
   @keyframes breathe { 50% { opacity: .35; } }
-  .sidebar-foot { margin-top: auto; display: grid; gap: 8px; padding: 0 8px; font-size: 12px; color: var(--slate); }
-  .conn { display: flex; align-items: center; gap: 7px; }
+  /* The app (since 2026-11-25): it only records, so two pages, and the menu is the window's head;
+     the server in use and the way to it are its foot. The server's page keeps the menu on the left. */
+  body:not(.server-page) .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  body:not(.server-page) .sidebar { flex-direction: row; align-items: center; gap: 2px; padding: 8px 8px 8px 14px;
+    border-right: 0; border-bottom: 1px solid var(--line); }
+  body:not(.server-page) .brand { padding: 0 16px 0 2px; }
+  body:not(.server-page) .nav { width: auto; padding: 7px 12px; }
+  body:not(.server-page) .topbar { display: none; }
+  body:not(.server-page) main { grid-template-rows: minmax(0, 1fr); }
+  body:not(.server-page) .page { padding-top: 16px; }
+  .head-drag { flex: 1; align-self: stretch; min-width: 12px; }
+  .server-card { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px 8px 22px;
+    background: var(--surface); border-top: 1px solid var(--line); font-size: 12.5px; color: var(--slate); }
+  .server-id { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
+  .server-id b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  .server-id::before { content: "·"; color: var(--mist); }
+  .server-id span { font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+  .server-id span::before { content: "·"; margin-right: 8px; color: var(--mist); }
+  .server-id span:empty { display: none; }
+  .server-card .hint { min-height: 0; margin-left: auto; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .server-card .hint:empty { display: none; }
+  /* a link out of the app into the browser, so it looks unlike the pages of the menu */
+  .to-server { flex: none; margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 14px;
+    border-radius: 10px; background: var(--blue); color: #fff; text-align: left; transition: background .12s; }
+  .server-card .hint:not(:empty) + .to-server { margin-left: 0; }
+  .to-server:hover { background: var(--deep); }
+  .to-server svg.i { width: 16px; height: 16px; }
+  .to-server b { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.25; }
+  .to-server small { display: block; font-size: 11px; opacity: .85; }
+  .to-server.off { background: var(--surface); color: var(--deep); border: 1px solid var(--line); }
+  .to-server.off:hover { border-color: var(--blue); background: var(--sky); }
+  .conn { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
   .conn::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--mist); flex: none; }
   .conn.online::before { background: var(--green); }
   .conn.offline::before { background: var(--amber); }
 
   main { display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; }
-  .topbar { display: flex; align-items: flex-start; gap: 8px; padding: 18px 12px 10px 28px; }
+  .topbar { display: flex; align-items: flex-start; gap: 8px; padding: 14px 10px 8px 24px; }
   .titles { flex: 1; }
   .titles h1 { margin: 0; font-family: var(--display); font-size: 22px; font-weight: 600; letter-spacing: -.2px; }
   .titles p { margin: 2px 0 0; color: var(--slate); }
   .win-btn { width: 32px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--slate); }
   .win-btn:hover { background: var(--hover); color: var(--ink); }
   .win-btn.close:hover { background: #c42b1c; color: #fff; }
-  .page { display: none; min-height: 0; overflow: auto; padding: 6px 28px 24px; }
+  .page { display: none; min-height: 0; overflow: auto; padding: 6px 24px 20px; }
   .page.active { display: block; }
 
   /* ------------------------------------------------------------- shared parts */
@@ -145,9 +175,9 @@
   .toggle small { display: block; font-size: 12px; color: var(--slate); }
 
   /* ------------------------------------------------------------- new recording */
-  .record-grid { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 22px; align-items: start; max-width: 1480px; }
-  .steps { display: grid; gap: 14px; align-content: start; }
-  .step { padding: 16px; display: grid; gap: 10px; }
+  .record-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; max-width: 1480px; }
+  .steps { display: grid; gap: 12px; align-content: start; }
+  .step { padding: 14px; display: grid; gap: 9px; }
   .step-no { width: 22px; height: 22px; border-radius: 50%; background: var(--sky); color: var(--deep);
     font-size: 12px; font-weight: 700; display: grid; place-items: center; flex: none; align-self: center; }
   .step .panel-head { align-items: center; }
@@ -159,8 +189,8 @@
   .meter div { height: 100%; width: 0; border-radius: 4px; background: var(--green); transition: width .08s linear; }
   .level-row span { width: 52px; text-align: right; font-size: 11.5px; color: var(--slate); }
 
-  .stage-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
-  .stage { position: relative; aspect-ratio: 16 / 9; justify-self: center; width: min(100%, calc((100vh - 330px) * 16 / 9));
+  .stage-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+  .stage { position: relative; aspect-ratio: 16 / 9; justify-self: center; width: min(100%, calc((100vh - 300px) * 16 / 9));
     border-radius: 16px; overflow: hidden; background: var(--stage); }
   .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .stage img:not([src]) { display: none; }
@@ -533,8 +563,8 @@
     border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
   .mod-row:hover { border-color: var(--line-strong); }
   .mod-row.selected { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0, 158, 227, .12); }
-  .mod-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mod-row .meta { font-size: 11.5px; color: var(--slate); white-space: nowrap; }
+  .mod-row .name { flex: 1 1 auto; min-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mod-row .meta { flex: 0 1 auto; min-width: 0; font-size: 11.5px; color: var(--slate); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mod-row .tag { font-size: 10.5px; font-weight: 700; color: var(--deep); background: var(--sky); padding: 1px 6px; border-radius: 5px; }
   .editor { padding: 18px; display: grid; gap: 10px; }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -647,20 +677,19 @@
   <aside class="sidebar">
     <div class="brand pywebview-drag-region"><span class="mark pywebview-drag-region"></span><span class="brand-name pywebview-drag-region">FLEX3 <span class="pywebview-drag-region">Light</span></span></div>
     <button class="nav active app-only" data-page="record" onclick="showPage('record')"><svg class="i"><use href="#i-record"/></svg>Neue Aufnahme</button>
-    <button class="nav" data-page="library" onclick="showPage('library')"><svg class="i"><use href="#i-film"/></svg>Meine Aufnahmen<span id="libraryBadge"></span><svg class="i app-only out" aria-label="öffnet im Browser"><use href="#i-out"/></svg></button>
-    <button class="nav app-only" data-page="modules" onclick="showPage('modules')"><svg class="i"><use href="#i-book"/></svg>Module</button>
+    <button class="nav server-only" data-page="library" onclick="showPage('library')"><svg class="i"><use href="#i-film"/></svg>Meine Aufnahmen<span id="libraryBadge"></span></button>
+    <button class="nav server-only" data-page="modules" onclick="showPage('modules')"><svg class="i"><use href="#i-book"/></svg>Module</button>
     <button class="nav" data-page="settings" onclick="showPage('settings')"><svg class="i"><use href="#i-gear"/></svg>Einstellungen</button>
-    <div class="sidebar-foot app-only">
-      <span class="conn" id="conn"></span>
-    </div>
+    <!-- in the app the menu is the window's head (since 2026-11-25): the free part moves the window -->
+    <span class="head-drag pywebview-drag-region app-only"></span>
+    <button class="win-btn" title="Minimieren" onclick="api().minimize()"><svg class="i"><use href="#i-minimize"/></svg></button>
+    <button class="win-btn" id="maximizeButton" title="Maximieren" onclick="toggleMaximize()"><svg class="i"><use href="#i-maximize"/></svg></button>
+    <button class="win-btn close" title="Schließen" onclick="closeWindow()"><svg class="i"><use href="#i-close"/></svg></button>
   </aside>
 
   <main>
-    <div class="topbar pywebview-drag-region">
-      <div class="titles pywebview-drag-region"><h1 id="pageTitle" class="pywebview-drag-region">Neue Aufnahme</h1><p id="pageText" class="pywebview-drag-region"></p></div>
-      <button class="win-btn" title="Minimieren" onclick="api().minimize()"><svg class="i"><use href="#i-minimize"/></svg></button>
-      <button class="win-btn" id="maximizeButton" title="Maximieren" onclick="toggleMaximize()"><svg class="i"><use href="#i-maximize"/></svg></button>
-      <button class="win-btn close" title="Schließen" onclick="closeWindow()"><svg class="i"><use href="#i-close"/></svg></button>
+    <div class="topbar">
+      <div class="titles"><h1 id="pageTitle">Neue Aufnahme</h1><p id="pageText"></p></div>
     </div>
 
     <!-- new recording: two steps on the left, the camera stage and the record button on the right -->
@@ -668,7 +697,7 @@
       <div class="record-grid">
         <div class="steps">
           <div class="panel step">
-            <div class="panel-head"><span class="step-no">1</span><h2>Worum geht es?</h2><button class="link" onclick="showPage('modules')">Module verwalten</button></div>
+            <div class="panel-head"><span class="step-no">1</span><h2>Worum geht es?</h2><button class="link" id="manageModules" title="Öffnet die Module auf dem Server im Browser" onclick="openInBrowser('modules')">Module verwalten</button></div>
             <div class="field"><label>Modul</label><select id="module" onchange="pickModule()"></select></div>
             <div class="field" id="newModuleField" style="display:none"><label>Neues Modul</label><input id="moduleNew" placeholder="Name des Moduls, kommt danach in deine Module" oninput="updateReady()" onchange="sendTexts()"></div>
             <div class="field"><label>Thema der Sitzung, optional</label><input id="topic" placeholder="erscheint im Namen der Aufnahme" onchange="sendTexts()"></div>
@@ -707,12 +736,6 @@
 
     <!-- my recordings: list on the left, the chosen one on the right -->
     <section class="page" id="page-library">
-      <div class="empty app-only" id="inBrowser" style="display:none">
-        <h2>Meine Aufnahmen öffnen sich im Browser</h2>
-        <p>Was nach der Aufnahme kommt, also Transkription, Schnitt, Themenvideos und Veröffentlichung, zeigt der FLEX3-Server im Browser, angemeldet als du. FLEX3 Light selbst nimmt nur auf.</p>
-        <button class="btn primary" onclick="openInBrowser('library')">Im Browser öffnen</button>
-        <span class="hint" id="inBrowserNote"></span>
-      </div>
       <div class="library" id="library">
         <div class="rec-list">
           <div class="field"><input id="search" placeholder="Aufnahmen durchsuchen" oninput="renderRecordings()"></div>
@@ -725,18 +748,13 @@
         <p>Nach jeder Aufnahme siehst du hier das Video, die Transkription und wie weit die Aufnahme auf dem Weg zur Veröffentlichung ist.</p>
         <button class="btn primary" onclick="showPage('record')">Erste Aufnahme vorbereiten</button>
       </div>
-      <div class="empty" id="noServer" style="display:none">
-        <h2>Deine Aufnahmen liegen auf dem FLEX3-Server</h2>
-        <p>Dort werden sie transkribiert, geschnitten und veröffentlicht, und du siehst sie im Browser, sobald FLEX3 Light mit dem Server verbunden ist. Bis dahin legt die App jede Aufnahme auf diesem Rechner ab.</p>
-        <button class="btn primary" onclick="showPage('settings')">Mit dem Server verbinden</button>
-      </div>
       <div class="empty" id="signedOut" style="display:none">
         <h2>Die Anmeldung ist abgelaufen</h2>
         <p>Klick in FLEX3 Light auf „Meine Aufnahmen“, dann öffnet die App diese Seite neu und meldet dich dabei wieder an.</p>
       </div>
     </section>
 
-    <!-- modules: the lecturer's profile, kept locally and synced with the server -->
+    <!-- modules: the lecturer's profile; since 2026-11-25 kept on the server's page, which the app syncs with -->
     <section class="page" id="page-modules">
       <div class="modules">
         <div class="steps">
@@ -811,6 +829,11 @@
               <span>Rohdateien</span><span class="path" id="raw_dir"></span><button class="link" onclick="pickFolder('raw_dir')">Ändern</button>
             </div>
           </div>
+          <div class="panel section app-only">
+            <div class="panel-head"><h2>Module, Schnitt und Videos</h2></div>
+            <div class="section-note">Deine Module, wie der Server schneidet, welche Untertitel entstehen und wie die Videos aussehen, stellst du auf dem FLEX3-Server im Browser ein, dort, wo du auch deine Aufnahmen siehst.</div>
+            <div class="key-actions"><button class="btn" onclick="openInBrowser('settings')"><svg class="i"><use href="#i-out"/></svg>Im Browser einstellen</button><span class="hint" id="settingsNote"></span></div>
+          </div>
         </div>
         <div class="settings-col">
           <div class="panel section app-only" id="serverPanel">
@@ -820,18 +843,13 @@
             <div class="key-edit" id="serverConnect"><div class="field"><input type="text" id="serverCode" autocomplete="off" spellcheck="false" placeholder="FLX3-…@https://…"></div><button class="btn primary" id="serverButton" onclick="connectServer()">Verbinden</button></div>
             <div class="key-actions"><button class="link" id="serverAdd" onclick="showServerCode()">Weiteren Server verbinden</button><button class="link danger" id="serverDisconnect" onclick="disconnectServer()">Trennen</button><span class="hint" id="serverMsg"></span></div>
           </div>
-          <div class="panel section app-only">
-            <div class="panel-head"><h2>Schnitt und Videos</h2></div>
-            <div class="section-note">Wie der Server schneidet, welche Untertitel entstehen und wie die Videos aussehen, stellst du auf dem FLEX3-Server im Browser ein, dort, wo du auch deine Aufnahmen siehst.</div>
-            <div class="key-actions"><button class="btn" onclick="openInBrowser('settings')"><svg class="i"><use href="#i-out"/></svg>Im Browser einstellen</button><span class="hint" id="settingsNote"></span></div>
-          </div>
           <div class="panel section server-only">
             <div class="panel-head"><h2>Aussehen der Videos</h2><span class="hint" id="styleMsg"></span></div>
             <div id="styleBody" class="cut-group"></div>
           </div>
           <div class="panel section app-only">
             <div class="panel-head"><h2>KI-Dienste</h2></div>
-            <div class="section-note">Für Transkription, Untertitel und Inhalte nach der Vorlesung. Die Schlüssel liegen in der Windows-Anmeldeinformationsverwaltung und werden hier nie wieder angezeigt.</div>
+            <div class="section-note">Nur für den Testserver auf diesem Rechner, der damit transkribiert und schneidet; ein Server im Netz hat eigene Schlüssel. Diese liegen in der Windows-Anmeldeinformationsverwaltung und werden hier nie wieder angezeigt.</div>
             <div class="key-row">
               <div class="key-head"><b>AssemblyAI</b><span class="key-use">Transkription und Untertitel</span><span class="key-state" id="state_assemblyai"></span></div>
               <div class="key-edit"><div class="field"><input type="password" id="key_assemblyai" autocomplete="off" spellcheck="false"></div><button class="btn primary" onclick="saveKey('assemblyai')">Speichern</button></div>
@@ -852,6 +870,15 @@
       </div>
     </section>
   </main>
+
+  <!-- the foot of the app: the server this computer sends to, and the way to everything after the
+       recording, which is there in the browser -->
+  <footer class="server-card app-only" id="serverCard">
+    <span class="conn" id="conn"></span>
+    <span class="server-id" id="serverId"><b id="serverName"></b><span id="serverVersion"></span></span>
+    <span class="hint" id="toServerNote"></span>
+    <button class="to-server" id="toServer" onclick="toServer()"><span><b id="toServerTitle"></b><small id="toServerText"></small></span><svg class="i"><use href="#i-out"/></svg></button>
+  </footer>
 </div>
 
 <div class="bar pywebview-drag-region">
@@ -952,15 +979,14 @@
 
   // ---------------------------------------------------------------- pages
   function showPage(name) {
-    if (SERVER && !["library", "settings"].includes(name)) return;   // the server's page has nothing else
+    if (SERVER ? name === "record" : ["library", "modules"].includes(name)) return;   // each has its own pages
     page = name;
     for (const b of document.querySelectorAll(".nav")) b.classList.toggle("active", b.dataset.page === name);
     for (const s of document.querySelectorAll(".page")) s.classList.toggle("active", s.id === "page-" + name);
     $("pageTitle").textContent = PAGES[name][0];
     $("pageText").textContent = PAGES[name][1];
     if (name === "library" && SERVER) loadRecordings();
-    if (name === "library" && !SERVER && $("inBrowser").style.display !== "none") openInBrowser("library");
-    if (name === "modules") renderModules();
+    if (name === "modules") api().data().then(d => fillModules(d)).catch(() => {});
     if (name === "settings" && SERVER) loadServerSettings();
     if (name !== "library" && $("player")) $("player").pause();
     updatePreview();
@@ -1015,7 +1041,7 @@
     for (const kind of ["screen", "camera", "microphone"]) fillSelect(kind, d.devices[kind], d.choice[kind]);
     for (const k in d.options) $(k).checked = d.options[k];
     fillServer(d.server);
-    fillLibrarySource(d);
+    fillServerCard(d.server);
     for (const k of ["archive_dir", "raw_dir"]) { $(k).textContent = d[k]; $(k).title = d[k]; }
     previewUrl = d.preview_url || "";
     mediaBase = d.media_base || "";
@@ -1061,7 +1087,8 @@
     if (error) showHint(error, "error");
   }
   function showHint(text, kind) { const h = $("hint"); h.textContent = text; h.className = "hint " + (kind || ""); }
-  const showLatest = () => showPage("library");             // opens the server's page in the browser
+  // the last recording: on the server's page in the browser, or its folder while there is no server
+  const showLatest = () => connected ? openInBrowser("library") : api().open_result();
 
   // ---------------------------------------------------------------- my recordings
   let recordings = [], selectedId = null, shownMedia = "";
@@ -2935,8 +2962,9 @@
     $("serverState").textContent = on ? (CONNECTION[sv.connection] || [""])[0] : "nicht verbunden";
     $("serverState").className = "key-state" + (on && sv.connection === "online" ? " ok" : "");
     $("serverNote").textContent = on
-      ? `${sv.url}, als ${sv.user_name || "…"} auf dem Gerät ${sv.device_id}. Aufnahmen gehen an diesen Server; `
-        + "Module, Schnitt und „Nach der Aufnahme“ liegen in deinem Profil dort und gelten auf allen deinen Rechnern."
+      ? `${sv.name ? sv.name + ", " : ""}${sv.url}${sv.version ? ", Version " + sv.version : ""}, als ${sv.user_name || "…"} `
+        + `auf dem Gerät ${sv.device_id}. Aufnahmen gehen an diesen Server; Module, Schnitt und „Nach der Aufnahme“ `
+        + "liegen in deinem Profil dort, du änderst sie im Browser, und sie gelten auf allen deinen Rechnern."
       : stored.length
         ? "Gerade bleibt alles auf diesem Rechner. Wähle eine Verbindung, damit neue Aufnahmen an einen Server gehen."
         : "Mit dem Verbindungscode vom Server meldest du diesen Rechner an. Bis dahin bleibt alles auf diesem Rechner.";
@@ -2963,7 +2991,7 @@
     finally {
       veil.classList.remove("open"); app.inert = false;
       const d = await api().data();
-      fillServer(d.server); fillLibrarySource(d);
+      fillServer(d.server); fillServerCard(d.server);
     }
   }
   async function useServer(kind) {
@@ -2997,7 +3025,7 @@
     const error = await api().disconnect_server();
     serverMessage(error || "Getrennt.", error ? "error" : "");
     const d = await api().data();
-    fillServer(d.server); fillLibrarySource(d);
+    fillServer(d.server); fillServerCard(d.server);
   }
 
   function fillKeys(keys) {
@@ -3034,11 +3062,12 @@
   // ---------------------------------------------------------------- recording bar and status
   let lastConnection = "";
   function showConnection(st) {
-    if (lastConnection && lastConnection !== st.connection) api().data().then(d => { fillServer(d.server); fillLibrarySource(d); });
+    if (lastConnection && lastConnection !== st.connection) api().data().then(d => { fillServer(d.server); fillServerCard(d.server); });
     lastConnection = st.connection;
     const c = $("conn"), [text, title] = CONNECTION[st.connection] || ["", ""];
     c.className = "conn " + st.connection;
     c.textContent = text;
+    if (st.server) showServerId(st.server.name, st.server.version, st.server_kind);
     c.title = title + (st.profile_pending && st.connection === "offline" ? ". Geänderte Module warten auf die Übertragung." : "")
       + (st.profile_status === "no-profile" ? ". Dieser Zugang hat am Server kein Profil, die Module bleiben lokal." : "");
   }
@@ -3091,7 +3120,7 @@
       addEventListener("mousemove", move); addEventListener("mouseup", up);
     });
   }
-  document.querySelector(".topbar").addEventListener("dblclick", ev => { if (!ev.target.closest("button")) toggleMaximize(); });
+  document.querySelector(".sidebar").addEventListener("dblclick", ev => { if (!SERVER && !ev.target.closest("button")) toggleMaximize(); });
 
   async function tick() {
     try {
@@ -3156,14 +3185,28 @@
   // Since 2026-11-25 the app only records (Nicolas). Everything after the recording, "Meine Aufnahmen"
   // and the settings of cut and videos, is the server's page (this file in its server mode), opened in
   // the browser and signed in with a one-time ticket the app gets with its device token.
-  function fillLibrarySource(d) {
-    const on = !!(d.server && d.server.url);
-    $("inBrowser").style.display = on ? "" : "none";
-    $("noServer").style.display = on ? "none" : "";
-    for (const id of ["library", "libraryEmpty"]) $(id).style.display = "none";
+  // The card at the foot of the menu: the server in use with its name and version, and the way there.
+  let connected = false, serverUrl = "";
+  function fillServerCard(sv) {
+    connected = !!(sv && sv.url); serverUrl = connected ? sv.url : "";
+    $("toServerTitle").textContent = connected ? "Meine Aufnahmen verwalten" : "Mit einem Server verbinden";
+    $("toServerText").textContent = connected ? "im Browser, auf dem Server" : "damit Aufnahmen geschnitten werden";
+    $("toServer").classList.toggle("off", !connected);
+    $("toServer").title = connected ? "Transkription, Schnitt, Themenvideos und Veröffentlichung, angemeldet als du"
+                                    : "Mit dem Verbindungscode vom Server, in den Einstellungen";
+    $("manageModules").style.display = connected ? "" : "none";
+    if (sv) showServerId(sv.name || "", sv.version || "", sv.active || "");
   }
+  function showServerId(name, version, kind) {
+    const host = serverUrl.replace(/^https?:[/][/]/, "").replace(/[/].*$/, "");
+    $("serverName").textContent = !connected ? "" : kind === "test" ? "Testserver auf diesem Rechner" : name || host;
+    $("serverName").title = connected ? serverUrl : "";
+    $("serverVersion").textContent = connected && version ? "Version " + version : "";
+    $("serverId").style.display = connected ? "" : "none";
+  }
+  function toServer() { if (connected) openInBrowser("library"); else showPage("settings"); }
   async function openInBrowser(target) {
-    const note = $(target === "settings" ? "settingsNote" : "inBrowserNote");
+    const note = $(target === "settings" ? "settingsNote" : "toServerNote");
     note.className = "hint"; note.textContent = "Wird im Browser geöffnet …";
     const error = await api().open_on_server(target);
     note.className = "hint" + (error ? " error" : "");
@@ -3175,7 +3218,7 @@
     document.body.classList.add("server-page");
     if (window.top !== window) document.body.classList.add("embedded");
     const hash = new URLSearchParams(location.hash.slice(1));
-    const ticket = hash.get("ticket"), first = hash.get("page") === "settings" ? "settings" : "library";
+    const ticket = hash.get("ticket"), first = ["settings", "modules"].includes(hash.get("page")) ? hash.get("page") : "library";
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);   // the ticket leaves the address
     if (ticket) {
       const r = await fetch("session", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ticket})});
@@ -3201,7 +3244,10 @@
   }
 
   if (SERVER) window.addEventListener("DOMContentLoaded", startServerPage);
-  else window.addEventListener("pywebviewready", async () => { await load(); showPage("record"); tick(); });
+  else window.addEventListener("pywebviewready", async () => {
+    await load(); showPage("record"); tick();
+    window.addEventListener("focus", () => api().refresh_profile());
+  });
 </script>
 </body>
 </html>

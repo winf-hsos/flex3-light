@@ -65,6 +65,10 @@ class ServerClient:
     def health(self) -> None:
         self._call("GET", "/health")
 
+    def about(self) -> dict:
+        """Name, version and load of the server (GET /status, since 2026-11-25)."""
+        return self._call("GET", "/status")[1]
+
     def open_session(self, sid: str) -> str:
         return self._call("PUT", f"/sessions/{sid}")[1]["state"]
 

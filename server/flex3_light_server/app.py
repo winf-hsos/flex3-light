@@ -46,6 +46,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -108,9 +109,12 @@ def code_version(root: Path = ROOT) -> str:
 
 
 def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
-               accounts: Accounts | None = None, keys=None, start_worker: bool = True) -> FastAPI:
+               accounts: Accounts | None = None, keys=None, start_worker: bool = True,
+               name: str = "") -> FastAPI:
     """keys: the project's key of a service ("openai", "assemblyai", "elevenlabs") or None;
-    without keys the pipeline waits for them, like the app does."""
+    without keys the pipeline waits for them, like the app does. name: what the app shows as the
+    server's name, the computer's name if empty."""
+    name = (name or socket.gethostname()).strip()[:60]
     data_dir = Path(data_dir)
     accounts = accounts or Accounts(data_dir / "accounts.sqlite")
     incoming, sessions = data_dir / "incoming", data_dir / "sessions"
@@ -183,7 +187,8 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
 
     @app.get("/status")
     def status():
-        """Which code runs and whether it is busy, for the update script on the workstation
+        """Which server this is, which code runs and whether it is busy: for the app, which shows name
+        and version under its connection, and for the update script on the workstation
         (tools/workstation/update.ps1), which restarts the server only when nothing would be cut off.
         Counts only, no recording is named."""
         runner = worker.runner
@@ -196,7 +201,7 @@ def create_app(data_dir: Path, tokens: dict[str, str | dict] | None = None,
                 assembling += json.loads(f.read_text(encoding="utf-8")).get("state") == "assembling"
             except (OSError, ValueError):
                 pass
-        return {"version": version, "started": started, "busy": active or queued > 0 or assembling > 0,
+        return {"name": name, "version": version, "started": started, "busy": active or queued > 0 or assembling > 0,
                 "active": active, "queued": queued, "assembling": assembling}
 
     @app.post("/devices/register")
@@ -503,4 +508,5 @@ def app_from_env() -> FastAPI:
     tokens = json.loads(Path(tokens_file).read_text(encoding="utf-8")) if tokens_file else {}
     secrets_file = os.environ.get("FLEX3_LIGHT_SERVER_SECRETS")
     secrets = json.loads(Path(secrets_file).read_text(encoding="utf-8")) if secrets_file else {}
-    return create_app(data, tokens, keys=lambda service: secrets.get(service) or None)
+    return create_app(data, tokens, keys=lambda service: secrets.get(service) or None,
+                      name=os.environ.get("FLEX3_LIGHT_SERVER_NAME", ""))

@@ -8,6 +8,7 @@ The config is the JSON file setup.ps1 writes:
      "secrets": "C:\\flex3-light\\secrets.json", the project's keys for the AI services
      "host": "0.0.0.0", "port": 8765,
      "url": "http://<workstation>:8765",      the address lecturers connect to, for connection codes
+     "name": "KI-Workstation",                  shown in the app under its connection, else the computer's name
      "path": ["C:\\tools\\ffmpeg\\bin"],         folders put in front of PATH, for ffmpeg and typst
      "logs": "C:\\flex3-light\\logs"}
 
@@ -43,6 +44,8 @@ def environment(c: dict) -> None:
     os.environ["FLEX3_LIGHT_SERVER_SECRETS"] = c["secrets"]
     if c["url"]:
         os.environ["FLEX3_LIGHT_SERVER_URL"] = c["url"]
+    if c.get("name"):
+        os.environ["FLEX3_LIGHT_SERVER_NAME"] = c["name"]
     if c["path"]:
         os.environ["PATH"] = os.pathsep.join([*c["path"], os.environ.get("PATH", "")])
 

@@ -49,7 +49,7 @@ powershell -ExecutionPolicy Bypass -File C:\flex3-light\code\tools\workstation\s
 |---|---|
 | `C:\flex3-light\code` | the repository, checked out at a commit (`-Ref`, default `origin/main`) |
 | `C:\flex3-light\venv` | the Python environment with `server\requirements.txt` |
-| `C:\flex3-light\config.json` | data folder, address, port, tool folders, logs; read by `tools\workstation\run_server.py` |
+| `C:\flex3-light\config.json` | data folder, address, port, tool folders, logs and the name the app shows under its connection (`"name"`, `-Name` of the setup, else the computer's name); read by `tools\workstation\run_server.py` |
 | `C:\flex3-light\secrets.json` | the project's keys, `{"openai": "...", "assemblyai": "...", "elevenlabs": "..."}`, readable only by the server's account and administrators |
 | `C:\flex3-light\logs` | `server.log`, a new file each day, two weeks kept; `backup.log` |
 | the data folder (`-Data`) | sessions, accounts, profiles, packages, style, sounds; best on a drive of its own |
@@ -62,7 +62,7 @@ Then put the keys into `secrets.json` and restart the task:
 Restart-ScheduledTask "FLEX3 Light Server"
 ```
 
-`http://<workstation>:8765/status` shows from any computer in the network which commit runs and whether the server is busy, with counts only.
+`http://<workstation>:8765/status` shows from any computer in the network the server's name, which commit runs and whether the server is busy, with counts only; the app shows name and version in the foot of its window.
 
 ## Moving the data from the laptop
 

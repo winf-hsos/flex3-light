@@ -98,6 +98,7 @@ class Profile:
         for e in self.data["modules"].values():
             _complete(e)
         self.status = "local"     # "local" (no server), "online", "offline" or "no-profile"
+        self.stale = False        # asked to sync now, e.g. after the modules were changed in the browser
 
     @property
     def is_new(self) -> bool:
@@ -137,7 +138,7 @@ class Profile:
         return self.data["revision"] != self.data["synced_revision"]
 
     def due(self) -> bool:
-        return self.dirty() or time.time() - self.data["synced_at"] > SYNC_EVERY
+        return self.stale or self.dirty() or time.time() - self.data["synced_at"] > SYNC_EVERY
 
     # ---------------------------------------------------------- changes
 
@@ -243,6 +244,7 @@ class Profile:
             if revision is not None:
                 self.data["synced_revision"] = revision
                 self.data["synced_at"] = time.time()
+                self.stale = False
                 for e in mods.values():
                     e.pop("seed", None)           # the server has it now; it is an entry like any other
             self.save()

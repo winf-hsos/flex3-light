@@ -37,8 +37,12 @@ APP_ID = "winf-hsos.Flex3Light"
 # the same hotkeys, so only one of them may run at a time.
 LECTURE_RECORDER_MUTEX = "Local\\LectureRecorder"
 HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))   # unpack folder of the packaged app
-FULL = (1120, 700)          # sidebar and pages; while recording only the slim bar
-FULL_MIN = (900, 560)       # smaller and the pages would need to scroll sideways
+# Since 2026-11-25 the window is as small as the recording page allows (Nicolas): menu on top, the server
+# below, the two steps and the camera side by side, room for the note after a recording. Smaller and
+# the page would scroll; a size saved before then was for the old window with a sidebar and is dropped.
+FULL = (820, 600)           # while recording only the slim bar
+FULL_MIN = FULL
+WINDOW_KEY = "window"       # "window_size" until 2026-11-25
 BAR = (530, 58)
 ASK = (560, 58)
 
@@ -50,8 +54,9 @@ class Api:
         self._core = core
         self._window = None
         self._full_position = None
-        saved = core.settings.get("window_size")
-        self._full_size = tuple(saved) if saved else FULL
+        core.settings.pop("window_size", None)
+        saved = core.settings.get(WINDOW_KEY)
+        self._full_size = (max(FULL_MIN[0], int(saved[0])), max(FULL_MIN[1], int(saved[1]))) if saved else FULL
         self._resize_from = self._full_size
         self._normal_rect = None                  # where the window was before it filled the screen
         self._mode = "full"
@@ -133,6 +138,9 @@ class Api:
     def open_on_server(self, page="library"):
         return self._core.open_on_server(str(page))
 
+    def refresh_profile(self):
+        self._core.refresh_profile()
+
     def view(self, mode):
         """Switch the window between "full" (setup), "bar" (recording) and "ask" (save question).
 
@@ -172,7 +180,7 @@ class Api:
         self._window.resize(*self._full_size)
 
     def resize_done(self):
-        self._core.settings["window_size"] = list(self._full_size)
+        self._core.settings[WINDOW_KEY] = list(self._full_size)
         save_settings(self._core.settings)
 
     def toggle_maximize(self):

@@ -25,7 +25,8 @@ param(
     [string]$Repo = "https://github.com/winf-hsos/flex3-light.git",
     [string]$Ref = "origin/main",
     [string[]]$ToolPaths = @(),                     # folders with ffmpeg.exe and typst.exe if not on PATH
-    [string]$BackupTarget = ""                      # a folder on another drive for the daily backup
+    [string]$BackupTarget = "",                     # a folder on another drive for the daily backup
+    [string]$Name = ""                              # shown in the app under its connection; default: kept, else the computer name
 )
 $ErrorActionPreference = "Stop"
 $Task = "FLEX3 Light Server"
@@ -110,8 +111,12 @@ foreach ($tool in @("ffmpeg", "typst")) {
     $c = Get-Command $tool -ErrorAction SilentlyContinue
     if ($c) { $toolDirs += (Split-Path $c.Source) }
 }
+if (-not $Name -and (Test-Path $Config)) {          # a name given before stays
+    try { $Name = [string](Get-Content $Config -Raw | ConvertFrom-Json).name } catch { $Name = "" }
+}
 $cfg = [ordered]@{ data = $Data; secrets = $Secrets; host = "0.0.0.0"; port = $Port; url = $Url;
                    path = @($toolDirs | Select-Object -Unique); logs = $Logs }
+if ($Name) { $cfg.name = $Name }
 [System.IO.File]::WriteAllText($Config, ($cfg | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
 Note $Config
 

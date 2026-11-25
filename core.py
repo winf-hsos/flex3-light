@@ -243,6 +243,8 @@ class Core:
         _move_token_out_of_settings(self.settings)
         _move_connection_into_servers(self.settings)
         self.delivery = Delivery(self.raw_dir, server_client(self.settings), self.profile)
+        self.about = {"url": "", "name": "", "version": "", "at": 0.0}   # what the server in use says of itself
+        self._asking_about = False
         # Since phase 5 (2026-11-09) the app only records: transcription, cut, rendering and the rest
         # run on the server, and a local server is started here if the connection points to one.
         local_server.ensure(self.settings.get("server_url", ""))
@@ -423,7 +425,41 @@ class Core:
                 "active": server_kind(url) if url and self.delivery.client else "",
                 "servers": [{"kind": k, "label": SERVER_LABELS[k], "url": stored[k]["url"]}
                             for k in SERVERS if k in stored],
-                "user_name": self.profile.data.get("user_name", ""), "connection": self.delivery.connection()}
+                "user_name": self.profile.data.get("user_name", ""), "connection": self.delivery.connection(),
+                **self.server_about()}
+
+    def server_about(self) -> dict:
+        """Name and version of the server in use, for the window: {"name", "version"}, empty until known.
+        Asked in the background when the connection is new and every ten minutes while it is online, so
+        an update on the workstation shows within that time; a server from before has no name."""
+        client, a = self.delivery.client, self.about
+        if client is None:
+            return {"name": "", "version": ""}
+        wait = 600 if a["version"] else 60
+        if self.delivery.reachable and not self._asking_about and (a["url"] != client.url or time.time() - a["at"] > wait):
+            self._asking_about = True
+
+            def ask() -> None:
+                try:
+                    answer = client.about()
+                    self.about = {"url": client.url, "name": str(answer.get("name") or "")[:60],
+                                  "version": str(answer.get("version") or "")[:40], "at": time.time()}
+                except (OSError, server_api.ServerError, ValueError, AttributeError):
+                    if self.about["url"] != client.url:
+                        self.about = {"url": client.url, "name": "", "version": "", "at": time.time()}
+                    else:
+                        self.about["at"] = time.time()
+                finally:
+                    self._asking_about = False
+            threading.Thread(target=ask, daemon=True, name="server-about").start()
+        return {"name": a["name"], "version": a["version"]} if a["url"] == client.url else {"name": "", "version": ""}
+
+    def refresh_profile(self) -> None:
+        """Take over changes made elsewhere at once, above all the modules kept in the browser since
+        2026-11-25; the window asks for it whenever it comes to the front."""
+        if self.delivery.client is not None and self.session is None:
+            self.profile.stale = True
+            self.delivery.wake.set()
 
     def _changing_server(self, url: str) -> str:
         """Why the connection cannot change to url now, or ''."""
@@ -722,7 +758,8 @@ class Core:
 
     def open_on_server(self, page: str = "library") -> str:
         """Open the server's page in the default browser, signed in as this lecturer with a one-time
-        ticket: "library" (Meine Aufnahmen) or "settings" (cut, videos, their look). Returns an error or ''."""
+        ticket: "library" (Meine Aufnahmen), "modules" or "settings" (cut, videos, their look). Returns an
+        error or ''."""
         client = self.delivery.client
         if client is None:
             return "Kein Server verbunden."
@@ -730,8 +767,8 @@ class Core:
             url = client.url + client.library_ticket()["path"]
         except (server_api.ServerError, OSError, KeyError):
             return "Der Server ist gerade nicht erreichbar. Versuch es gleich noch einmal."
-        if page == "settings":
-            url += "&page=settings"
+        if page in ("settings", "modules"):
+            url += "&page=" + page
         webbrowser.open(url)
         return ""
 
@@ -779,7 +816,8 @@ class Core:
                 "connection": self.delivery.connection(), "profile_status": self.profile.status,
                 "profile_pending": self.profile.dirty() and self.delivery.connection() != "local",
                 "profile_stamp": f"{self.profile.data['revision']}-{self.profile.data['synced_at']}",
-                "devices_stamp": self.devices_stamp}
+                "devices_stamp": self.devices_stamp, "server": self.server_about(),
+                "server_kind": server_kind(self.settings.get("server_url", "")) if self.delivery.client else ""}
 
     def _loop(self) -> None:
         next_device_check = 0.0

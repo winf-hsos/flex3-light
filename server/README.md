@@ -26,7 +26,7 @@ Every request except registration carries `Authorization: Bearer <token>`. The t
 | `POST /profile/sync` | `{"modules": [...], "preferences": {...}}`: merges the device's entries and returns all of them |
 | `POST /devices/register` | `{"key", "device_name"}`, no token: exchanges an invitation key for the device token |
 | `GET /me` | the device and lecturer of the token |
-| `GET /status` | no token: the commit that runs (`git describe`), when it started, and whether it is busy (`active`, `queued`, `assembling` as counts) |
+| `GET /status` | no token: the server's name (`"name"` in `config.json`, else the computer's name), the commit that runs (`git describe`), when it started, and whether it is busy (`active`, `queued`, `assembling` as counts); the app shows name and version in its foot |
 | `GET /library/` | the page "Meine Aufnahmen": the app's `ui.html` in its server mode, no token needed |
 | `POST /library/ticket` | a one-time ticket (two minutes) that opens the page as the lecturer of the token |
 | `POST /library/session` | `{"ticket"}`: a page session of twelve hours, no token needed |
@@ -85,7 +85,7 @@ Name, colors, caption look and logo can also be changed in the app (Einstellunge
 
 ### Meine Aufnahmen
 
-Since phase 4 (2026-11-09) the review runs on the server: the server serves the app's own `ui.html` at `/library/`, which recognises that it runs there (`window.FLEX3_SERVER`) and shows only "Meine Aufnahmen", with every action sent to `/library/api/<call>` instead of the app. One file, so the page in the app and the page on the server never drift apart. The actions themselves are shared too: `recordings.py` at the repository root holds them, and `my_recordings.py` applies them to the server's session folders of whoever is signed in (since phase 5 the app has no library of its own), with the server's pipeline and the settings of their profile; a program rule or a term added on the page lands in the profile and reaches the app with its next sync.
+Since phase 4 (2026-11-09) the review runs on the server: the server serves the app's own `ui.html` at `/library/`, which recognises that it runs there (`window.FLEX3_SERVER`) and shows "Meine Aufnahmen", "Module" (since 2026-11-25; the modules are no longer changed in the app) and "Einstellungen", with every action sent to `/library/api/<call>` instead of the app. One file, so the page in the app and the page on the server never drift apart. The actions themselves are shared too: `recordings.py` at the repository root holds them, and `my_recordings.py` applies them to the server's session folders of whoever is signed in (since phase 5 the app has no library of its own), with the server's pipeline and the settings of their profile; a module, a program rule or a term added on the page lands in the profile and reaches the app with its next sync, which the app makes whenever its window comes to the front.
 
 Nobody types a password: the app asks for a one-time ticket with its device token and opens the page with it, in a frame of its window or in the default browser ("Im Browser öffnen"). The page trades the ticket for a page session of twelve hours, kept in memory (a restarted server only means a new ticket); a `<video>` sends no header, so media addresses carry the page session, never the device token. Deleting moves the session folder into `trash/` below the data folder, which an administrator empties.
 

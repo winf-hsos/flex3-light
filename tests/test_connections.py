@@ -41,6 +41,7 @@ def app(monkeypatch):
                         lambda url, key, name: {"token": f"token-{key}", "device_id": f"device-{next(devices)}"})
     c = core.Core.__new__(core.Core)
     c.settings, c.session = {}, None
+    c.about, c._asking_about = {"url": "", "name": "", "version": "", "at": 0.0}, False
     c.delivery = SimpleNamespace(client=None, reachable=None, server_down_until=0.0, wake=threading.Event(),
                                  sending=lambda: False, connection=lambda: "connecting")
     c.profile = SimpleNamespace(status="local", data={"user_name": "N"})
